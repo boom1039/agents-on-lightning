@@ -1,16 +1,28 @@
 /**
  * Agent Analysis Routes — /api/v1/analysis/
  *
- * Network health (LND-direct). Python-backed analysis routes stripped —
- * placeholder for backend model being built.
+ * - network-health: LND-direct, no auth
+ * - node/:pubkey: LND getNodeInfo, no auth
+ * - suggest-peers/:pubkey: LND one-hop scan → Python scoring script
  */
 
 import { Router } from 'express';
 import { rateLimit } from '../identity/rate-limiter.js';
+import { validatePubkey } from '../identity/validators.js';
+import { err400Validation } from '../identity/agent-friendly-errors.js';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PYTHON3 = process.env.PYTHON3 || '/opt/homebrew/bin/python3';
+const SUGGEST_PEERS_SCRIPT = resolve(__dirname, '..', 'analysis', 'suggest-peers.py');
 
 export function agentAnalysisRoutes(daemon) {
   const router = Router();
   const analysisRate = rateLimit('analysis');
+
+  // --- Network health (LND-direct) ---
 
   router.get('/api/v1/analysis/network-health', analysisRate, async (_req, res) => {
     try {
@@ -52,8 +64,109 @@ export function agentAnalysisRoutes(daemon) {
           total_network_capacity: networkInfo.total_network_capacity,
           avg_channel_size: networkInfo.avg_channel_size,
         } : null,
-        hint: 'For deeper analysis (node profiling, fee competitiveness, routing paths), see the paid analytics catalog at /api/v1/analytics/catalog',
+        hint: 'For deeper analysis, see /api/v1/analysis/node/:pubkey or /api/v1/analysis/suggest-peers/:pubkey',
       });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message });
+    }
+  });
+
+  // --- Node profile (LND-direct) ---
+
+  router.get([
+    '/api/v1/analysis/node/:pubkey',
+    '/api/v1/analysis/profile-node/:pubkey',
+    '/api/v1/analysis/node-profile/:pubkey',
+  ], analysisRate, async (req, res) => {
+    const check = validatePubkey(req.params.pubkey);
+    if (!check.valid) return err400Validation(res, check.reason, { see: 'GET /api/v1/analysis/network-health' });
+
+    try {
+      const client = daemon.nodeManager?.getDefaultNode();
+      if (!client) return res.json({ error: 'No LND node connected' });
+
+      const nodeInfo = await client.getNodeInfo(req.params.pubkey);
+      const n = nodeInfo?.node || {};
+
+      res.json({
+        pubkey: n.pub_key,
+        alias: n.alias || '',
+        color: n.color || '',
+        num_channels: nodeInfo.num_channels || 0,
+        total_capacity: nodeInfo.total_capacity || '0',
+        addresses: (n.addresses || []).map(a => a.addr),
+        last_update: n.last_update,
+      });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message });
+    }
+  });
+
+  // --- Suggest peers (LND one-hop scan → Python scoring) ---
+
+  router.get('/api/v1/analysis/suggest-peers/:pubkey', analysisRate, async (req, res) => {
+    const check = validatePubkey(req.params.pubkey);
+    if (!check.valid) return err400Validation(res, check.reason);
+
+    try {
+      const client = daemon.nodeManager?.getDefaultNode();
+      if (!client) return res.json({ error: 'No LND node connected' });
+
+      // 1. Get our channels (who we already connect to)
+      const myChannels = await client.listChannels();
+      const myPeers = (myChannels.channels || []).map(c => c.remote_pubkey);
+
+      // 2. Get target node's channels (their peers) — include_channels=true to get the channel list
+      const targetInfo = await client._get(`/v1/graph/node/${req.params.pubkey}?include_channels=true`);
+      const targetChannels = targetInfo.channels || [];
+      const peerPubkeys = new Set();
+      for (const ch of targetChannels) {
+        if (ch.node1_pub !== req.params.pubkey) peerPubkeys.add(ch.node1_pub);
+        if (ch.node2_pub !== req.params.pubkey) peerPubkeys.add(ch.node2_pub);
+      }
+
+      // 3. Fetch info on each peer (one-hop out), cap at 30 to limit LND calls
+      const peerList = [...peerPubkeys].slice(0, 30);
+      const candidates = await Promise.all(
+        peerList.map(async (pubkey) => {
+          try {
+            const info = await client.getNodeInfo(pubkey);
+            return {
+              pubkey,
+              alias: info.node?.alias || '',
+              num_channels: info.num_channels || 0,
+              total_capacity: info.total_capacity || '0',
+            };
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      // 4. Pipe to Python scoring script via stdin → stdout
+      const input = JSON.stringify({
+        target_pubkey: req.params.pubkey,
+        my_peers: myPeers,
+        candidates: candidates.filter(Boolean),
+      });
+
+      const result = await new Promise((resolve, reject) => {
+        const proc = spawn(PYTHON3, [SUGGEST_PEERS_SCRIPT], { timeout: 10_000 });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => { stdout += d; });
+        proc.stderr.on('data', d => { stderr += d; });
+        proc.on('close', code => {
+          if (code !== 0) return reject(new Error(stderr || `Python exit ${code}`));
+          try { resolve(JSON.parse(stdout)); }
+          catch { reject(new Error('Invalid JSON from Python')); }
+        });
+        proc.on('error', reject);
+        proc.stdin.write(input);
+        proc.stdin.end();
+      });
+
+      res.json(result);
     } catch (err) {
       res.status(err.statusCode || 500).json({ error: err.message });
     }

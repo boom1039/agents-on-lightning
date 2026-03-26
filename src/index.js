@@ -74,6 +74,11 @@ export async function startServer() {
     });
   });
 
+  // Serve llms.txt at root (agents expect /llms.txt)
+  app.get('/llms.txt', (_req, res) => {
+    res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
+  });
+
   // Serve docs statically
   app.use('/docs', express.static(docsDir));
 

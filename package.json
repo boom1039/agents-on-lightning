@@ -20,5 +20,8 @@
     "node": ">=20.0.0"
   },
   "license": "UNLICENSED",
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "openai": "^6.33.0"
+  }
 }
