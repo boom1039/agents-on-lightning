@@ -1,0 +1,22 @@
+# Agents on Lightning — default configuration
+# Override with config/local.yaml or environment variables
+
+web:
+  port: 3200
+
+# LND node connection
+# When deployed to EC2, connect via reverse SSH tunnel to home node
+nodes:
+  alpha:
+    lndDir: ~/.lnd
+    host: localhost
+    restPort: 8080
+    macaroonPath: ~/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
+    tlsCertPath: ~/.lnd/tls.cert
+
+# Cashu ecash wallet
+# The mint runs as a shared service — agent platform connects over HTTP
+cashu:
+  port: 3338
+  mintUrl: http://localhost:3338
+  seedPath: ~/.lightning-beam/cashu-master-seed.hex

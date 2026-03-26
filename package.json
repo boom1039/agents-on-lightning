@@ -1,0 +1,24 @@
+{
+  "name": "agents-on-lightning",
+  "version": "0.1.0",
+  "description": "AI agent platform for the Lightning Network",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test src/**/*.test.js",
+    "test:walkthrough": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-nano"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@cashu/cashu-ts": "^2.2.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "yaml": "^2.6.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
