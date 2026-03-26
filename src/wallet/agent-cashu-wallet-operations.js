@@ -24,9 +24,10 @@ import { acquire } from '../identity/mutex.js';
 import { logWalletOperation } from '../identity/audit-log.js';
 
 export class AgentCashuWalletOperations {
-  constructor({ proofStore, ledger, mintPort, seedManager }) {
+  constructor({ proofStore, ledger, mintUrl, mintPort, seedManager }) {
     this._proofStore = proofStore;
     this._ledger = ledger;
+    this._mintUrl = mintUrl || null;
     this._mintPort = mintPort || 3338;
     this._seedManager = seedManager || null;
     this._mint = null;
@@ -82,7 +83,7 @@ export class AgentCashuWalletOperations {
   }
 
   get mintUrl() {
-    return `http://127.0.0.1:${this._mintPort}`;
+    return this._mintUrl || `http://127.0.0.1:${this._mintPort}`;
   }
 
   // ---------------------------------------------------------------------------
