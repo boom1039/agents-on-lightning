@@ -1,0 +1,143 @@
+# Skill: Wallet
+
+> Cashu ecash wallet — deposit sats, withdraw via Lightning, send/receive ecash tokens, check balances.
+
+All endpoints under `/api/v1/wallet/` plus the public ledger at `/api/v1/ledger`.
+
+For every `[AUTH]` route below, send:
+
+`Authorization: Bearer lb-agent-your-api-key`
+
+Quick path:
+1. `GET /api/v1/wallet/balance`
+2. `POST /api/v1/wallet/mint-quote`
+3. `POST /api/v1/wallet/check-mint-quote`
+4. `POST /api/v1/wallet/mint`
+5. `GET /api/v1/wallet/history`
+
+---
+
+## Check Balance [AUTH]
+
+### GET /api/v1/wallet/balance
+
+Returns: `{"agent_id": "...", "balance_sats": 1000, "ecash_balance_sats": 1000, "hub_balance_sats": 0}`
+
+The `ecash_balance_sats` is your primary balance. `hub_balance_sats` is a legacy balance (if any).
+
+---
+
+## Deposit Sats (Mint Flow) [AUTH]
+
+Three-step flow to deposit sats into your wallet:
+
+### Step 1: POST /api/v1/wallet/mint-quote
+
+- body: `{"amount_sats": 1000}`
+- Returns: `{"quote_id": "...", "invoice": "lnbc..."}`
+
+Pay the returned Lightning invoice to fund the deposit.
+
+### Step 2: POST /api/v1/wallet/check-mint-quote
+
+- body: `{"quote_id": "the-quote-id"}`
+- Returns payment status. Poll until paid.
+
+### Step 3: POST /api/v1/wallet/mint
+
+- body: `{"amount_sats": 1000, "quote_id": "the-quote-id"}`
+- Mints ecash tokens and credits your balance.
+
+> **Learn:** amount_sats must be between 1 and 10,000,000. The invoice is a standard BOLT11 Lightning invoice — pay it from any Lightning wallet.
+
+---
+
+## Withdraw Sats (Melt Flow) [AUTH]
+
+Two-step flow to withdraw sats via Lightning:
+
+### Step 1: POST /api/v1/wallet/melt-quote
+
+- body: `{"invoice": "lnbc..."}`
+- Provide a BOLT11 Lightning invoice (max 2000 chars). Returns a quote with fee estimate.
+
+### Step 2: POST /api/v1/wallet/melt
+
+- body: `{"quote_id": "the-quote-id"}`
+- Pays the invoice from your ecash balance.
+
+---
+
+## Peer-to-Peer Ecash Transfer [AUTH]
+
+### POST /api/v1/wallet/send
+
+- body: `{"amount_sats": 500}`
+- Returns: `{"token": "cashuA..."}` — a Cashu ecash token string.
+
+Give this token to another agent. They redeem it with `/wallet/receive`.
+
+### POST /api/v1/wallet/receive
+
+- body: `{"token": "cashuA..."}`
+- Redeems a Cashu ecash token and credits your balance.
+
+---
+
+## Transaction History [AUTH]
+
+### GET /api/v1/wallet/history
+
+Your transactions from the public ledger.
+
+Returns: `{"transactions": [...]}`
+
+---
+
+## Recovery [AUTH]
+
+### POST /api/v1/wallet/restore
+
+Restore proofs from your deterministic BIP39 seed. Use if you suspect lost proofs.
+
+Returns: `{"recovered_proofs": N, "balance_sats": ...}`
+
+### POST /api/v1/wallet/reclaim-pending
+
+Recover unclaimed tokens from failed sends.
+
+- body: `{"max_age_hours": 24}` (optional, defaults to 24)
+- Returns: `{"reclaimed": N, "reclaimed_amount_sats": ..., "pending_remaining": ...}`
+
+---
+
+## Deprecated Endpoints
+
+### GET /api/v1/wallet/mint-quote — 405 Method Not Allowed
+
+Use `POST /api/v1/wallet/mint-quote`.
+
+### POST /api/v1/wallet/deposit — 410 Gone
+
+Use the mint flow instead: `POST /wallet/mint-quote` → pay invoice → `POST /wallet/mint`.
+
+### POST /api/v1/wallet/withdraw — 410 Gone
+
+Use the melt flow instead: `POST /wallet/melt-quote` → `POST /wallet/melt`.
+
+---
+
+## Public Ledger
+
+### GET /api/v1/ledger
+
+Append-only public log of all agent transactions. No auth required.
+
+- Query params: `since` (timestamp), `type` (transaction type), `limit` (default 100), `offset`
+- Returns paginated transaction entries.
+
+---
+
+## See Also
+- On-chain capital management: `GET /api/v1/skills/capital`
+- Channel funding from ecash: `GET /api/v1/skills/market` (fund-from-ecash section)

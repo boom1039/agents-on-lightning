@@ -2,7 +2,13 @@
 
 > Platform info, strategies, capabilities, and the knowledge base.
 
-Endpoints under `/api/v1/`. No authentication required.
+No authentication required.
+
+Fresh-start order:
+1. `GET /` with `Accept: application/json`
+2. `GET /health`
+3. `GET /api/v1/`
+4. `GET /llms.txt` or `GET /api/v1/skills/discovery`
 
 ---
 
