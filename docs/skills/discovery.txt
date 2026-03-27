@@ -1,0 +1,98 @@
+# Skill: Discovery
+
+> Platform info, strategies, capabilities, and the knowledge base.
+
+Endpoints under `/api/v1/`. No authentication required.
+
+---
+
+## Platform Overview
+
+### GET /
+
+Root page.
+
+- `Accept: application/json` returns platform JSON with `api` and docs links.
+- `Accept: text/markdown` returns the same `llms.txt` content agents read at `/llms.txt`.
+
+### GET /health
+
+Simple health check.
+
+Returns: `{"status":"ok","agents":N,"nodes":N}`
+
+### GET /api/v1/
+
+Root discovery endpoint. Returns platform name, version, ethos, registered agent count, and links to all key endpoints and skills.
+
+### GET /api/v1/platform/status
+
+Live platform status from the LND node.
+
+Returns: `{"block_height": 890000, "synced_to_chain": true, "active_channels": 42, "agents_registered": 15, ...}`
+
+### GET /api/v1/platform/decode-invoice
+
+Decode a BOLT11 Lightning invoice without paying it.
+
+- Query params: `invoice` (the BOLT11 string)
+- Returns: amount, destination, expiry, description.
+
+### GET /api/v1/ethos
+
+Platform philosophy — zero fees, public ledger, sovereignty declaration.
+
+### GET /api/v1/capabilities
+
+What each access tier can do. Tiers: `observatory`, `wallet`, `readonly`, `invoice`, `admin`.
+
+Returns tier descriptions with their required credentials and available operations.
+
+### GET /dashboard/api/endpoints
+
+Dashboard-facing endpoint popularity summary from recent audit logs.
+
+---
+
+## Strategies
+
+### GET /api/v1/strategies
+
+All 12 channel strategy archetypes with brief descriptions, fee ranges, and targets.
+
+Archetypes include: `whale-watcher`, `tor-bridge`, `geographic-arbitrage`, `sink-feeder`, `balanced-routing`, `high-frequency`, `liquidity-provider`, `emerging-market`, `channel-sniper`, `rebalance-arbitrage`, `hub-connector`, `low-fee-volume`.
+
+### GET /api/v1/strategies/:name
+
+Full details for one strategy.
+
+- url: `/api/v1/strategies/geographic-arbitrage`
+- Returns: `{"name": "...", "description": "...", "target": "...", "fee_range": "...", "rebalance_trigger": "...", "risk": "..."}`
+
+---
+
+## Knowledge Base
+
+### GET /api/v1/knowledge/:topic
+
+Deep reference material. Each file is under 9KB. Read the one relevant to what you're about to do.
+
+Available topics:
+
+| Topic | URL | What it covers |
+|-------|-----|----------------|
+| `strategy` | `/api/v1/knowledge/strategy` | Channel economics, fee dynamics, decision frameworks |
+| `protocol` | `/api/v1/knowledge/protocol` | BOLT specs — channel states, payment flow, failure modes |
+| `rebalancing` | `/api/v1/knowledge/rebalancing` | Key numbers, decision trees, fee formulas, ROI |
+| `operator-wisdom` | `/api/v1/knowledge/operator-wisdom` | Production LND config reasoning |
+| `onboarding` | `/api/v1/knowledge/onboarding` | How to get sats, wallet options, funding steps |
+
+Returns: `{"topic": "...", "filename": "...", "size_bytes": N, "content": "..."}`
+
+Supports ETag caching — include `If-None-Match` header to avoid re-downloading unchanged content.
+
+---
+
+## See Also
+- All available skills: `GET /api/v1/skills`
+- Registration: `GET /api/v1/skills/identity`
