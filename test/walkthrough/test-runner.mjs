@@ -54,6 +54,8 @@ const MODE = opt('--mode', 'walkthrough');   // navigation | walkthrough | agent
 const WITH_FEEDBACK = flag('--feedback');
 const COVERAGE_SUITE = opt('--suite', 'all');
 const SKIP_COVERAGE_VERIFY = flag('--skip-coverage-verify');
+const FAIL_FAST = flag('--fail-fast');
+const SHOW_DOC_TRACES = flag('--show-doc-traces');
 const MANUAL_FUNDING = flag('--manual-funding');
 const OPEN_PEER_PUBKEY = opt('--open-peer-pubkey', null);
 const OPEN_AMOUNT_SATS = parseInt(opt('--open-amount-sats', String(DEFAULT_OPEN_AMOUNT_SATS)), 10);
@@ -77,6 +79,9 @@ const TAG = opt('--tag', null);
 const PROVIDER = opt('--provider', 'openai');
 const MODEL = opt('--model',
   PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-4.1-mini');
+const EFFECTIVE_MAX_RETRIES = FAIL_FAST ? 1 : MAX_RETRIES;
+const EFFECTIVE_BAIL_AFTER = FAIL_FAST ? 1 : BAIL_AFTER;
+const SKIP_FAILURE_INTERVIEWS = FAIL_FAST;
 
 // ─── Model Roster ───
 
@@ -100,6 +105,47 @@ function testLog(msg) { process.stdout.write(`${_pre}  ★ ${msg}\n`); }
 
 function doHttp(input) { return _doHttp(input, BASE_URL); }
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function shortUrl(url = '') {
+  return String(url).replace(BASE_URL, '') || url;
+}
+
+function redactHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return null;
+  const redacted = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (String(key).toLowerCase() === 'authorization') {
+      redacted[key] = 'Bearer [REDACTED]';
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return Object.keys(redacted).length > 0 ? redacted : null;
+}
+
+function summarizeRequest(input = {}) {
+  return {
+    method: input.method || 'GET',
+    url: shortUrl(input.url || ''),
+    headers: redactHeaders(input.headers),
+    body: input.body ?? null,
+  };
+}
+
+function isDocRoute(input = {}) {
+  const url = shortUrl(input.url || '');
+  if (
+    url.includes('/llms.txt')
+    || url === '/api/v1/'
+    || url.includes('/llms-full.txt')
+    || url.includes('/api/v1/skills/')
+    || url.includes('/api/v1/knowledge/')
+  ) {
+    return true;
+  }
+  const accept = Object.entries(input.headers || {}).find(([key]) => String(key).toLowerCase() === 'accept')?.[1];
+  return url === '/' && typeof accept === 'string' && accept.includes('text/markdown');
+}
 
 function headerValue(headers, name) {
   if (!headers) return null;
@@ -141,7 +187,7 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
   const { phaseNum, totalPhases, phaseName, attempt } = ctx;
   const nudgeStart = Date.now();
   const pre = phaseName ? `${String(phaseNum).padStart(2)}/${totalPhases} ${phaseName.padEnd(20)}` : '';
-  const att = attempt ? ` ${attempt}/${MAX_RETRIES}` : '';
+  const att = attempt ? ` ${attempt}/${EFFECTIVE_MAX_RETRIES}` : '';
 
   messages.push({ role: 'user', content: nudge });
   const httpLog = [];
@@ -149,6 +195,9 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
   let docReads = 0;
   const thinkTimes = [];
   const responseSizes = [];
+  const docTraces = [];
+  const turnTraces = [];
+  const pendingDocTraces = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (Date.now() - nudgeStart > NUDGE_TIMEOUT_MS) {
@@ -183,29 +232,49 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       agentLog(`${pre}${att}  think:${(thinkMs / 1000).toFixed(1)}s  agent: ${first}`);
     }
 
+    turnTraces.push({
+      turn: turn + 1,
+      think_ms: thinkMs,
+      assistant_text: response.text || '',
+      requested_calls: response.toolCalls.map(tc => summarizeRequest(tc.input)),
+    });
+
     if (response.toolCalls.length === 0) break;
 
     const results = [];
     for (const tc of response.toolCalls) {
+      if (pendingDocTraces.length > 0) {
+        const previousDoc = pendingDocTraces.shift();
+        previousDoc.next_request = summarizeRequest(tc.input);
+        docTraces.push(previousDoc);
+        if (SHOW_DOC_TRACES) {
+          agentLog(`${pre}${att}  DOC→NEXT ${previousDoc.doc_url} => ${previousDoc.next_request.method} ${previousDoc.next_request.url}`);
+        }
+      }
+
       const httpResult = await doHttp(tc.input);
-      const shortUrl = (tc.input.url || '').replace(BASE_URL, '');
+      const currentShortUrl = shortUrl(tc.input.url || '');
       const bodyStr = tc.input.body ? ` body:${JSON.stringify(tc.input.body).substring(0, 80)}` : '';
       const errStr = httpResult.errSnippet ? ` err:"${String(httpResult.errSnippet).substring(0, 60)}"` : '';
       const sizeStr = `, ${formatBytes(httpResult.responseBytes)}`;
 
-      if (
-        shortUrl.includes('/llms.txt') ||
-        shortUrl === '/api/v1/' ||
-        shortUrl.includes('/llms-full.txt') ||
-        shortUrl.includes('/api/v1/skills/') ||
-        shortUrl.includes('/api/v1/knowledge/')
-      ) {
+      if (isDocRoute(tc.input)) {
         docReads++;
+        pendingDocTraces.push({
+          turn: turn + 1,
+          method: tc.input.method,
+          doc_url: currentShortUrl,
+          status: httpResult.status,
+          response_bytes: httpResult.responseBytes,
+          visible_payload: httpResult.raw,
+          request_headers: redactHeaders(tc.input.headers),
+          next_request: null,
+        });
       }
 
-      agentLog(`${pre}${att}  ${tc.input.method} ${shortUrl} → ${httpResult.status} (${httpResult.latency}ms${sizeStr})${bodyStr}${errStr}`);
+      agentLog(`${pre}${att}  ${tc.input.method} ${currentShortUrl} → ${httpResult.status} (${httpResult.latency}ms${sizeStr})${bodyStr}${errStr}`);
 
-      responseSizes.push({ url: shortUrl, bytes: httpResult.responseBytes });
+      responseSizes.push({ url: currentShortUrl, bytes: httpResult.responseBytes });
       httpLog.push({
         method: tc.input.method, url: tc.input.url, status: httpResult.status,
         latency: httpResult.latency, reqBody: httpResult.reqBody, errSnippet: httpResult.errSnippet,
@@ -217,7 +286,14 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     provider.push(messages, response.raw, results);
   }
 
-  return { httpLog, totalTokens, docReads, thinkTimes, responseSizes };
+  for (const unresolvedDoc of pendingDocTraces) {
+    docTraces.push(unresolvedDoc);
+    if (SHOW_DOC_TRACES) {
+      agentLog(`${pre}${att}  DOC→NEXT ${unresolvedDoc.doc_url} => [none]`);
+    }
+  }
+
+  return { httpLog, totalTokens, docReads, thinkTimes, responseSizes, docTraces, turnTraces };
 }
 
 // ─── Test phases ───
@@ -687,11 +763,13 @@ async function runNavigation(provider, modelConfig) {
     let phaseDocReads = 0;
     let phaseThinkTimes = [];
     let phaseResponseSizes = [];
+    let phaseDocTraces = [];
+    let phaseTurnTraces = [];
     let errorRecovery = null;  // "helped" | "not_helped" | null
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= EFFECTIVE_MAX_RETRIES; attempt++) {
       const nudge = attempt === 1 ? phase.nudge : `Let's try that again. ${phase.nudge}`;
-      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes } = await runNudge(messages, nudge, provider, {
+      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces } = await runNudge(messages, nudge, provider, {
         phaseNum, totalPhases: WALKTHROUGH_PHASES.length, phaseName: phase.name, attempt,
       });
 
@@ -701,6 +779,8 @@ async function runNavigation(provider, modelConfig) {
       phaseDocReads += docReads;
       phaseThinkTimes.push(...thinkTimes);
       phaseResponseSizes.push(...responseSizes);
+      phaseDocTraces.push(...docTraces);
+      phaseTurnTraces.push(...turnTraces);
 
       const result = phase.check(httpLog, state);
       if (result.pass) {
@@ -712,7 +792,7 @@ async function runNavigation(provider, modelConfig) {
       } else {
         reason = result.reason;
         // If this is the last attempt and we still failed, error message didn't help
-        if (attempt === MAX_RETRIES) errorRecovery = 'not_helped';
+        if (attempt === EFFECTIVE_MAX_RETRIES) errorRecovery = 'not_helped';
       }
     }
 
@@ -751,7 +831,19 @@ async function runNavigation(provider, modelConfig) {
       }
     }
 
-    results.push({ phase: phase.name, passed, reason, duration_ms: phaseDur, http_calls: phaseHttpLog.length, failureInterview, errorRecovery, responseSizes: phaseResponseSizes, thinkTimes: phaseThinkTimes });
+    results.push({
+      phase: phase.name,
+      passed,
+      reason,
+      duration_ms: phaseDur,
+      http_calls: phaseHttpLog.length,
+      failureInterview,
+      errorRecovery,
+      responseSizes: phaseResponseSizes,
+      thinkTimes: phaseThinkTimes,
+      docTraces: phaseDocTraces,
+      turnTraces: phaseTurnTraces,
+    });
 
     // Incremental JSONL with rich diagnostic data
     const urlsTried = phaseHttpLog.map(h => `${h.method} ${h.url} → ${h.status}`);
@@ -769,9 +861,11 @@ async function runNavigation(provider, modelConfig) {
       response_sizes: phaseResponseSizes,
       error_recovery: errorRecovery,
       think_times: phaseThinkTimes,
+      doc_traces: phaseDocTraces,
+      turn_traces: phaseTurnTraces,
     });
 
-    if (BAIL_AFTER > 0 && consecutiveFails >= BAIL_AFTER) {
+    if (EFFECTIVE_BAIL_AFTER > 0 && consecutiveFails >= EFFECTIVE_BAIL_AFTER) {
       agentLog(`BAIL: ${consecutiveFails} consecutive failures — stopping early`);
       break;
     }
@@ -861,15 +955,17 @@ async function runAgentCoverage(provider, modelConfig) {
     let phaseDocReads = 0;
     let phaseThinkTimes = [];
     let phaseResponseSizes = [];
+    let phaseDocTraces = [];
+    let phaseTurnTraces = [];
     let matched = [];
     let missing = [...task.covers];
     let passed = false;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= EFFECTIVE_MAX_RETRIES; attempt++) {
       const nudge = attempt === 1
         ? buildAgentCoveragePrompt(task)
         : buildAgentCoverageRetryPrompt(task);
-      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes } = await runNudge(messages, nudge, provider, {
+      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces } = await runNudge(messages, nudge, provider, {
         phaseNum: i + 1,
         totalPhases: tasks.length,
         phaseName: phaseLabel,
@@ -882,6 +978,8 @@ async function runAgentCoverage(provider, modelConfig) {
       phaseDocReads += docReads;
       phaseThinkTimes.push(...thinkTimes);
       phaseResponseSizes.push(...responseSizes);
+      phaseDocTraces.push(...docTraces);
+      phaseTurnTraces.push(...turnTraces);
 
       ({ matched, missing } = matchCoveredRoutes(phaseHttpLog, task.covers));
       if (missing.length === 0) {
@@ -910,7 +1008,7 @@ async function runAgentCoverage(provider, modelConfig) {
     }
 
     let failureInterview = null;
-    if (!passed) {
+    if (!passed && !SKIP_FAILURE_INTERVIEWS) {
       const whyNudge = `That capability-area task (${phaseLabel}) did not fully succeed. In 1-2 sentences: what information was missing from /llms.txt or the linked skill file, and what would have helped you find or call the remaining documented routes?`;
       const { totalTokens: whyTok } = await runNudge(messages, whyNudge, provider, {
         phaseNum: i + 1,
@@ -944,6 +1042,8 @@ async function runAgentCoverage(provider, modelConfig) {
       failureInterview,
       responseSizes: phaseResponseSizes,
       thinkTimes: phaseThinkTimes,
+      docTraces: phaseDocTraces,
+      turnTraces: phaseTurnTraces,
     });
 
     appendResult({
@@ -965,6 +1065,8 @@ async function runAgentCoverage(provider, modelConfig) {
       token_usage: phaseTokens,
       doc_consultations: phaseDocReads,
       failure_interview: failureInterview,
+      doc_traces: phaseDocTraces,
+      turn_traces: phaseTurnTraces,
     });
 
     if (DELAY_SECS > 0 && i < tasks.length - 1) {
