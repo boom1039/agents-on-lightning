@@ -839,7 +839,7 @@ const AGENT_COVERAGE_GOALS = {
     actions: 'Read GET /api/v1/skills/identity and follow only the actions section. That file is the authoritative route order and body guide for this group.',
   },
   wallet: {
-    'wallet-teaching-and-ledger': 'Read GET /api/v1/skills/wallet and follow only the wallet-teaching-and-ledger section. That file is the authoritative route order and boundary guide for this group.',
+    'wallet-teaching-and-ledger': 'Read GET /api/v1/skills/wallet and follow only the wallet-teaching-and-ledger section. That file is the authoritative route order and boundary guide for this group. Keep the same wallet token on routes 1, 2, and 3. Do not summarize before route 4.',
     'mint-balance-history': 'Read GET /api/v1/skills/wallet and follow only the mint-balance-history section. That file is the authoritative route order and body guide for this group.',
     'melt-send-receive': 'Read GET /api/v1/skills/wallet and follow only the melt-send-receive section. That file is the authoritative route order and boundary guide for this group.',
   },

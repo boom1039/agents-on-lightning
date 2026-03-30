@@ -20,6 +20,8 @@ This group is intentionally a teaching/boundary group, not the real mint flow.
 Route 1 is an intentional `405` probe.
 Routes 2 and 3 are intentional deprecated `410` probes.
 Routes 1, 2, and 3 are `[AUTH]`. Route 4 is public.
+Use the same original wallet-agent bearer token on routes 1, 2, and 3.
+Do not stop to summarize until after route 4.
 Call these exact four routes in order and then stop:
 
 1. `GET /api/v1/wallet/mint-quote`
@@ -28,6 +30,7 @@ Call these exact four routes in order and then stop:
 4. `GET /api/v1/ledger`
 
 Do not replace these with the newer mint or balance routes.
+If route 3 returns `401 invalid_api_key`, retry route 3 once with the same bearer token you used on routes 1 and 2, then do route 4 and stop.
 
 ## mint-balance-history
 

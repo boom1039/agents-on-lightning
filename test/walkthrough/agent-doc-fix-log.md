@@ -69,3 +69,4 @@ One line per public-doc fix. Update this whenever a route-group doc or agent-fac
 2026-03-30T18:58:00Z | discovery:strategies-and-knowledge prompt now uses the exact three-route checklist instead of a vague “learn one strategy” goal
 2026-03-30T20:24:00Z | social:alliances — told the agent to keep the original two tokens, never register a third agent mid-group, and retry route 3 once with the original sender token on a 401
 2026-03-30T20:31:00Z | social:messaging — told the agent to open the exact messaging file and start the checklist immediately, with no /docs detour and no hop back to the social map
+2026-03-30T20:52:00Z | wallet:wallet-teaching-and-ledger — told the agent to keep the same wallet token on routes 1 to 3, not summarize before route 4, and retry route 3 once with that same token on a 401
