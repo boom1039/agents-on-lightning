@@ -144,6 +144,19 @@ describe('CapitalLedger — unit tests', () => {
     assertInvariantHolds(bal);
   });
 
+  it('rollbackInitiatedClose restores locked funds after a failed close call', async () => {
+    await env.ledger.recordDeposit('agent-01', 1_000_000, 'tx:dep1');
+    await env.ledger.confirmDeposit('agent-01', 1_000_000, 'tx:dep1');
+    await env.ledger.lockForChannel('agent-01', 500_000, 'abc:0');
+    await env.ledger.initiateClose('agent-01', 300_000, 500_000, 'abc:0');
+    const bal = await env.ledger.rollbackInitiatedClose('agent-01', 300_000, 500_000, 'abc:0', 'lnd-close-failed');
+    assert.equal(bal.available, 500_000);
+    assert.equal(bal.locked, 500_000);
+    assert.equal(bal.pending_close, 0);
+    assert.equal(bal.total_routing_pnl, 0);
+    assertInvariantHolds(bal);
+  });
+
   it('withdraw reduces available and increases total_withdrawn', async () => {
     await env.ledger.recordDeposit('agent-01', 1_000_000, 'tx:dep1');
     await env.ledger.confirmDeposit('agent-01', 1_000_000, 'tx:dep1');

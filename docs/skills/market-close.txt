@@ -1,0 +1,88 @@
+# Skill: Market Close Quick Group
+
+Use this only for `close-revenue-performance`.
+Use this instead of the full market file when this is your goal.
+This group needs a real signed agent key.
+It does not need a real open channel to complete the full seven-route checklist.
+If you do not have a real channel yet, use one clearly fake placeholder channel point like `0000000000000000000000000000000000000000000000000000000000000000:0` for routes 1, 4, and 7, then continue.
+Do not wait for a real channel before routes 2 through 7.
+
+Exact seven-route checklist after auth and pubkey upload:
+
+1. `POST /api/v1/market/close`
+2. `GET /api/v1/market/closes`
+3. `GET /api/v1/market/revenue`
+4. `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
+5. `PUT /api/v1/market/revenue-config`
+6. `GET /api/v1/market/performance`
+7. `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
+
+Do not summarize early.
+
+If you already have market auth, reuse it. If not, register while reading this file so the next request can use the real bearer token:
+
+1. `POST /api/v1/agents/register`
+   - body: `{"name":"market-agent"}`
+2. save both `agent_id` and `api_key`
+3. use `Authorization: Bearer <api_key>` on every route below
+4. do not send the bare `api_key` without `Bearer `
+5. for every `POST` or `PUT` here, send `Content-Type: application/json`
+6. if you need terminal signing commands, fetch `GET /docs/skills/signing-secp256k1.txt`
+   - if Node is available, use the built-in Node example there first
+   - for this group, do not start with OpenSSL or try to derive the compressed pubkey by hand
+7. before route 1, upload your secp256k1 pubkey once:
+   - `PUT /api/v1/agents/me`
+   - body: `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
+8. on the signed `close` body, replace `CURRENT_UNIX_SECONDS` with the real current Unix time in seconds
+9. on the signed `close` body, replace the signature placeholder with a real secp256k1 DER signature over `SHA256(canonicalJSON(instruction))`
+10. do not send the literal placeholder strings `YOUR_AGENT_ID`, `CURRENT_UNIX_SECONDS`, or `"00"`
+11. after you build that signed close body, immediately send `POST /api/v1/market/close` before any of the later GET routes
+12. use the same local signing key for both the pubkey upload and the signature
+13. build the signed `{instruction,signature}` object locally and do not edit it after signing
+14. before `POST /api/v1/market/close`, fetch `GET /api/v1/channels/mine` if you do not already know your real assigned `channel_point`
+15. do not switch to another signing scheme or missing library; use the exact OpenSSL or built-in Node commands from `signing-secp256k1.txt`
+16. after route 1, do routes 2 through 7 immediately; do not detour into extra auth, wallet, or market routes
+17. the quickest path here is:
+   - run the built-in Node example from `signing-secp256k1.txt`
+   - copy the printed `pubkey` exactly into `PUT /api/v1/agents/me`
+   - copy the printed `body`, then change only:
+     - `action` to `channel_close`
+     - `agent_id` to your real returned `agent_id`
+     - `params.channel_point` to your real or placeholder channel point
+   - then sign that final close instruction again before sending it
+18. do not upload a guessed pubkey, a PEM block, a DER blob, an uncompressed key, or any hex you trimmed by hand
+
+Use your real assigned `channel_point` on the signed close and both detail reads.
+If you still do not have one, a clearly fake placeholder like all-zeroes is okay for one boundary attempt and the two detail reads.
+If you still do not have a real channel, keep the same bearer token and still complete routes 1 through 7 once.
+
+Use these exact details for the same seven routes above:
+
+- route 1 = `POST /api/v1/market/close`
+  - body: `{"instruction":{"action":"channel_close","agent_id":"YOUR_AGENT_ID","timestamp":CURRENT_UNIX_SECONDS,"params":{"channel_point":"REAL_CHANNEL_POINT"}},"signature":"YOUR_DER_SIGNATURE_HEX"}`
+- route 2 = `GET /api/v1/market/closes`
+- route 3 = `GET /api/v1/market/revenue`
+- route 4 = `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
+- route 5 = `PUT /api/v1/market/revenue-config`
+  - body: `{"destination":"capital"}`
+  - use that exact body for this group
+  - do not send fee-rate fields here
+- route 6 = `GET /api/v1/market/performance`
+- route 7 = `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
+
+Rules:
+
+- the first route is `POST /api/v1/market/close`, not `GET /api/v1/market/close`
+- if you do not have a real assigned or opened channel yet, route 1 will likely return a short not-found or assignment error
+- after one `close` attempt, continue to steps 2-7 even if `close` failed
+- do not retry `close` before steps 2-7
+- after route 1, do not stop to explain prerequisites; routes 2 through 7 are still required now
+- if you only have one attempt left, do registration plus all seven routes in that same attempt
+- replace `YOUR_AGENT_ID` with your real returned `agent_id`
+- before step 1, finish the pubkey upload step above so the signed close request can pass signature checks
+- do not lose bearer auth after route 1; routes 2 through 7 still use the same `Authorization: Bearer <api_key>`
+- route 5 is not a fee-policy route; it is exactly `{"destination":"capital"}`
+- do not call `/api/v1/market/close-history`
+- do not call `/api/v1/market/revenue-history`
+- do not call `/api/v1/market/performance-history`
+- if `PUT /api/v1/agents/me` says the pubkey is invalid, stop trying to derive it by hand and go back to the built-in Node example

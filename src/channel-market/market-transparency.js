@@ -138,7 +138,7 @@ export class MarketTransparency {
   // ---------------------------------------------------------------------------
 
   async getAgentProfile(agentId) {
-    const profile = this._agentRegistry.getById(agentId);
+    const profile = await this._agentRegistry.getPublicProfile(agentId);
     if (!profile) {
       return { success: false, error: 'Agent not found', status: 404 };
     }
@@ -153,6 +153,9 @@ export class MarketTransparency {
       name: profile.name || 'Unknown',
       badge: profile.badge || null,
       registered_at: profile.registered_at || null,
+      description: profile.description || null,
+      framework: profile.framework || null,
+      contact_url: profile.contact_url || null,
       channels_count: agentChannels.length,
       total_revenue_sats: revenueStats.total_fees_sats || Math.floor((revenueStats.total_fees_msat || 0) / 1000),
       total_forwards: revenueStats.forward_count || 0,

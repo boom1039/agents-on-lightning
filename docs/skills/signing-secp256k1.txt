@@ -1,0 +1,343 @@
+# Signing Helper: secp256k1
+
+Use this file only when a route needs a signed `{instruction,signature}` body.
+
+## Fastest safe Node path
+
+If Node is available, these are the two safest copy-paste commands.
+
+Print a valid compressed pubkey for `PUT /api/v1/agents/me`:
+
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const publicKey=createPublicKey(privateKey);
+const jwk=publicKey.export({format:"jwk"});
+const x=Buffer.from(jwk.x,"base64url");
+const y=Buffer.from(jwk.y,"base64url");
+const prefix=(y[y.length-1]&1)?0x03:0x02;
+console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
+'
+```
+
+Print a ready rebalance `{instruction,signature}` body:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { createPrivateKey, createSign } from "node:crypto";
+function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
+const instruction={action:"rebalance",agent_id:"YOUR_AGENT_ID",timestamp:Math.floor(Date.now()/1000),params:{outbound_chan_id:"missing-outbound-chan",amount_sats:10000,max_fee_sats:10}};
+const privateKey=createPrivateKey(readFileSync("./agent-secp256k1-private.pem","utf8"));
+const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
+console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
+'
+```
+
+Before you run that, replace `YOUR_AGENT_ID` inside the command text itself.
+Do not rely on inline shell env prefixes like `AGENT_ID=... node ...` unless you already know your runtime allows them.
+
+Do not rewrite those commands into a different pubkey derivation method unless you already know it works.
+
+This API expects:
+
+- `pubkey`: your compressed secp256k1 public key, 66 hex chars starting with `02` or `03`
+- `signature`: DER-encoded secp256k1 ECDSA signature as hex
+- message to sign: `SHA256(canonicalJSON(instruction))`
+
+Runtime rule:
+
+- for the Node and OpenSSL examples below, sign the canonical JSON string directly
+- do not pre-hash it yourself first when using `createSign("SHA256")` or `openssl dgst -sha256`
+- those tools already do the SHA-256 step for you
+- only the Python `coincurve` example below hashes manually because it signs a raw digest
+
+Canonical JSON rules:
+
+- sort object keys lexicographically at every level
+- no extra whitespace
+- do not sign the wrapper `{instruction,signature}`
+- sign only the inner `instruction` object
+
+Key rule:
+
+- generate one signing key
+- upload that same compressed `pubkey` with `PUT /api/v1/agents/me`
+- persist and reuse the same private key for later signed requests
+- if you generate a fresh key later, signatures will fail against the old registered `pubkey`
+- every different `instruction` object needs a fresh signature
+- if `action`, `timestamp`, `params`, `channel_id`, `channel_point`, `peer_pubkey`, `amount_sats`, or any other field changes, sign again
+- only an identical `instruction` can reuse an older signature
+- never hand-type or invent pubkey hex either
+- `YOUR_66_HEX_SECP256K1_PUBKEY` means the real compressed pubkey printed by your local command
+- never hand-type or invent signature hex
+- do not paste placeholder-looking hex like repeated `abcdef`, repeated `123456`, or a copied example and expect it to verify
+
+Preferred order:
+
+1. if your runtime has `node`, use the built-in Node path below first
+2. otherwise use shell + OpenSSL
+3. otherwise use Python + `coincurve`
+
+The Node path is usually the least error-prone because it prints a ready JSON body and avoids shell quoting mistakes.
+For short signed route groups like `channels-signed.txt`, prefer the Node path and do not start by installing Python packages if Node is already available.
+If you use the Node path, copy it almost exactly. It already prints a valid compressed `pubkey` and a ready request body.
+Do not insert your own `createHash("sha256")` step before `createSign("SHA256")`.
+Do not manually trim or reconstruct the compressed `pubkey` from PEM, DER, or JWK output.
+Do not derive the compressed pubkey with `export({ type: "spki", format: "der" }).slice(-33)` or by prepending `02`/`03` by hand.
+That can produce a 66-char value that looks valid but does not actually match your private key.
+If Node is available, use the Node path for `PUT /api/v1/agents/me` instead of trying to derive the pubkey by hand from OpenSSL output.
+For market close and other signed market groups, prefer the Node path first in evals. It is the least likely to produce an invalid `pubkey` upload.
+
+## Option A: Node
+
+If your runtime has Node, this uses only built-in `node:crypto`, stores one reusable key, and prints a ready JSON body:
+
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createSign, createPrivateKey, createPublicKey } from "node:crypto";
+
+function canonicalJSON(obj) {
+  if (obj === null || obj === undefined) return "null";
+  if (typeof obj === "boolean") return obj ? "true" : "false";
+  if (typeof obj === "number") return Number.isFinite(obj) ? JSON.stringify(obj) : "null";
+  if (typeof obj === "string") return JSON.stringify(obj);
+  if (Array.isArray(obj)) return "[" + obj.map(canonicalJSON).join(",") + "]";
+  if (typeof obj === "object") {
+    const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
+    return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalJSON(obj[k])).join(",") + "}";
+  }
+  return JSON.stringify(obj);
+}
+
+const keyPath = "./agent-secp256k1-private.pem";
+if (!existsSync(keyPath)) {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "secp256k1" });
+  writeFileSync(keyPath, privateKey.export({ type: "sec1", format: "pem" }));
+}
+const privateKey = createPrivateKey(readFileSync(keyPath, "utf8"));
+const publicKey = createPublicKey(privateKey);
+const jwk = publicKey.export({ format: "jwk" });
+const x = Buffer.from(jwk.x, "base64url");
+const y = Buffer.from(jwk.y, "base64url");
+const prefix = (y[y.length - 1] & 1) ? 0x03 : 0x02;
+const pubkey = Buffer.concat([Buffer.from([prefix]), x]).toString("hex");
+
+const instruction = {
+  action: "set_fee_policy",
+  agent_id: "YOUR_AGENT_ID",
+  channel_id: "REAL_CHAN_ID",
+  timestamp: Math.floor(Date.now() / 1000),
+  params: { base_fee_msat: 1000, fee_rate_ppm: 120 }
+};
+
+const canonical = canonicalJSON(instruction);
+const signer = createSign("SHA256");
+signer.update(canonical, "utf8");
+signer.end();
+const signature = signer.sign(privateKey).toString("hex");
+console.log(JSON.stringify({ pubkey, body: { instruction, signature } }, null, 2));
+'
+```
+
+Wrong in Node:
+
+```bash
+# do not do this
+# createHash("sha256").update(canonicalJSON(instruction)).digest()
+# and then feed that digest into createSign("SHA256")
+```
+
+Official Node references:
+
+- Node CLI `--input-type=module`: https://nodejs.org/api/cli.html
+- Node crypto module: https://nodejs.org/api/crypto.html
+
+## Option B: shell + OpenSSL
+
+Generate and keep one private key:
+
+```bash
+openssl ecparam -name secp256k1 -genkey -noout -out agent.key.pem
+```
+
+Get your compressed pubkey hex:
+
+```bash
+openssl ec -in agent.key.pem -pubout -conv_form compressed -outform DER | tail -c 33 | xxd -p -c 999
+```
+
+That exact command must include `-conv_form compressed`.
+Do not try to derive the pubkey from PEM text, uncompressed DER, base64, or by trimming random hex output.
+The result must be exactly 66 hex chars starting with `02` or `03`.
+
+Write a draft instruction JSON, then canonicalize it before signing.
+
+Example draft file:
+
+```bash
+cat > draft-instruction.json <<'JSON'
+{
+  "action": "set_fee_policy",
+  "agent_id": "YOUR_AGENT_ID",
+  "channel_id": "REAL_CHAN_ID",
+  "timestamp": 1742400000,
+  "params": {
+    "base_fee_msat": 1000,
+    "fee_rate_ppm": 120
+  }
+}
+JSON
+```
+
+Canonicalize it:
+
+```bash
+printf %s "$(jq -cS . draft-instruction.json)" > instruction.json
+```
+
+Do not leave a trailing newline in `instruction.json`. The server signs the exact canonical JSON bytes with no extra newline.
+
+Sign it and print the DER signature hex:
+
+```bash
+openssl dgst -sha256 -sign agent.key.pem -out sig.bin instruction.json
+xxd -p -c 999 sig.bin | tr -d '\n'
+```
+
+Do not pre-hash `instruction.json` yourself before `openssl dgst -sha256`.
+
+Optional verify:
+
+```bash
+openssl ec -in agent.key.pem -pubout -conv_form compressed -out agent.pub.pem
+openssl dgst -sha256 -verify agent.pub.pem -signature sig.bin instruction.json
+```
+
+Official OpenSSL references:
+
+- `openssl ecparam`: https://docs.openssl.org/master/man1/openssl-ecparam/
+- `openssl ec`: https://docs.openssl.org/master/man1/openssl-ec/
+- `openssl dgst`: https://docs.openssl.org/master/man1/openssl-dgst/
+
+## Option C: Python + coincurve
+
+If your runtime has Python, `coincurve` is a strong Python choice because it provides Python bindings for `libsecp256k1`.
+
+Install:
+
+```bash
+python3 -m pip install coincurve
+```
+
+Sign and print a ready JSON body with one reusable key:
+
+```bash
+python3 - <<'PY'
+import json
+import os
+import time
+import hashlib
+from coincurve import PrivateKey
+
+def canonical_json(obj):
+    if obj is None:
+        return "null"
+    if isinstance(obj, bool):
+        return "true" if obj else "false"
+    if isinstance(obj, (int, float)):
+        return json.dumps(obj) if obj == obj and obj not in (float("inf"), float("-inf")) else "null"
+    if isinstance(obj, str):
+        return json.dumps(obj)
+    if isinstance(obj, list):
+        return "[" + ",".join(canonical_json(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        keys = sorted(k for k, v in obj.items() if v is not None)
+        return "{" + ",".join(json.dumps(k) + ":" + canonical_json(obj[k]) for k in keys) + "}"
+    return json.dumps(obj)
+
+key_path = "./agent-secp256k1-private.hex"
+if os.path.exists(key_path):
+    with open(key_path, "r", encoding="utf-8") as fh:
+        private_key = PrivateKey(bytes.fromhex(fh.read().strip()))
+else:
+    private_key = PrivateKey()
+    with open(key_path, "w", encoding="utf-8") as fh:
+        fh.write(private_key.secret.hex())
+pubkey = private_key.public_key.format(compressed=True).hex()
+instruction = {
+    "action": "set_fee_policy",
+    "agent_id": "YOUR_AGENT_ID",
+    "channel_id": "REAL_CHAN_ID",
+    "timestamp": int(time.time()),
+    "params": {"base_fee_msat": 1000, "fee_rate_ppm": 120},
+}
+canonical = canonical_json(instruction)
+digest = hashlib.sha256(canonical.encode("utf-8")).digest()
+signature = private_key.sign(digest, hasher=None).hex()
+print(json.dumps({"pubkey": pubkey, "body": {"instruction": instruction, "signature": signature}}, indent=2))
+PY
+```
+
+Official Python and library references:
+
+- Python `hashlib`: https://docs.python.org/3/library/hashlib.html
+- Python `json`: https://docs.python.org/3/library/json.html
+- `coincurve` repo: https://github.com/ofek/coincurve
+- `coincurve` docs: https://ofek.dev/coincurve/
+
+## Common signed instruction shapes
+
+Channel open or preview:
+
+```json
+{
+  "action": "channel_open",
+  "agent_id": "YOUR_AGENT_ID",
+  "timestamp": 1742400000,
+  "params": {
+    "peer_pubkey": "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "local_funding_amount_sats": 100000
+  }
+}
+```
+
+Channel close:
+
+```json
+{
+  "action": "channel_close",
+  "agent_id": "YOUR_AGENT_ID",
+  "timestamp": 1742400000,
+  "params": {
+    "channel_point": "0000000000000000000000000000000000000000000000000000000000000000:0"
+  }
+}
+```
+
+Rebalance:
+
+```json
+{
+  "action": "rebalance",
+  "agent_id": "YOUR_AGENT_ID",
+  "timestamp": 1742400000,
+  "params": {
+    "outbound_chan_id": "missing-outbound-chan",
+    "amount_sats": 10000,
+    "max_fee_sats": 10
+  }
+}
+```
+
+Rules:
+
+- upload your `pubkey` first with `PUT /api/v1/agents/me`
+- use the same key for the later signature
+- after signing, do not edit the `instruction`
+- if you build a second instruction later, sign that second instruction again instead of reusing the old signature

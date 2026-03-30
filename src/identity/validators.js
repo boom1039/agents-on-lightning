@@ -7,11 +7,32 @@ const PUBKEY_RE = /^[0-9a-f]{66}$/;          // 33-byte compressed pubkey hex
 const CHANNEL_ID_RE = /^\d{10,20}$/;          // numeric channel point
 const AGENT_ID_RE = /^[0-9a-f]{8}$/;          // 4-byte hex
 const NAME_CHARSET_RE = /^[a-zA-Z0-9_\-. ]+$/;
-const ED25519_PUBKEY_RE = /^[0-9a-f]{64}$/;   // Ed25519 hex
+const SECP256K1_PUBKEY_RE = /^(02|03)[0-9a-f]{64}$/i;
 const REFERRAL_CODE_RE = /^ref-[0-9a-f]{8}$/;
 const GEO_TARGET_RE = /^[a-zA-Z0-9\-]{1,50}$/;
 const MESSAGE_TYPES = ['message', 'challenge', 'intel'];
 const TIERS = ['observatory', 'wallet', 'read-only', 'readonly', 'invoice', 'admin'];
+const BITCOIN_ADDRESS_RE = /^(bc1[ac-hj-np-z02-9]{11,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/;
+// eslint-disable-next-line no-control-regex
+const DISALLOWED_TEXT_CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g;
+
+function normalizeTextValue(s, { allowNewlines = true } = {}) {
+  let normalized = String(s)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(DISALLOWED_TEXT_CONTROL_RE, '');
+
+  if (!allowNewlines) {
+    normalized = normalized.replace(/\n+/g, ' ');
+  }
+
+  normalized = normalized
+    .split('\n')
+    .map(line => line.replace(/ {2,}/g, ' ').trimEnd())
+    .join('\n');
+
+  return normalized.trim();
+}
 
 export function validatePubkey(s) {
   if (typeof s !== 'string') return { valid: false, reason: 'pubkey must be a string' };
@@ -70,15 +91,26 @@ export function validateUrl(s) {
   return { valid: true };
 }
 
-export function validateEd25519Pubkey(s) {
+export function validateSecp256k1Pubkey(s) {
   if (typeof s !== 'string') return { valid: false, reason: 'pubkey must be a string' };
-  if (!ED25519_PUBKEY_RE.test(s)) return { valid: false, reason: 'Invalid Ed25519 pubkey format (expected 64 hex chars)' };
+  if (!SECP256K1_PUBKEY_RE.test(s)) {
+    return { valid: false, reason: 'Invalid secp256k1 pubkey format (expected compressed 66 hex chars starting with 02 or 03)' };
+  }
   return { valid: true };
 }
 
 export function validateReferralCode(s) {
   if (typeof s !== 'string') return { valid: false, reason: 'referral_code must be a string' };
   if (!REFERRAL_CODE_RE.test(s)) return { valid: false, reason: 'Invalid referral code format (expected ref-XXXXXXXX)' };
+  return { valid: true };
+}
+
+export function validateBitcoinAddress(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'Bitcoin address must be a string' };
+  const trimmed = s.trim();
+  if (!BITCOIN_ADDRESS_RE.test(trimmed)) {
+    return { valid: false, reason: 'Invalid Bitcoin address format' };
+  }
   return { valid: true };
 }
 
@@ -100,11 +132,69 @@ export function validateMessageType(s) {
   return { valid: true };
 }
 
+export function validatePlainObject(value, {
+  field = 'value',
+  allowedKeys = null,
+  maxKeys = null,
+} = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { valid: false, reason: `${field} must be a JSON object` };
+  }
+
+  const keys = Object.keys(value);
+  if (maxKeys !== null && keys.length > maxKeys) {
+    return { valid: false, reason: `${field} must contain at most ${maxKeys} keys` };
+  }
+
+  if (allowedKeys) {
+    const allowed = new Set(allowedKeys);
+    const unknown = keys.filter(key => !allowed.has(key));
+    if (unknown.length > 0) {
+      return { valid: false, reason: `${field} contains unknown fields: ${unknown.join(', ')}` };
+    }
+  }
+
+  return { valid: true };
+}
+
+export function normalizeFreeText(s, {
+  field = 'text',
+  maxLen = 500,
+  maxLines = 8,
+  maxLineLen = 200,
+  allowNewlines = true,
+} = {}) {
+  if (typeof s !== 'string') return { valid: false, reason: `${field} must be a string` };
+
+  const raw = s;
+  const value = normalizeTextValue(s, { allowNewlines });
+  if (value.length === 0) {
+    return { valid: false, reason: `${field} must not be empty` };
+  }
+  if (value.length > maxLen) {
+    return { valid: false, reason: `${field} must be ${maxLen} characters or less` };
+  }
+
+  const lines = allowNewlines ? value.split('\n') : [value];
+  if (lines.length > maxLines) {
+    return { valid: false, reason: `${field} must be ${maxLines} lines or less` };
+  }
+  if (lines.some(line => line.length > maxLineLen)) {
+    return { valid: false, reason: `${field} lines must be ${maxLineLen} characters or less` };
+  }
+
+  return {
+    valid: true,
+    value,
+    raw,
+    changed: value !== raw,
+  };
+}
+
 /**
  * Strip control characters and truncate for safe logging.
  */
 export function sanitizeForLog(s, maxLen = 200) {
   if (typeof s !== 'string') return String(s).slice(0, maxLen);
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/[\x00-\x1f\x7f]/g, '').slice(0, maxLen);
+  return normalizeTextValue(s, { allowNewlines: false }).slice(0, maxLen);
 }

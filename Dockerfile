@@ -15,8 +15,9 @@ COPY config/ config/
 RUN mkdir -p data
 
 ENV NODE_ENV=production
-ENV PORT=3200
+ENV HOST=0.0.0.0
+ENV PORT=3302
 
-EXPOSE 3200
+EXPOSE 3302
 
 CMD ["node", "src/index.js"]

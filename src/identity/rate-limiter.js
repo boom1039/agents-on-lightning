@@ -8,6 +8,8 @@
 
 import { logRateLimitHit } from './audit-log.js';
 import { err429 } from './agent-friendly-errors.js';
+import { acquire as acquireMutex } from './mutex.js';
+import { getSocketAddress, isLoopbackAddress } from './request-security.js';
 
 // Category configurations: { perAgent, perIp, global, windowMs }
 const CATEGORIES = {
@@ -15,7 +17,6 @@ const CATEGORIES = {
   analysis:      { perAgent: 2,    perIp: 3,  global: 10,  windowMs: 300_000 },      // 5 min
   wallet_write:  { perAgent: 10,   perIp: 15, global: 100, windowMs: 60_000 },       // 1 min
   wallet_read:   { perAgent: 20,   perIp: 30, global: 200, windowMs: 60_000 },       // 1 min
-  bounty_write:  { perAgent: 3,    perIp: 5,  global: 20,  windowMs: 3600_000 },     // 1 hour
   social_write:  { perAgent: 3,    perIp: 5,  global: 30,  windowMs: 300_000 },      // 5 min
   social_read:   { perAgent: 10,   perIp: 20, global: 120, windowMs: 60_000 },       // 1 min
   discovery:     { perAgent: null, perIp: 10, global: 200, windowMs: 60_000 },       // 1 min
@@ -26,6 +27,11 @@ const CATEGORIES = {
   capital_read:     { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 },    // 1 min
   capital_write:    { perAgent: 3,  perIp: 5,  global: 30,  windowMs: 300_000 },   // 5 min
   market_read:      { perAgent: null, perIp: 30, global: 300, windowMs: 60_000 },  // 1 min
+  market_private_read: { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 }, // 1 min
+  market_write:     { perAgent: 5,  perIp: 10, global: 60,  windowMs: 300_000 },   // 5 min
+  identity_read:    { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 },    // 1 min
+  identity_write:   { perAgent: 10, perIp: 15, global: 100, windowMs: 60_000 },    // 1 min
+  node_write:       { perAgent: 3,  perIp: 5,  global: 30,  windowMs: 300_000 },   // 5 min
 };
 
 // Global server cap
@@ -34,6 +40,45 @@ const GLOBAL_CAP = { limit: 1000, windowMs: 60_000 };
 // Counters: Map<string, { count: number, windowStart: number }>
 const _counters = new Map();
 const _globalCounter = { count: 0, windowStart: Date.now() };
+let _persistentStore = null;
+
+function defaultPersistentState() {
+  return {
+    counters: {},
+    globalCounter: { count: 0, windowStart: Date.now() },
+  };
+}
+
+export function configureRateLimiterPersistence({ dataLayer, path = 'data/security/rate-limits.json', mutex = { acquire: acquireMutex } } = {}) {
+  if (!dataLayer || typeof dataLayer.readJSON !== 'function' || typeof dataLayer.writeJSON !== 'function') {
+    _persistentStore = null;
+    return;
+  }
+  _persistentStore = { dataLayer, path, mutex };
+}
+
+export function disableRateLimiterPersistence() {
+  _persistentStore = null;
+}
+
+async function withPersistentState(mutator) {
+  if (!_persistentStore) return mutator(null);
+  const unlock = await _persistentStore.mutex.acquire(`rate-limit:${_persistentStore.path}`);
+  try {
+    let state;
+    try {
+      state = await _persistentStore.dataLayer.readJSON(_persistentStore.path);
+    } catch (err) {
+      if (err.code === 'ENOENT') state = defaultPersistentState();
+      else throw err;
+    }
+    const result = await mutator(state);
+    await _persistentStore.dataLayer.writeJSON(_persistentStore.path, state);
+    return result;
+  } finally {
+    unlock();
+  }
+}
 
 /**
  * Check and increment a rate limit counter for a given key.
@@ -43,7 +88,23 @@ const _globalCounter = { count: 0, windowStart: Date.now() };
  * @param {number} windowMs - Window duration in ms
  * @returns {{ allowed: boolean, retryAfter: number }}
  */
-export function checkAndIncrement(key, limit, windowMs) {
+export async function checkAndIncrement(key, limit, windowMs) {
+  if (_persistentStore) {
+    return withPersistentState((state) => {
+      const now = Date.now();
+      const entry = state.counters[key];
+      if (!entry || now - entry.windowStart > windowMs) {
+        state.counters[key] = { count: 1, windowStart: now };
+        return { allowed: true, retryAfter: 0 };
+      }
+      if (entry.count >= limit) {
+        const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
+        return { allowed: false, retryAfter };
+      }
+      entry.count++;
+      return { allowed: true, retryAfter: 0 };
+    });
+  }
   const now = Date.now();
   const entry = _counters.get(key);
 
@@ -65,7 +126,21 @@ export function checkAndIncrement(key, limit, windowMs) {
  * Check rate limit WITHOUT incrementing. Use when you need to verify
  * before committing to the operation (e.g., check before payment).
  */
-export function checkOnly(key, limit, windowMs) {
+export async function checkOnly(key, limit, windowMs) {
+  if (_persistentStore) {
+    return withPersistentState((state) => {
+      const now = Date.now();
+      const entry = state.counters[key];
+      if (!entry || now - entry.windowStart > windowMs) {
+        return { allowed: true, retryAfter: 0 };
+      }
+      if (entry.count >= limit) {
+        const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
+        return { allowed: false, retryAfter };
+      }
+      return { allowed: true, retryAfter: 0 };
+    });
+  }
   const now = Date.now();
   const entry = _counters.get(key);
 
@@ -81,7 +156,48 @@ export function checkOnly(key, limit, windowMs) {
   return { allowed: true, retryAfter: 0 };
 }
 
-function _checkGlobalCap() {
+export async function decrementCounter(key, amount = 1) {
+  const decrementBy = Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1;
+  if (_persistentStore) {
+    return withPersistentState((state) => {
+      const entry = state.counters[key];
+      if (!entry) return { count: 0 };
+      entry.count = Math.max(0, (entry.count || 0) - decrementBy);
+      if (entry.count === 0) {
+        delete state.counters[key];
+      }
+      return { count: entry.count || 0 };
+    });
+  }
+
+  const entry = _counters.get(key);
+  if (!entry) return { count: 0 };
+  entry.count = Math.max(0, (entry.count || 0) - decrementBy);
+  if (entry.count === 0) {
+    _counters.delete(key);
+  }
+  return { count: entry.count || 0 };
+}
+
+async function _checkGlobalCap() {
+  if (_persistentStore) {
+    return withPersistentState((state) => {
+      const now = Date.now();
+      const counter = state.globalCounter || { count: 0, windowStart: now };
+      state.globalCounter = counter;
+      if (now - counter.windowStart > GLOBAL_CAP.windowMs) {
+        counter.count = 1;
+        counter.windowStart = now;
+        return { allowed: true, retryAfter: 0 };
+      }
+      if (counter.count >= GLOBAL_CAP.limit) {
+        const retryAfter = Math.ceil((counter.windowStart + GLOBAL_CAP.windowMs - now) / 1000);
+        return { allowed: false, retryAfter };
+      }
+      counter.count++;
+      return { allowed: true, retryAfter: 0 };
+    });
+  }
   const now = Date.now();
   if (now - _globalCounter.windowStart > GLOBAL_CAP.windowMs) {
     _globalCounter.count = 1;
@@ -109,67 +225,79 @@ export function rateLimit(category) {
   const config = CATEGORIES[category];
   if (!config) throw new Error(`Unknown rate limit category: ${category}`);
 
-  return (req, res, next) => {
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  return async (req, res, next) => {
+    try {
+    const socketIp = getSocketAddress(req) || 'unknown';
     const agentId = req.agentId || null;
 
     // Exempt localhost (dashboard, test runner, operator)
-    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+    if (isLoopbackAddress(socketIp)) return next();
 
     // 1. Global server cap
-    const globalCheck = _checkGlobalCap();
+    const globalCheck = await _checkGlobalCap();
     if (!globalCheck.allowed) {
-      logRateLimitHit('global', ip, agentId);
+      logRateLimitHit('global', socketIp, agentId);
       return err429(res, { category: 'global', retryAfter: globalCheck.retryAfter });
     }
 
     // 2. Per-IP limit
     if (config.perIp) {
-      const ipCheck = checkAndIncrement(`${category}:ip:${ip}`, config.perIp, config.windowMs);
+      const ipCheck = await checkAndIncrement(`${category}:ip:${socketIp}`, config.perIp, config.windowMs);
       if (!ipCheck.allowed) {
-        logRateLimitHit(category, ip, agentId);
+        logRateLimitHit(category, socketIp, agentId);
         return err429(res, { category, retryAfter: ipCheck.retryAfter });
       }
     }
 
     // 3. Per-agent limit (only if authenticated)
     if (config.perAgent && agentId) {
-      const agentCheck = checkAndIncrement(`${category}:agent:${agentId}`, config.perAgent, config.windowMs);
+      const agentCheck = await checkAndIncrement(`${category}:agent:${agentId}`, config.perAgent, config.windowMs);
       if (!agentCheck.allowed) {
-        logRateLimitHit(category, ip, agentId);
+        logRateLimitHit(category, socketIp, agentId);
         return err429(res, { category, retryAfter: agentCheck.retryAfter });
       }
     }
 
     // 4. Global per-category limit
-    const catCheck = checkAndIncrement(`${category}:global`, config.global, config.windowMs);
+    const catCheck = await checkAndIncrement(`${category}:global`, config.global, config.windowMs);
     if (!catCheck.allowed) {
-      logRateLimitHit(category, ip, agentId);
+      logRateLimitHit(category, socketIp, agentId);
       return err429(res, { category, retryAfter: catCheck.retryAfter });
     }
 
     next();
+    } catch (err) {
+      next(err);
+    }
   };
 }
 
 /**
  * Global rate limit middleware (applied to all requests).
  */
-export function globalRateLimit(req, res, next) {
-  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
-  const globalCheck = _checkGlobalCap();
+export async function globalRateLimit(req, res, next) {
+  try {
+  const socketIp = getSocketAddress(req) || 'unknown';
+  if (isLoopbackAddress(socketIp)) return next();
+  const globalCheck = await _checkGlobalCap();
   if (!globalCheck.allowed) {
-    logRateLimitHit('global', ip, null);
+    logRateLimitHit('global', socketIp, null);
     return err429(res, { category: 'global', retryAfter: globalCheck.retryAfter });
   }
   next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 /**
  * Reset all rate limit counters. Used by E2E tests to avoid cross-suite interference.
  */
-export function resetCounters() {
+export async function resetCounters() {
   _counters.clear();
   _globalCounter.count = 0;
   _globalCounter.windowStart = Date.now();
+  if (_persistentStore) {
+    await _persistentStore.dataLayer.writeJSON(_persistentStore.path, defaultPersistentState());
+  }
 }

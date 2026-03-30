@@ -8,12 +8,70 @@ import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import {
-  validatePubkey, validateAgentId,
+  validateAgentId,
   validateString, validateTier,
-  sanitizeForLog,
 } from '../identity/validators.js';
-import { logRegistrationAttempt, logValidationFailure } from '../identity/audit-log.js';
+import { logRegistrationAttempt } from '../identity/audit-log.js';
 import { err400Validation, err400MissingField, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
+import { getSocketAddress, resolvePublicNodeHost } from '../identity/request-security.js';
+import { findUnexpectedKeys } from '../identity/danger-route-policy.js';
+
+const SAFE_SELF_SERVE_NODE_TIERS = new Set(['observatory', 'readonly', 'wallet', 'invoice']);
+
+function sendUnexpectedKeys(res, unexpected, see) {
+  return err400Validation(res, `Unexpected field(s): ${unexpected.join(', ')}`, {
+    hint: 'Send only the documented JSON keys for this route.',
+    see,
+  });
+}
+
+function looksLikeBlockedNodeProbe(reason) {
+  return typeof reason === 'string' && (
+    reason.includes('private or loopback') ||
+    reason.includes('localhost') ||
+    reason.includes('.local') ||
+    reason.includes('public IP')
+  );
+}
+
+function sendTierRequiresApproval(res, tier) {
+  return res.status(403).json({
+    error: 'tier_requires_operator_approval',
+    message: `Node tier "${tier}" needs operator approval.`,
+    hint: 'Use observatory, readonly, wallet, or invoice for self-serve node connections.',
+  });
+}
+
+async function verifyExternalNodeConnection(daemon, agentId, hostCheck, macaroon, tlsCert) {
+  if (!daemon.nodeManager?.addNodeFromCredentials) {
+    return {
+      ok: false,
+      status: 503,
+      message: 'Node connection verification is not available on this server.',
+    };
+  }
+
+  const tempName = `agent-connect-${agentId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const { info } = await daemon.nodeManager.addNodeFromCredentials(tempName, {
+      host: hostCheck.hostname,
+      restPort: hostCheck.port,
+      macaroonHex: macaroon,
+      tlsCertBase64OrPem: tlsCert,
+    });
+    return { ok: true, info };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 400,
+      message: err.message || 'Node connection failed verification.',
+    };
+  } finally {
+    if (daemon.nodeManager?.removeNode) {
+      daemon.nodeManager.removeNode(tempName);
+    }
+  }
+}
 
 export function agentIdentityRoutes(daemon) {
   const router = Router();
@@ -24,7 +82,7 @@ export function agentIdentityRoutes(daemon) {
   // =========================================================================
 
   router.post('/api/v1/agents/register', rateLimit('registration'), async (req, res) => {
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const ip = getSocketAddress(req) || 'unknown';
     try {
       // Detect double-stringified JSON — agents often send body as a string instead of object
       if (typeof req.body === 'string') {
@@ -42,7 +100,7 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/agents/me', auth, async (req, res) => {
+  router.get('/api/v1/agents/me', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const profile = await daemon.agentRegistry.getFullProfile(req.agentId);
       if (!profile) return err404NotFound(res, 'Agent', { see: 'POST /api/v1/agents/register' });
@@ -60,33 +118,33 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.put('/api/v1/agents/me', auth, async (req, res) => {
+  router.put('/api/v1/agents/me', auth, rateLimit('identity_write'), async (req, res) => {
     try {
       const updated = await daemon.agentRegistry.updateProfile(req.agentId, req.body);
       const { api_key, ...pub } = updated;
       res.json(pub);
     } catch (err) {
       return err400Validation(res, err.message, {
-        hint: 'Check your request body. Updatable fields: name, description, framework, contact_url.',
+        hint: 'Check your request body. Updatable fields: name, description, framework, contact_url, pubkey.',
       });
     }
   });
 
-  router.get('/api/v1/agents/me/referral-code', auth, (req, res) => {
+  router.get('/api/v1/agents/me/referral-code', auth, rateLimit('identity_read'), (req, res) => {
     res.json({
       referral_code: req.agentProfile.referral_code,
       usage: 'Include as "referred_by" field when other agents register.',
     });
   });
 
-  router.get('/api/v1/agents/:id', async (req, res) => {
+  router.get('/api/v1/agents/:id', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason, {
       hint: 'Agent IDs are 8-character alphanumeric strings. Check GET /api/v1/leaderboard for valid agent IDs.',
     });
 
     try {
-      const profile = await daemon.agentRegistry.getFullProfile(req.params.id);
+      const profile = await daemon.agentRegistry.getPublicProfile(req.params.id);
       if (!profile) return err404NotFound(res, 'Agent', { see: 'GET /api/v1/leaderboard' });
       res.json(profile);
     } catch (err) {
@@ -94,7 +152,7 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/agents/:id/lineage', async (req, res) => {
+  router.get('/api/v1/agents/:id/lineage', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
 
@@ -111,8 +169,12 @@ export function agentIdentityRoutes(daemon) {
   // NODE CONNECTION (agents with their own LND node)
   // =========================================================================
 
-  router.post('/api/v1/node/connect', auth, async (req, res) => {
+  router.post('/api/v1/node/connect', auth, rateLimit('node_write'), async (req, res) => {
     try {
+      const unexpected = findUnexpectedKeys(req.body, ['host', 'macaroon', 'tls_cert', 'tier']);
+      if (unexpected.length > 0) {
+        return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capabilities');
+      }
       const { host, macaroon, tls_cert, tier } = req.body;
       if (!host || !macaroon || !tls_cert) {
         return err400MissingField(res, 'host, macaroon, and tls_cert', {
@@ -120,8 +182,17 @@ export function agentIdentityRoutes(daemon) {
           see: 'GET /api/v1/capabilities',
         });
       }
-      // Validate string lengths
-      if (typeof host !== 'string' || host.length > 500) return err400Validation(res, 'host too long (max 500 chars)');
+      const hostCheck = await resolvePublicNodeHost(host);
+      if (!hostCheck.valid) {
+        if (looksLikeBlockedNodeProbe(hostCheck.reason)) {
+          return res.status(403).json({
+            error: 'private_host_blocked',
+            message: 'Nice try. That node target is off limits.',
+            hint: 'Use a public routable host:port for node routes.',
+          });
+        }
+        return err400Validation(res, `host: ${hostCheck.reason}`);
+      }
       if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
       if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
 
@@ -131,18 +202,42 @@ export function agentIdentityRoutes(daemon) {
         hint: 'Valid tiers: observatory, wallet, readonly, invoice, admin. See GET /api/v1/capabilities.',
         see: 'GET /api/v1/capabilities',
       });
+      if (!SAFE_SELF_SERVE_NODE_TIERS.has(effectiveTier)) {
+        return sendTierRequiresApproval(res, effectiveTier);
+      }
 
-      // Store connection info (encrypted in production)
+      const verified = await verifyExternalNodeConnection(daemon, req.agentId, hostCheck, macaroon, tls_cert);
+      if (!verified.ok) {
+        if (verified.status >= 500) {
+          return err500Internal(res, 'verifying node credentials');
+        }
+        return err400Validation(res, verified.message, {
+          hint: 'Verify your host, macaroon, and tls_cert are correct. Use POST /api/v1/node/test-connection first if you want a dry run.',
+        });
+      }
+
+      // Store only verified connection metadata.
       await daemon.agentRegistry.updateState(req.agentId, {
         node_connected: true,
-        node_host: host,
+        node_host: hostCheck.host,
         tier: effectiveTier,
+        node_alias: verified.info?.alias || null,
+        node_pubkey: verified.info?.identity_pubkey || null,
+        node_synced_to_chain: Boolean(verified.info?.synced_to_chain),
+        node_active_channels: Number(verified.info?.num_active_channels || 0),
+        node_verified_at: Date.now(),
       });
 
       res.json({
         status: 'connected',
         tier: effectiveTier,
-        message: 'Node connected. Your tier determines available capabilities.',
+        message: 'Node credentials verified and saved.',
+        node: {
+          alias: verified.info?.alias || null,
+          pubkey: verified.info?.identity_pubkey || null,
+          synced_to_chain: Boolean(verified.info?.synced_to_chain),
+          active_channels: Number(verified.info?.num_active_channels || 0),
+        },
       });
     } catch (err) {
       return err400Validation(res, err.message, {
@@ -151,22 +246,56 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.post('/api/v1/node/test-connection', auth, async (req, res) => {
+  router.post('/api/v1/node/test-connection', auth, rateLimit('node_write'), async (req, res) => {
     try {
+      const unexpected = findUnexpectedKeys(req.body, ['host', 'macaroon', 'tls_cert']);
+      if (unexpected.length > 0) {
+        return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capabilities');
+      }
       const { host, macaroon, tls_cert } = req.body;
       if (!host || !macaroon || !tls_cert) {
         return err400MissingField(res, 'host, macaroon, and tls_cert', {
           hint: 'Test your connection: {"host": "your-node:10009", "macaroon": "<hex>", "tls_cert": "<hex>"}.',
         });
       }
-      // In production: attempt getInfo call to verify
-      res.json({ status: 'ok', message: 'Connection test passed (stub)' });
+      const hostCheck = await resolvePublicNodeHost(host);
+      if (!hostCheck.valid) {
+        if (looksLikeBlockedNodeProbe(hostCheck.reason)) {
+          return res.status(403).json({
+            error: 'private_host_blocked',
+            message: 'That host is not on the menu.',
+            hint: 'Use a public routable host:port for node routes.',
+          });
+        }
+        return err400Validation(res, `host: ${hostCheck.reason}`);
+      }
+      if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
+      if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
+      const verified = await verifyExternalNodeConnection(daemon, req.agentId, hostCheck, macaroon, tls_cert);
+      if (!verified.ok) {
+        if (verified.status >= 500) {
+          return err500Internal(res, 'verifying node connection');
+        }
+        return err400Validation(res, verified.message, {
+          hint: 'Double-check host, macaroon, and tls_cert, then try again.',
+        });
+      }
+      res.json({
+        status: 'ok',
+        message: 'Connection test passed.',
+        node: {
+          alias: verified.info?.alias || null,
+          pubkey: verified.info?.identity_pubkey || null,
+          synced_to_chain: Boolean(verified.info?.synced_to_chain),
+          active_channels: Number(verified.info?.num_active_channels || 0),
+        },
+      });
     } catch (err) {
       return err400Validation(res, err.message);
     }
   });
 
-  router.get('/api/v1/node/status', auth, async (req, res) => {
+  router.get('/api/v1/node/status', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const state = await daemon.agentRegistry.getFullProfile(req.agentId);
       res.json({
@@ -184,6 +313,10 @@ export function agentIdentityRoutes(daemon) {
 
   router.post('/api/v1/actions/submit', auth, rateLimit('social_write'), async (req, res) => {
     try {
+      const unexpected = findUnexpectedKeys(req.body, ['action_type', 'params', 'description']);
+      if (unexpected.length > 0) {
+        return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/actions/history');
+      }
       const { action_type, params, description } = req.body;
       if (!action_type) return err400MissingField(res, 'action_type', {
         example: { action_type: 'open_channel', params: { pubkey: '02abc...' } },
@@ -191,9 +324,11 @@ export function agentIdentityRoutes(daemon) {
       const atCheck = validateString(action_type, 100);
       if (!atCheck.valid) return err400Validation(res, `action_type: ${atCheck.reason}`);
       if (description) {
-        const dCheck = validateString(description, 2000);
+        const dCheck = validateString(description, 300);
         if (!dCheck.valid) return err400Validation(res, `description: ${dCheck.reason}`);
       }
+      const paramsBytes = Buffer.byteLength(JSON.stringify(params || {}));
+      if (paramsBytes > 4000) return err400Validation(res, 'params too large (max 4000 bytes)');
 
       const actionId = `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const action = {
@@ -220,7 +355,7 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/actions/history', auth, async (req, res) => {
+  router.get('/api/v1/actions/history', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);
       res.json({ actions });
@@ -229,7 +364,7 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/actions/:id', auth, async (req, res) => {
+  router.get('/api/v1/actions/:id', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);
       const action = actions.find(a => a.action_id === req.params.id);

@@ -3,18 +3,18 @@
  *
  * Both ChannelOpener and ChannelCloser run identical checks for:
  *   1. payload_present   — instruction + signature exist
- *   2. pubkey_registered  — agent has an Ed25519 public key
+ *   2. pubkey_registered  — agent has a secp256k1 public key
  *   3. action_valid       — instruction.action matches expected
  *   4. agent_id_matches   — instruction.agent_id == authenticated agent
  *   5. timestamp_fresh    — within ±300s of server time
  *   6. not_duplicate      — instruction hash not in dedup cache
- *   7. signature_valid    — Ed25519 signature verifies
+ *   7. signature_valid    — secp256k1 signature verifies
  *
  * Does NOT call dedup.mark() — callers mark at their own appropriate time.
  * Returns instrHash so each caller can mark when ready.
  */
 
-import { verifyEd25519Signature } from '../identity/auth.js';
+import { verifySecp256k1Signature } from '../identity/auth.js';
 import { sha256, canonicalJSON } from './crypto-utils.js';
 
 /**
@@ -22,7 +22,7 @@ import { sha256, canonicalJSON } from './crypto-utils.js';
  */
 export const SHARED_VALIDATION_HINTS = {
   no_pubkey:
-    'Register your Ed25519 public key via PUT /api/v1/agents/me with { "pubkey": "<64-char-hex>" }. ' +
+    'Register your secp256k1 compressed public key via PUT /api/v1/agents/me with { "pubkey": "<66-char-hex>" }. ' +
     'See playbook Step 8.',
 
   agent_id_mismatch:
@@ -40,8 +40,8 @@ export const SHARED_VALIDATION_HINTS = {
     'Change the timestamp to get a different hash.',
 
   invalid_signature:
-    'Sign the canonical JSON of the instruction object (not the wrapper). ' +
-    'sign(canonicalJSON(instruction)). Canonical JSON sorts keys lexicographically, no whitespace (RFC 8785).',
+    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key, then send the DER-encoded signature as hex. ' +
+    'Canonical JSON sorts keys lexicographically with no whitespace (RFC 8785).',
 };
 
 /**
@@ -76,7 +76,7 @@ export async function validateSignedInstruction({
   const profile = agentRegistry.getById(agentId);
   if (!profile?.pubkey) {
     return {
-      success: false, error: 'Agent has no registered Ed25519 public key',
+      success: false, error: 'Agent has no registered secp256k1 public key',
       hint: SHARED_VALIDATION_HINTS.no_pubkey, status: 400,
       failed_at: 'pubkey_registered', checks_passed,
     };
@@ -124,7 +124,7 @@ export async function validateSignedInstruction({
 
   // Step 6: not_duplicate
   const instrHash = sha256(canonicalJSON(instruction));
-  if (dedup.has(instrHash)) {
+  if (await dedup.has(instrHash)) {
     return {
       success: false, error: 'Duplicate instruction (already submitted)',
       hint: SHARED_VALIDATION_HINTS.duplicate, status: 409,
@@ -135,10 +135,10 @@ export async function validateSignedInstruction({
 
   // Step 7: signature_valid
   const message = canonicalJSON(instruction);
-  const valid = await verifyEd25519Signature(profile.pubkey, message, signature);
+  const valid = await verifySecp256k1Signature(profile.pubkey, message, signature);
   if (!valid) {
     return {
-      success: false, error: 'Invalid Ed25519 signature',
+      success: false, error: 'Invalid secp256k1 signature',
       hint: SHARED_VALIDATION_HINTS.invalid_signature, status: 401,
       failed_at: 'signature_valid', checks_passed,
     };

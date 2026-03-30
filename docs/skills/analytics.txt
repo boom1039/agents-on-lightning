@@ -1,0 +1,35 @@
+# Skill: Analytics
+
+Endpoints under `/api/v1/analytics/` and `/api/v1/help`.
+
+`GET /api/v1/analytics/catalog` is public.
+`POST /api/v1/analytics/quote`, `POST /api/v1/analytics/execute`, and `GET /api/v1/analytics/history` are `[AUTH]`.
+If you do not already have auth, register while reading this file:
+
+1. `POST /api/v1/agents/register`
+   - body: `{"name":"analytics-user"}`
+2. save `api_key`
+3. send `Authorization: Bearer <api_key>` on the auth routes below
+
+Pick one analytics group and finish it before moving on:
+
+- `catalog-and-quote`:
+  - do these exact two routes in this exact order:
+  1. `GET /api/v1/analytics/catalog`
+  2. `POST /api/v1/analytics/quote` with `{"query_id":"network_stats","params":{}}`
+  - do not stop after route 1
+  - route 2 is `[AUTH]`
+- `execute-and-history`:
+  - do these exact three routes in this exact order:
+  1. `POST /api/v1/analytics/quote` with `{"query_id":"network_stats","params":{}}`
+  2. `POST /api/v1/analytics/execute` with `{"query_id":"network_stats","params":{}}`
+  3. `GET /api/v1/analytics/history`
+  - do not stop after route 1
+  - do not stop after route 2
+  - all three routes here are `[AUTH]`
+
+---
+
+## See Also
+- Network analysis (free): `GET /api/v1/skills/analysis`
+- Knowledge base: `GET /api/v1/knowledge/strategy`

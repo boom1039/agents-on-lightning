@@ -17,7 +17,7 @@
  *   # Coverage mode
  *   node test-runner.mjs --mode coverage --suite all
  *   node test-runner.mjs --mode agent-coverage --suite all
- *   node test-runner.mjs --mode coverage --suite market --manual-funding --open-peer-pubkey <pubkey>
+ *   node test-runner.mjs --mode agent-coverage --suite social --phase messaging --fail-fast
  *   node test-runner.mjs --mode both --feedback
  *
  *   # Generate report from saved results
@@ -25,27 +25,40 @@
  *   node test-runner.mjs --report --report-file /tmp/report.md
  */
 
-import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, appendFileSync, readFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { flag as _flag, opt as _opt, sleep, formatTime, formatBytes, doHttp as _doHttp, createProvider } from './shared.mjs';
 import {
-  DEFAULT_FUNDING_TIMEOUT_SECS,
+  flag as _flag,
+  opt as _opt,
+  sleep,
+  formatTime,
+  formatBytes,
+  doHttp as _doHttp,
+  doTerminalCommand,
+  createProvider,
+  HTTP_TOOL,
+  TERMINAL_TOOL,
+} from './shared.mjs';
+import {
   DEFAULT_OPEN_AMOUNT_SATS,
   SkipPhaseError,
   createCoverageContext,
 } from './coverage-helpers.mjs';
+import { evaluatePhaseCoverage, getCoverMatcher } from './agent-coverage-scoring.mjs';
 import { resolveSuites } from './suites/index.mjs';
 import { verifyCoverage } from './verify-suite-coverage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const RESULTS_FILE = join(__dirname, 'stress-test-results.jsonl');
 
 // ─── CLI ───
 
 const args = process.argv.slice(2);
 function flag(name) { return _flag(name, args); }
 function opt(name, def) { return _opt(name, def, args); }
+
+const RESULTS_FILE = opt('--results-file', join(__dirname, 'stress-test-results.jsonl'));
 
 const REPORT_ONLY = flag('--report');
 const ALL_MODELS = flag('--all');
@@ -54,24 +67,35 @@ const MODE = opt('--mode', 'walkthrough');   // navigation | walkthrough | agent
 const WITH_FEEDBACK = flag('--feedback');
 const COVERAGE_SUITE = opt('--suite', 'all');
 const SKIP_COVERAGE_VERIFY = flag('--skip-coverage-verify');
+const QUICK_MODE = flag('--quick');
 const FAIL_FAST = flag('--fail-fast');
 const SHOW_DOC_TRACES = flag('--show-doc-traces');
-const MANUAL_FUNDING = flag('--manual-funding');
+const SHARED_AGENT_COVERAGE_SESSION = flag('--shared-agent-coverage-session');
+const AGENT_COVERAGE_SESSIONS = Math.max(1, parseInt(opt('--agent-coverage-sessions', '1'), 10));
 const OPEN_PEER_PUBKEY = opt('--open-peer-pubkey', null);
 const OPEN_AMOUNT_SATS = parseInt(opt('--open-amount-sats', String(DEFAULT_OPEN_AMOUNT_SATS)), 10);
-const FUNDING_TIMEOUT_SECS = parseInt(opt('--funding-timeout-secs', String(DEFAULT_FUNDING_TIMEOUT_SECS)), 10);
-const CHANNEL_POINT = opt('--channel-point', null);
 const ONLY_PHASE = opt('--phase', null);
 const START_PHASE = parseInt(opt('--start-phase', '0'), 10);
-const MAX_RETRIES = parseInt(opt('--retries', '2'), 10);
-const MAX_TURNS = parseInt(opt('--max-turns', '1'), 10);
+const AGENT_RUNTIME = opt('--agent-runtime', 'http');
+const MAX_RETRIES = parseInt(opt('--attempts', opt('--retries', QUICK_MODE ? '3' : '3')), 10);
+const HAS_MAX_TURNS_OVERRIDE = args.includes('--max-turns');
+const MAX_TURNS = HAS_MAX_TURNS_OVERRIDE
+  ? parseInt(opt('--max-turns', '1'), 10)
+  : 1;
+const DEFAULT_PREP_TURNS = AGENT_RUNTIME === 'terminal'
+  ? (QUICK_MODE ? '8' : '10')
+  : (QUICK_MODE ? '4' : '6');
+const MAX_PREP_TURNS = parseInt(opt('--prep-turns', DEFAULT_PREP_TURNS), 10);
+const MAX_PHASE_BURSTS = parseInt(opt('--phase-bursts', QUICK_MODE ? '6' : '12'), 10);
+const MAX_NO_PROGRESS_BURSTS = parseInt(opt('--max-no-progress-bursts', QUICK_MODE ? '2' : '2'), 10);
+const MAX_DOC_ONLY_BURSTS = parseInt(opt('--max-doc-only-bursts', QUICK_MODE ? '3' : '2'), 10);
 const NUDGE_TIMEOUT_MS = parseInt(opt('--nudge-timeout', '60000'), 10);
 const DELAY_SECS = parseInt(opt('--delay', '0'), 10);
 const BAIL_AFTER = parseInt(opt('--bail', '2'), 10);  // stop after N consecutive failures
 const MODEL_RETRY_MAX = parseInt(opt('--model-retry-max', '6'), 10);
 const MODEL_RETRY_BASE_MS = parseInt(opt('--model-retry-base-ms', '5000'), 10);
 const MODEL_RETRY_MAX_MS = parseInt(opt('--model-retry-max-ms', '60000'), 10);
-const BASE_URL = opt('--base-url', 'http://localhost:3200');
+const BASE_URL = opt('--base-url', 'http://localhost:3302');
 const REPORT_FILE = opt('--report-file', null);
 const TAG = opt('--tag', null);
 
@@ -80,8 +104,24 @@ const PROVIDER = opt('--provider', 'openai');
 const MODEL = opt('--model',
   PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-4.1-mini');
 const EFFECTIVE_MAX_RETRIES = FAIL_FAST ? 1 : MAX_RETRIES;
-const EFFECTIVE_BAIL_AFTER = FAIL_FAST ? 1 : BAIL_AFTER;
-const SKIP_FAILURE_INTERVIEWS = FAIL_FAST;
+const EFFECTIVE_BAIL_AFTER = FAIL_FAST ? 1 : QUICK_MODE ? 1 : BAIL_AFTER;
+const QUICK_NUDGE_TIMEOUT_MS = AGENT_RUNTIME === 'terminal' ? 40000 : 20000;
+const EFFECTIVE_NUDGE_TIMEOUT_MS = QUICK_MODE ? Math.min(NUDGE_TIMEOUT_MS, QUICK_NUDGE_TIMEOUT_MS) : NUDGE_TIMEOUT_MS;
+const SKIP_FAILURE_INTERVIEWS = FAIL_FAST || QUICK_MODE;
+const SHOULD_VERIFY_COVERAGE = !SKIP_COVERAGE_VERIFY && !QUICK_MODE;
+
+function createTerminalRuntime(label = 'agent-coverage') {
+  const runtimeDir = mkdtempSync(join(tmpdir(), `agents-on-lightning-${label.replace(/[^a-z0-9_-]/gi, '-').toLowerCase()}-`));
+  return {
+    cwd: runtimeDir,
+    async execute(toolName, input = {}) {
+      if (toolName !== TERMINAL_TOOL.name) {
+        return { ok: false, error: `Unsupported local tool ${toolName}` };
+      }
+      return await doTerminalCommand(input, { cwd: runtimeDir });
+    },
+  };
+}
 
 // ─── Model Roster ───
 
@@ -97,6 +137,15 @@ const MODEL_ROSTER = [
   { id: 'mistralai/mistral-large-2411',      provider: 'openrouter', display: 'Mistral Large',       tier: 'stress' },
 ];
 
+const MODEL_PRICING_USD_PER_1M = {
+  'gpt-4.1': { input: 2.0, output: 8.0 },
+  'gpt-4.1-mini': { input: 0.4, output: 1.6 },
+  'gpt-4.1-nano': { input: 0.1, output: 0.4 },
+  'gpt-5.4': { input: 2.5, output: 15.0 },
+  'gpt-5.4-mini': { input: 0.75, output: 4.5 },
+  'gpt-5.4-nano': { input: 0.2, output: 1.25 },
+};
+
 // ─── Logging ───
 
 const _pre = TAG ? `[${TAG}] ` : '';
@@ -105,6 +154,18 @@ function testLog(msg) { process.stdout.write(`${_pre}  ★ ${msg}\n`); }
 
 function doHttp(input) { return _doHttp(input, BASE_URL); }
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function formatUsd(amount) {
+  if (!Number.isFinite(amount)) return 'n/a';
+  if (amount < 0.01) return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+function estimateModelCostUsd(modelId, inputTokens, outputTokens) {
+  const pricing = MODEL_PRICING_USD_PER_1M[modelId];
+  if (!pricing) return null;
+  return ((inputTokens / 1_000_000) * pricing.input) + ((outputTokens / 1_000_000) * pricing.output);
+}
 
 function shortUrl(url = '') {
   return String(url).replace(BASE_URL, '') || url;
@@ -130,6 +191,103 @@ function summarizeRequest(input = {}) {
     headers: redactHeaders(input.headers),
     body: input.body ?? null,
   };
+}
+
+function summarizeToolCall(tc = {}) {
+  if ((tc.name || HTTP_TOOL.name) === HTTP_TOOL.name) {
+    return { tool: HTTP_TOOL.name, ...summarizeRequest(tc.input) };
+  }
+  return {
+    tool: tc.name || 'unknown_tool',
+    input: tc.input ?? null,
+  };
+}
+
+function normalizeEndpointPath(url = '') {
+  try {
+    const parsed = new URL(url, BASE_URL);
+    return parsed.pathname;
+  } catch {
+    return shortUrl(url).split('?')[0];
+  }
+}
+
+function matchesPhaseCover(input = {}, phaseCovers = []) {
+  if (!phaseCovers || phaseCovers.length === 0) return false;
+  const method = String(input.method || 'GET').toUpperCase();
+  const path = normalizeEndpointPath(input.url || '');
+  return phaseCovers.some((cover) => {
+    const matcher = getCoverMatcher(cover);
+    return matcher.method === method && matcher.regex.test(path);
+  });
+}
+
+function repeatedFailedEndpoint(prev, next) {
+  if (!prev || !next) return null;
+  if ((prev.status || 0) < 400 || (next.status || 0) < 400) return null;
+  const prevMethod = String(prev.method || 'GET').toUpperCase();
+  const nextMethod = String(next.method || 'GET').toUpperCase();
+  const prevPath = normalizeEndpointPath(prev.url || '');
+  const nextPath = normalizeEndpointPath(next.url || '');
+  if (prevMethod !== nextMethod || prevPath !== nextPath) return null;
+  return {
+    method: nextMethod,
+    path: nextPath,
+    statuses: [prev.status, next.status],
+  };
+}
+
+function findRepeatedFailedEndpoint(httpLog) {
+  for (let i = 1; i < httpLog.length; i++) {
+    const repeat = repeatedFailedEndpoint(httpLog[i - 1], httpLog[i]);
+    if (repeat) return repeat;
+  }
+  return null;
+}
+
+function parsePhaseFilters(raw) {
+  return String(raw || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function phaseMatchesFilter(suiteName, phaseName, filters) {
+  if (!filters || filters.length === 0) return true;
+  const full = `${suiteName}:${phaseName}`;
+  return filters.some(filter => filter === phaseName || filter === full);
+}
+
+function filterSuitesByPhase(suites, filters) {
+  if (!filters || filters.length === 0) return suites;
+  const filtered = suites
+    .map(suite => ({
+      ...suite,
+      phases: suite.phases.filter(phase => phaseMatchesFilter(suite.name, phase.name, filters)),
+    }))
+    .filter(suite => suite.phases.length > 0);
+  if (filtered.length === 0) {
+    throw new Error(`Unknown phase filter "${filters.join(', ')}". Use a phase name like "messaging" or a full name like "social:messaging".`);
+  }
+  return filtered;
+}
+
+function stitchDocTraces(docTraces, requestTimeline) {
+  return docTraces.map((trace) => {
+    if (trace.next_request) return trace;
+    const nextRequest = requestTimeline.find((entry) => entry.request_timeline_index > trace.request_timeline_index);
+    if (!nextRequest) return trace;
+    return {
+      ...trace,
+      next_request: {
+        method: nextRequest.method,
+        url: nextRequest.url,
+        headers: nextRequest.headers,
+        body: nextRequest.body,
+      },
+      next_request_timeline_index: nextRequest.request_timeline_index,
+    };
+  });
 }
 
 function isDocRoute(input = {}) {
@@ -184,24 +342,30 @@ function parseRetryDelayMs(err, attempt) {
 // ─── Send a nudge and let the agent work ───
 
 async function runNudge(messages, nudge, provider, ctx = {}) {
-  const { phaseNum, totalPhases, phaseName, attempt } = ctx;
+  const { phaseNum, totalPhases, phaseName, attempt, attemptMax = EFFECTIVE_MAX_RETRIES } = ctx;
   const nudgeStart = Date.now();
   const pre = phaseName ? `${String(phaseNum).padStart(2)}/${totalPhases} ${phaseName.padEnd(20)}` : '';
-  const att = attempt ? ` ${attempt}/${EFFECTIVE_MAX_RETRIES}` : '';
+  const att = attempt ? ` ${attempt}/${attemptMax}` : '';
 
   messages.push({ role: 'user', content: nudge });
   const httpLog = [];
   let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
   let docReads = 0;
   const thinkTimes = [];
   const responseSizes = [];
   const docTraces = [];
   const turnTraces = [];
   const pendingDocTraces = [];
+  const requestTimeline = [];
+  let stopReason = null;
+  let actionTurnsUsed = 0;
+  let prepTurnsUsed = 0;
 
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    if (Date.now() - nudgeStart > NUDGE_TIMEOUT_MS) {
-      agentLog(`${pre}${att}  TIMEOUT ${formatTime(NUDGE_TIMEOUT_MS)}`);
+  for (let turn = 0; turn < MAX_TURNS + MAX_PREP_TURNS; turn++) {
+    if (Date.now() - nudgeStart > EFFECTIVE_NUDGE_TIMEOUT_MS) {
+      agentLog(`${pre}${att}  TIMEOUT ${formatTime(EFFECTIVE_NUDGE_TIMEOUT_MS)}`);
       break;
     }
 
@@ -225,6 +389,8 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     const thinkMs = Date.now() - thinkStart;
     thinkTimes.push(thinkMs);
 
+    inputTokens += (response.usage?.input || 0);
+    outputTokens += (response.usage?.output || 0);
     totalTokens += (response.usage?.input || 0) + (response.usage?.output || 0);
 
     if (response.text.trim()) {
@@ -233,19 +399,46 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     }
 
     turnTraces.push({
+      attempt,
       turn: turn + 1,
       think_ms: thinkMs,
       assistant_text: response.text || '',
-      requested_calls: response.toolCalls.map(tc => summarizeRequest(tc.input)),
+      requested_calls: response.toolCalls.map(tc => summarizeToolCall(tc)),
     });
 
     if (response.toolCalls.length === 0) break;
 
     const results = [];
+    let stopThisNudge = false;
+    let hitPhaseRouteThisTurn = false;
+    let usedAnyToolThisTurn = false;
     for (const tc of response.toolCalls) {
+      const toolName = tc.name || HTTP_TOOL.name;
+      usedAnyToolThisTurn = true;
+      if (toolName !== HTTP_TOOL.name) {
+        const toolResult = await ctx.executeLocalTool?.(toolName, tc.input || {});
+        const preview = JSON.stringify(toolResult || {});
+        agentLog(`${pre}${att}  TOOL ${toolName} → ${preview.substring(0, 120)}`);
+        results.push({ id: tc.id, content: JSON.stringify(toolResult || { ok: false, error: `No handler for ${toolName}` }) });
+        continue;
+      }
+
+      const requestSummary = summarizeRequest(tc.input);
+      if (matchesPhaseCover(tc.input, ctx.phaseCovers)) {
+        hitPhaseRouteThisTurn = true;
+      }
+      const requestTimelineIndex = requestTimeline.length;
+      requestTimeline.push({
+        attempt,
+        turn: turn + 1,
+        request_timeline_index: requestTimelineIndex,
+        ...requestSummary,
+      });
+
       if (pendingDocTraces.length > 0) {
         const previousDoc = pendingDocTraces.shift();
-        previousDoc.next_request = summarizeRequest(tc.input);
+        previousDoc.next_request = requestSummary;
+        previousDoc.next_request_timeline_index = requestTimelineIndex;
         docTraces.push(previousDoc);
         if (SHOW_DOC_TRACES) {
           agentLog(`${pre}${att}  DOC→NEXT ${previousDoc.doc_url} => ${previousDoc.next_request.method} ${previousDoc.next_request.url}`);
@@ -261,7 +454,9 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       if (isDocRoute(tc.input)) {
         docReads++;
         pendingDocTraces.push({
+          attempt,
           turn: turn + 1,
+          request_timeline_index: requestTimelineIndex,
           method: tc.input.method,
           doc_url: currentShortUrl,
           status: httpResult.status,
@@ -279,11 +474,36 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
         method: tc.input.method, url: tc.input.url, status: httpResult.status,
         latency: httpResult.latency, reqBody: httpResult.reqBody, errSnippet: httpResult.errSnippet,
         responseBytes: httpResult.responseBytes, body: httpResult.parsed,
+        requestHeaders: redactHeaders(tc.input.headers),
       });
+      ctx.observeHttp?.(tc.input, httpResult);
+      const repeatFailure = findRepeatedFailedEndpoint(httpLog);
+      if (repeatFailure) {
+        stopReason = `Repeated failure on ${repeatFailure.method} ${repeatFailure.path} (${repeatFailure.statuses.join(' -> ')})`;
+        agentLog(`${pre}${att}  STOP ${stopReason}`);
+        stopThisNudge = true;
+      }
       results.push({ id: tc.id, content: httpResult.raw });
+      if (stopThisNudge) break;
+    }
+
+    for (const tc of response.toolCalls) {
+      if (results.some(result => result.id === tc.id)) continue;
+      results.push({
+        id: tc.id,
+        content: JSON.stringify({ status: 0, error: 'skipped_after_stop' }),
+      });
     }
 
     provider.push(messages, response.raw, results);
+    if (hitPhaseRouteThisTurn) {
+      actionTurnsUsed += 1;
+      if (actionTurnsUsed >= MAX_TURNS) break;
+    } else if (usedAnyToolThisTurn) {
+      prepTurnsUsed += 1;
+      if (prepTurnsUsed >= MAX_PREP_TURNS) break;
+    }
+    if (stopThisNudge) break;
   }
 
   for (const unresolvedDoc of pendingDocTraces) {
@@ -293,7 +513,19 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     }
   }
 
-  return { httpLog, totalTokens, docReads, thinkTimes, responseSizes, docTraces, turnTraces };
+  return {
+    httpLog,
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    docReads,
+    thinkTimes,
+    responseSizes,
+    docTraces,
+    turnTraces,
+    requestTimeline,
+    stopReason,
+  };
 }
 
 // ─── Test phases ───
@@ -501,137 +733,135 @@ const WALKTHROUGH_PHASES = [
   },
 ];
 
-const AGENT_COVERAGE_PRIMER = `The server base URL is ${BASE_URL}. Start from ${BASE_URL}/llms.txt.
-For this session, you may only learn routes, methods, headers, bodies, and workflow details from /llms.txt and the files it links to.
-If you need documentation, reread those files instead of guessing.
-You only have HTTP access. If a flow requires cryptographic signing, external payment, on-chain funding, or a second agent account, do the furthest honest documented HTTP attempt you can with the tools you have.
-When docs mention aliases, deprecated endpoints, or common mistake / teaching surfaces, exercise those too.`;
+const AGENT_COVERAGE_PRIMER = `The server base URL is ${BASE_URL}.
+Behave like an outside agent visiting this site for the first time.
+Use only information you can discover from the website, its docs, and API responses.
+Do not rely on hidden test rules, repo knowledge, or undocumented routes.
+If you batch multiple authenticated HTTP calls in one turn, repeat the Authorization header on each request; auth does not carry over automatically.`;
 
 const AGENT_COVERAGE_GOALS = {
   discovery: {
-    'root-and-docs': 'Start from scratch and find the main docs, entrypoints, health signal, and API index.',
-    'platform-ethos-capabilities': 'Understand the live platform status, invoice decoding helper, platform ethos, and access tiers.',
-    'strategies-and-knowledge': 'Explore strategy archetypes and read a relevant knowledge-base topic.',
-    skills: 'List the available skills and read the relevant skill file for this capability area.',
+    'root-and-docs': 'You just arrived at the site. Figure out what it is, where the docs are, and whether the service is healthy.',
+    'platform-ethos-capabilities': 'Understand what this platform does, what kind of access it offers, and any general platform helpers it exposes.',
+    'strategies-and-knowledge': 'Learn about one routing strategy and read one relevant knowledge page.',
+    skills: 'Call exactly these three discovery routes in order and stop there: GET /api/v1/skills, GET /api/v1/skills/discovery, and GET /api/v1/skills/market/open-flow.txt. Do not detour into any other discovery group.',
   },
   identity: {
-    'registration-and-profile': 'Register an agent, inspect your own profile and referral info, then inspect your public profile and lineage.',
-    'node-connection': 'Understand how an agent would connect its own node: test the connection flow, the real connect flow, and the current node-connection status.',
-    actions: 'Submit a sample action, inspect your action history, and fetch the specific action you created.',
+    'registration-and-profile': 'Register exactly one agent, inspect your own profile and referral info, then inspect your public profile and lineage. Keep the profile update simple: name and description are enough; do not add pubkey unless the docs for your current goal require it.',
+    'node-connection': 'Call exactly these three routes in order and stop there: POST /api/v1/node/test-connection with {}, POST /api/v1/node/connect with {}, and GET /api/v1/node/status. Use the same bearer token on all three individual requests, including the final GET. If the two POST routes return 400 missing_required_field, treat that as the expected boundary and continue straight to status; do not re-register, do not invent host credentials, and do not detour into capabilities.',
+    actions: 'Call exactly these three routes in order and stop there: POST /api/v1/actions/submit with {"action_type":"open_channel","params":{"peer_pubkey":"03abababababababababababababababababababababababababababababababab"},"description":"Opening channel"}, then GET /api/v1/actions/history, then GET /api/v1/actions/<real-action_id>. Stay on the /api/v1/actions/* family only; do not invent /api/v1/identity/actions routes, do not probe /api/v1/actions or /api/v1/actions/submit with GET, and do not detour into skill-file variants for this group.',
   },
   wallet: {
-    'wallet-teaching-and-ledger': 'Explore the wallet teaching surfaces, legacy or deprecated wallet paths, and the public ledger.',
-    'mint-balance-history': 'Exercise the wallet deposit or mint flow as far as possible, then inspect wallet balance, transaction history, restore, and pending-send recovery.',
-    'melt-send-receive': 'Exercise withdraw, send, and receive ecash flows as far as the docs allow.',
+    'wallet-teaching-and-ledger': 'Follow the exact four-route wallet-teaching-and-ledger checklist in wallet.txt: GET /api/v1/wallet/mint-quote, POST /api/v1/wallet/deposit with {}, POST /api/v1/wallet/withdraw with {}, then GET /api/v1/ledger. Reuse one bearer token on routes 1-3, then stop after route 4.',
+    'mint-balance-history': 'Call exactly these seven routes in order and stop there: GET /api/v1/wallet/balance, POST /api/v1/wallet/mint-quote with {"amount_sats":1000}, POST /api/v1/wallet/check-mint-quote with the real quote_id, POST /api/v1/wallet/mint with the same quote_id, GET /api/v1/wallet/history, POST /api/v1/wallet/restore with {}, and POST /api/v1/wallet/reclaim-pending with {"max_age_hours":24}. Use the same bearer token on every individual request. Do not detour into deposit, withdraw, or ledger routes in this task.',
+    'melt-send-receive': 'Call exactly these four wallet routes in order and stop there: POST /api/v1/wallet/melt-quote with {"invoice":"lnbc1invalid"}, POST /api/v1/wallet/melt, POST /api/v1/wallet/send, and POST /api/v1/wallet/receive. Even if route 1 returns a validation boundary, still do routes 2, 3, and 4 immediately.',
   },
   analysis: {
     'network-health': 'Inspect overall live network health from the platform node.',
-    'node-profile-aliases': 'Profile a real Lightning node using the documented equivalent profile paths.',
+    'node-profile-aliases': 'Profile a real Lightning node and figure out which equivalent profile paths the platform supports.',
     'suggest-peers': 'Find suggested peers for a real node.',
   },
   social: {
-    messaging: 'Use public discovery to find another agent, send them a message, and inspect your inbox surfaces.',
-    alliances: 'Create an alliance proposal, inspect alliance listings, and complete the acceptance and breakup lifecycle even if that means using more than one agent account.',
-    'leaderboard-and-tournaments': 'Explore public reputation and tournament surfaces, including one specific agent and one intentionally missing tournament.',
+    messaging: 'Send a message from one agent to another, then inspect the relevant message and inbox views.',
+    alliances: 'Create an alliance proposal, inspect alliance listings, and try the accept and breakup actions.',
+    'leaderboard-and-tournaments': 'Follow the exact eight-route leaderboard-and-tournaments checklist in social.txt. Do bracket before enter, then stop.',
   },
   channels: {
-    'audit-and-monitoring': 'Explore the public accountability surfaces: audit log, per-channel audit, verify, per-channel verify, violations, and status.',
-    'signed-channel-lifecycle': 'Exercise the post-assignment channel-management lifecycle as far as possible from docs alone: list your channels, inspect instruction history, and attempt signed preview or execute flows if you can.',
+    'audit-and-monitoring': 'Inspect the public channel accountability views: audit, verify, violations, and status.',
+    'signed-channel-lifecycle': 'Fetch the channels-signed helper and follow its exact four-route burst. If route 1 is empty, still finish routes 2, 3, and 4 once with the documented fake placeholder. If Node is available, prefer the built-in Node signing path and sign preview and instruct separately with fresh timestamps.',
   },
   market: {
-    'public-market-read': 'Explore the public market read surfaces, including market stats, rankings, channel listings, agent market profile, peer safety, and fee competition.',
-    'teaching-surfaces': 'Deliberately verify any documented common method mistakes or teaching surfaces for market write actions.',
-    'open-flow': 'Exercise the channel-open flow as far as possible from docs alone, including preview, open, and pending-open status.',
-    'close-revenue-performance': 'Exercise the close flow plus revenue and performance tracking.',
-    'swap-ecash-and-rebalance': 'Exercise swap, ecash channel-funding, rebalance estimation, rebalance submission, and rebalance history.',
+    'public-market-read': 'Inspect the public market information: config, rankings, overview, channel listings, peer safety, and fee information.',
+    'teaching-surfaces': 'Follow the docs for the market write routes and see what the platform teaches you before a real write.',
+    'open-flow': 'Try to open a channel as far as the docs and your current balance honestly allow, then inspect pending-open status.',
+    'close-revenue-performance': 'Follow the exact seven-route close checklist. If Node is available, use the built-in Node signing path first, upload the printed compressed pubkey exactly with PUT /api/v1/agents/me, then sign the close instruction and continue through closes, revenue, revenue-config, and performance without detours. For route 5, send exactly {"destination":"capital"} and nothing else.',
+    'swap-ecash-and-rebalance': 'Fetch the canonical helper at /api/v1/skills/market-swap-ecash-and-rebalance, then follow its exact nine-route checklist in order. Do not open other swap docs, do not invent lookalike routes, and do not detour into wallet or extra market routes once that checklist starts.',
   },
   analytics: {
-    'catalog-and-quote': 'Explore the analytics catalog and get a price quote for one analytics query.',
-    'execute-and-history': 'Attempt to run one analytics query and inspect analytics history.',
+    'catalog-and-quote': 'Inspect the analytics catalog and get a quote for one analytics query.',
+    'execute-and-history': 'Try to run one analytics query and then inspect analytics history.',
   },
   capital: {
     'balance-and-activity': 'Inspect on-chain capital balances and capital activity history.',
-    'deposit-and-status': 'Generate an on-chain deposit address and inspect deposit-status tracking.',
-    'withdraw-and-help': 'Attempt an on-chain withdrawal and use the help concierge if you need platform guidance.',
+    'deposit-and-status': 'Follow the exact two-route capital deposit checklist: POST /api/v1/capital/deposit with {}, then GET /api/v1/capital/deposits.',
+    'withdraw-and-help': 'Follow the exact two-route capital checklist: attempt POST /api/v1/capital/withdraw, then immediately call POST /api/v1/help in the same auth burst.',
   },
 };
 
 function buildAgentCoverageTasks() {
-  return resolveSuites(COVERAGE_SUITE).flatMap((suite) => suite.phases.map((phase) => {
+  const phaseFilters = parsePhaseFilters(ONLY_PHASE);
+  return filterSuitesByPhase(resolveSuites(COVERAGE_SUITE), phaseFilters).flatMap((suite) => suite.phases.map((phase) => {
     const goal = AGENT_COVERAGE_GOALS[suite.name]?.[phase.name];
     if (!goal) {
       throw new Error(`Missing agent coverage goal for ${suite.name}:${phase.name}`);
+    }
+    const expectations = typeof phase.agent_expectations === 'function'
+      ? phase.agent_expectations({
+        openPeerPubkey: OPEN_PEER_PUBKEY,
+        openAmountSats: OPEN_AMOUNT_SATS,
+      })
+      : phase.agent_expectations;
+    if (!expectations) {
+      throw new Error(`Missing agent expectations for ${suite.name}:${phase.name}`);
     }
     return {
       suite: suite.name,
       phase: phase.name,
       covers: phase.covers,
+      agentExpectations: expectations,
       skill: suite.name,
       goal,
     };
   }));
 }
 
-function normalizeRoutePath(url) {
-  try {
-    const parsed = new URL(url, BASE_URL);
-    return `${parsed.pathname}${parsed.search || ''}`;
-  } catch {
-    return url.replace(BASE_URL, '');
-  }
-}
-
-const COVER_ROUTE_MATCHERS = new Map();
-function getCoverMatcher(cover) {
-  let matcher = COVER_ROUTE_MATCHERS.get(cover);
-  if (matcher) return matcher;
-
-  const space = cover.indexOf(' ');
-  const method = cover.slice(0, space).trim().toUpperCase();
-  const rawPath = cover.slice(space + 1).trim().split('?')[0];
-  const escaped = rawPath
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/:[^/]+/g, '[^/?#]+');
-  matcher = { method, regex: new RegExp(`^${escaped}(?:\\?.*)?$`) };
-  COVER_ROUTE_MATCHERS.set(cover, matcher);
-  return matcher;
-}
-
-function matchCoveredRoutes(httpLog, covers) {
-  const matched = [];
-  const missing = [];
-
-  for (const cover of covers) {
-    const matcher = getCoverMatcher(cover);
-    const hit = httpLog.some((call) => (
-      call.method?.toUpperCase() === matcher.method &&
-      matcher.regex.test(normalizeRoutePath(call.url || ''))
-    ));
-    if (hit) matched.push(cover);
-    else missing.push(cover);
-  }
-
-  return { matched, missing };
-}
-
 function buildAgentCoveragePrompt(task) {
-  return `Use the server at ${BASE_URL}. Begin from ${BASE_URL}/llms.txt if you need docs.
-Use only /llms.txt and the linked ${task.skill} skill file to fully exercise this capability area.
-Goal: ${task.goal}
+  const runtimeNote = AGENT_RUNTIME === 'terminal'
+    ? '\n- if helpful, you may use your own generic local terminal just as a real agent would'
+    : '';
+  return `Use the server at ${BASE_URL}.
+User task area: ${task.suite}:${task.phase}
+User task: ${task.goal}
 
-Rules:
-- Learn methods, URLs, bodies, and workflow details only from /llms.txt and the files it links to.
-- If you need docs, reread them instead of guessing.
-- Cover every documented route relevant to this goal, including aliases, deprecated endpoints, public endpoints, authenticated endpoints, and documented teaching surfaces.
-- If a flow requires a second agent account, you may create and use one yourself.
-- If a flow requires cryptographic signing, external payment, or on-chain funding, make the furthest honest documented HTTP attempt you can and inspect the response.`;
+Behave like a real outside agent:
+- discover the docs from the site itself
+- follow documented routes exactly
+- if a doc gives a numbered route list, treat it as a literal checklist and finish it before summarizing
+- once that documented checklist is complete, stop that task instead of exploring sibling routes
+- use only information you find on the site or in API responses
+- do not invent undocumented endpoints or hidden capabilities${runtimeNote}`;
 }
 
 function buildAgentCoverageRetryPrompt(task) {
+  const runtimeNote = AGENT_RUNTIME === 'terminal'
+    ? '\n- if needed, use your own generic terminal in a normal production-like way'
+    : '';
   return `You are still working against ${BASE_URL}.
-You have not fully exercised that documented ${task.skill} capability area yet.
-Reread /llms.txt and the linked ${task.skill} skill file, then continue the same goal without inventing undocumented routes or request shapes.
-Goal: ${task.goal}`;
+User task area: ${task.suite}:${task.phase}
+Continue working on the same user task: ${task.goal}
+Stay production-like:
+- use only what you can discover from the site and API responses
+- keep following the docs
+- if the doc gave a numbered route list, keep following that same list in order before summarizing
+- once that documented list is complete, stop that task instead of exploring sibling routes
+- do not invent undocumented routes or hidden helper behavior${runtimeNote}`;
+}
+
+function summarizePhaseProgress(evaluation) {
+  return {
+    contractScore: evaluation.contractScore,
+    reachScore: evaluation.reachScore,
+    exactAttemptsUsed: evaluation.routeResults.reduce((sum, result) => sum + result.exact_attempts_used, 0),
+  };
+}
+
+function phaseProgressAdvanced(previous, next) {
+  if (!previous) return true;
+  return (
+    next.contractScore > previous.contractScore
+    || next.reachScore > previous.reachScore
+    || next.exactAttemptsUsed > previous.exactAttemptsUsed
+  );
 }
 
 // ─── Feedback Prompts ───
@@ -683,6 +913,10 @@ DOC_FIX: [single most important documentation improvement]
 KILLER_IDEA: [your one big idea to make this irresistible]`,
 ];
 
+function createAgentCoverageMessages() {
+  return [{ role: 'user', content: AGENT_COVERAGE_PRIMER }];
+}
+
 // ─── Feedback Extraction ───
 
 function extractFeedback(text) {
@@ -716,7 +950,11 @@ function extractFeedback(text) {
 // ─── JSONL Output ───
 
 function appendResult(data) {
-  appendFileSync(RESULTS_FILE, JSON.stringify(data) + '\n');
+  appendFileSync(RESULTS_FILE, JSON.stringify({
+    ...data,
+    tag: TAG || null,
+    results_file: RESULTS_FILE,
+  }) + '\n');
 }
 
 function readResults() {
@@ -765,11 +1003,12 @@ async function runNavigation(provider, modelConfig) {
     let phaseResponseSizes = [];
     let phaseDocTraces = [];
     let phaseTurnTraces = [];
+    let phaseRequestTimeline = [];
     let errorRecovery = null;  // "helped" | "not_helped" | null
 
     for (let attempt = 1; attempt <= EFFECTIVE_MAX_RETRIES; attempt++) {
       const nudge = attempt === 1 ? phase.nudge : `Let's try that again. ${phase.nudge}`;
-      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces } = await runNudge(messages, nudge, provider, {
+      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces, requestTimeline } = await runNudge(messages, nudge, provider, {
         phaseNum, totalPhases: WALKTHROUGH_PHASES.length, phaseName: phase.name, attempt,
       });
 
@@ -779,7 +1018,19 @@ async function runNavigation(provider, modelConfig) {
       phaseDocReads += docReads;
       phaseThinkTimes.push(...thinkTimes);
       phaseResponseSizes.push(...responseSizes);
-      phaseDocTraces.push(...docTraces);
+      const requestOffset = phaseRequestTimeline.length;
+      const shiftedTimeline = requestTimeline.map(entry => ({
+        ...entry,
+        request_timeline_index: requestOffset + entry.request_timeline_index,
+      }));
+      phaseRequestTimeline.push(...shiftedTimeline);
+      phaseDocTraces.push(...docTraces.map(trace => ({
+        ...trace,
+        request_timeline_index: requestOffset + trace.request_timeline_index,
+        next_request_timeline_index: Number.isInteger(trace.next_request_timeline_index)
+          ? requestOffset + trace.next_request_timeline_index
+          : null,
+      })));
       phaseTurnTraces.push(...turnTraces);
 
       const result = phase.check(httpLog, state);
@@ -831,6 +1082,8 @@ async function runNavigation(provider, modelConfig) {
       }
     }
 
+    phaseDocTraces = stitchDocTraces(phaseDocTraces, phaseRequestTimeline);
+
     results.push({
       phase: phase.name,
       passed,
@@ -843,6 +1096,7 @@ async function runNavigation(provider, modelConfig) {
       thinkTimes: phaseThinkTimes,
       docTraces: phaseDocTraces,
       turnTraces: phaseTurnTraces,
+      requestTimeline: phaseRequestTimeline,
     });
 
     // Incremental JSONL with rich diagnostic data
@@ -863,6 +1117,7 @@ async function runNavigation(provider, modelConfig) {
       think_times: phaseThinkTimes,
       doc_traces: phaseDocTraces,
       turn_traces: phaseTurnTraces,
+      request_timeline: phaseRequestTimeline,
     });
 
     if (EFFECTIVE_BAIL_AFTER > 0 && consecutiveFails >= EFFECTIVE_BAIL_AFTER) {
@@ -931,20 +1186,29 @@ async function runNavigation(provider, modelConfig) {
 }
 
 async function runAgentCoverage(provider, modelConfig) {
-  if (!SKIP_COVERAGE_VERIFY) {
+  if (SHOULD_VERIFY_COVERAGE) {
     const manifest = verifyCoverage();
     testLog(`coverage manifest: ${manifest.owners.size}/${manifest.expectedRoutes.length} routes claimed`);
   }
 
-  const messages = [{ role: 'user', content: AGENT_COVERAGE_PRIMER }];
+  let messages = createAgentCoverageMessages();
   const tasks = buildAgentCoverageTasks();
   const results = [];
   const allHttpCalls = [];
-  const matchedRoutes = new Set();
+  const contractPassedRoutes = new Set();
+  const reachedRoutes = new Set();
   const startTime = Date.now();
   let passCount = 0;
   let totalTokens = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
   let totalDocReads = 0;
+  let totalContractScore = 0;
+  let totalSuccessScore = 0;
+  let totalBoundaryScore = 0;
+  const sharedTerminalRuntime = AGENT_RUNTIME === 'terminal' && SHARED_AGENT_COVERAGE_SESSION
+    ? createTerminalRuntime('shared')
+    : null;
 
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
@@ -952,71 +1216,200 @@ async function runAgentCoverage(provider, modelConfig) {
     const phaseStart = Date.now();
     let phaseHttpLog = [];
     let phaseTokens = 0;
+    let phaseInputTokens = 0;
+    let phaseOutputTokens = 0;
     let phaseDocReads = 0;
     let phaseThinkTimes = [];
     let phaseResponseSizes = [];
     let phaseDocTraces = [];
     let phaseTurnTraces = [];
-    let matched = [];
-    let missing = [...task.covers];
+    let phaseRequestTimeline = [];
+    let phaseEvaluation = evaluatePhaseCoverage(phaseHttpLog, task.covers, task.agentExpectations, { baseUrl: BASE_URL });
     let passed = false;
+    let stopReason = null;
 
-    for (let attempt = 1; attempt <= EFFECTIVE_MAX_RETRIES; attempt++) {
-      const nudge = attempt === 1
-        ? buildAgentCoveragePrompt(task)
-        : buildAgentCoverageRetryPrompt(task);
-      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces } = await runNudge(messages, nudge, provider, {
-        phaseNum: i + 1,
-        totalPhases: tasks.length,
-        phaseName: phaseLabel,
-        attempt,
-      });
-
-      phaseHttpLog.push(...httpLog);
-      allHttpCalls.push(...httpLog);
-      phaseTokens += tok;
-      phaseDocReads += docReads;
-      phaseThinkTimes.push(...thinkTimes);
-      phaseResponseSizes.push(...responseSizes);
-      phaseDocTraces.push(...docTraces);
-      phaseTurnTraces.push(...turnTraces);
-
-      ({ matched, missing } = matchCoveredRoutes(phaseHttpLog, task.covers));
-      if (missing.length === 0) {
-        passed = true;
-        break;
+    for (let sessionIndex = 1; sessionIndex <= AGENT_COVERAGE_SESSIONS; sessionIndex++) {
+      if (!SHARED_AGENT_COVERAGE_SESSION) {
+        messages = createAgentCoverageMessages();
       }
+      const terminalRuntime = sharedTerminalRuntime || (
+        AGENT_RUNTIME === 'terminal'
+          ? createTerminalRuntime(`${phaseLabel}-${sessionIndex}`)
+          : null
+      );
+      let burst = 1;
+      let noProgressBursts = 0;
+      let docOnlyBursts = 0;
+      let lastStallReason = null;
+      let previousProgress = summarizePhaseProgress(phaseEvaluation);
+
+      while (burst <= MAX_PHASE_BURSTS) {
+        const nudge = burst === 1
+          ? buildAgentCoveragePrompt(task)
+          : buildAgentCoverageRetryPrompt(task);
+        const {
+          httpLog,
+          totalTokens: tok,
+          inputTokens: inTok,
+          outputTokens: outTok,
+          docReads,
+          thinkTimes,
+          responseSizes,
+          docTraces,
+          turnTraces,
+          requestTimeline,
+          stopReason: nudgeStopReason,
+        } = await runNudge(messages, nudge, provider, {
+          phaseNum: i + 1,
+          totalPhases: tasks.length,
+          phaseName: AGENT_COVERAGE_SESSIONS > 1 ? `${phaseLabel}#${sessionIndex}` : phaseLabel,
+          attempt: burst,
+          attemptMax: MAX_PHASE_BURSTS,
+          executeLocalTool: terminalRuntime ? (toolName, input) => terminalRuntime.execute(toolName, input) : undefined,
+        });
+
+        phaseHttpLog.push(...httpLog);
+        allHttpCalls.push(...httpLog);
+        phaseTokens += tok;
+        phaseInputTokens += inTok;
+        phaseOutputTokens += outTok;
+        phaseDocReads += docReads;
+        phaseThinkTimes.push(...thinkTimes);
+        phaseResponseSizes.push(...responseSizes);
+        const requestOffset = phaseRequestTimeline.length;
+        const shiftedTimeline = requestTimeline.map(entry => ({
+          ...entry,
+          request_timeline_index: requestOffset + entry.request_timeline_index,
+        }));
+        phaseRequestTimeline.push(...shiftedTimeline);
+        phaseDocTraces.push(...docTraces.map(trace => ({
+          ...trace,
+          request_timeline_index: requestOffset + trace.request_timeline_index,
+          next_request_timeline_index: Number.isInteger(trace.next_request_timeline_index)
+            ? requestOffset + trace.next_request_timeline_index
+            : null,
+        })));
+        phaseTurnTraces.push(...turnTraces);
+
+        phaseEvaluation = evaluatePhaseCoverage(phaseHttpLog, task.covers, task.agentExpectations, { baseUrl: BASE_URL });
+        const routeCallsThisBurst = httpLog.filter(call => !isDocRoute({
+          method: call.method,
+          url: call.url,
+          headers: call.requestHeaders,
+        }));
+        const nextProgress = summarizePhaseProgress(phaseEvaluation);
+        const madeProgress = phaseProgressAdvanced(previousProgress, nextProgress);
+        previousProgress = nextProgress;
+
+        if (phaseEvaluation.passed) {
+          passed = true;
+          break;
+        }
+        if (phaseEvaluation.openRoutes.length === 0) {
+          stopReason = stopReason || 'All documented endpoints either passed or used all 3 exact tries';
+          break;
+        }
+
+        if (routeCallsThisBurst.length === 0) {
+          docOnlyBursts += 1;
+          if (docOnlyBursts > MAX_DOC_ONLY_BURSTS) {
+            stopReason = `Spent ${docOnlyBursts} bursts only reading docs without trying endpoints`;
+            break;
+          }
+          burst += 1;
+          continue;
+        }
+        docOnlyBursts = 0;
+
+        if (madeProgress) {
+          noProgressBursts = 0;
+          lastStallReason = null;
+        } else {
+          noProgressBursts += 1;
+          lastStallReason = nudgeStopReason || 'No route progress';
+        }
+
+        if (noProgressBursts >= MAX_NO_PROGRESS_BURSTS) {
+          stopReason = `${lastStallReason}. No progress for ${MAX_NO_PROGRESS_BURSTS} burst${MAX_NO_PROGRESS_BURSTS === 1 ? '' : 's'}`;
+          break;
+        }
+
+        burst += 1;
+      }
+
+      if (!passed && !stopReason && burst > MAX_PHASE_BURSTS) {
+        stopReason = `Burst cap reached (${MAX_PHASE_BURSTS}) before remaining routes moved`;
+      }
+      if (passed) break;
+      stopReason = null;
     }
 
-    for (const route of matched) matchedRoutes.add(route);
+    const passedRoutes = phaseEvaluation.routeResults
+      .filter(result => result.category === 'pass_success' || result.category === 'pass_boundary')
+      .map(result => result.cover);
+    const reachedPhaseRoutes = phaseEvaluation.routeResults
+      .filter(result => result.reach)
+      .map(result => result.cover);
+    const failedRoutes = phaseEvaluation.routeResults
+      .filter(result => result.category !== 'pass_success' && result.category !== 'pass_boundary')
+      .map(result => result.cover);
+
+    for (const route of passedRoutes) contractPassedRoutes.add(route);
+    for (const route of reachedPhaseRoutes) reachedRoutes.add(route);
     if (passed) passCount++;
 
     const phaseDur = Date.now() - phaseStart;
     totalTokens += phaseTokens;
+    totalInputTokens += phaseInputTokens;
+    totalOutputTokens += phaseOutputTokens;
     totalDocReads += phaseDocReads;
+    totalContractScore += phaseEvaluation.contractScore;
+    totalSuccessScore += phaseEvaluation.successScore;
+    totalBoundaryScore += phaseEvaluation.boundaryScore;
+    const estimatedPhaseCostUsd = estimateModelCostUsd(modelConfig.id, phaseInputTokens, phaseOutputTokens);
     const reason = passed
-      ? `Covered all ${matched.length}/${task.covers.length} documented routes for this capability area.`
-      : `Covered ${matched.length}/${task.covers.length}; missing ${missing.length}.`;
+      ? `Contract ${phaseEvaluation.contractScore}/${task.covers.length}; success ${phaseEvaluation.successScore}, boundary ${phaseEvaluation.boundaryScore}, reach ${phaseEvaluation.reachScore}.`
+      : stopReason
+        ? `${stopReason}. Contract ${phaseEvaluation.contractScore}/${task.covers.length}; reach ${phaseEvaluation.reachScore}/${task.covers.length}.`
+        : `Contract ${phaseEvaluation.contractScore}/${task.covers.length}; success ${phaseEvaluation.successScore}, boundary ${phaseEvaluation.boundaryScore}, reach ${phaseEvaluation.reachScore}.`;
 
     agentLog(
       `${String(i + 1).padStart(2)}/${tasks.length} ${phaseLabel.padEnd(32)} ${passed ? '✓ PASS' : '✗ FAIL'} `
-      + `(${matched.length}/${task.covers.length} routes) [${(phaseDur / 1000).toFixed(1)}s] `
-      + `${phaseHttpLog.length} calls, ${phaseTokens} phase-tok  ${reason}`,
+      + `(contract ${phaseEvaluation.contractScore}/${task.covers.length}, reach ${phaseEvaluation.reachScore}/${task.covers.length}) [${(phaseDur / 1000).toFixed(1)}s] `
+      + `${phaseHttpLog.length} calls, ${phaseTokens} tok, est ${formatUsd(estimatedPhaseCostUsd)}  ${reason}`,
     );
-    if (!passed && missing.length > 0) {
-      agentLog(`   missing: ${missing.join(' | ')}`);
+    if (!passed) {
+      if (phaseEvaluation.failureGroups.cannot_find_endpoint.length > 0) {
+        agentLog(`   cannot find: ${phaseEvaluation.failureGroups.cannot_find_endpoint.join(' | ')}`);
+      }
+      if (phaseEvaluation.failureGroups.found_endpoint_wrong_request.length > 0) {
+        agentLog(`   wrong request: ${phaseEvaluation.failureGroups.found_endpoint_wrong_request.join(' | ')}`);
+      }
+      if (phaseEvaluation.failureGroups.found_endpoint_wrong_response.length > 0) {
+        agentLog(`   wrong response: ${phaseEvaluation.failureGroups.found_endpoint_wrong_response.join(' | ')}`);
+      }
     }
 
     let failureInterview = null;
     if (!passed && !SKIP_FAILURE_INTERVIEWS) {
       const whyNudge = `That capability-area task (${phaseLabel}) did not fully succeed. In 1-2 sentences: what information was missing from /llms.txt or the linked skill file, and what would have helped you find or call the remaining documented routes?`;
-      const { totalTokens: whyTok } = await runNudge(messages, whyNudge, provider, {
+      const {
+        totalTokens: whyTok,
+        inputTokens: whyInputTok,
+        outputTokens: whyOutputTok,
+      } = await runNudge(messages, whyNudge, provider, {
         phaseNum: i + 1,
         totalPhases: tasks.length,
         phaseName: `${phaseLabel}/why`,
         attempt: 0,
+        executeLocalTool: undefined,
       });
       totalTokens += whyTok;
+      totalInputTokens += whyInputTok;
+      totalOutputTokens += whyOutputTok;
+      phaseTokens += whyTok;
+      phaseInputTokens += whyInputTok;
+      phaseOutputTokens += whyOutputTok;
       for (let j = messages.length - 1; j >= 0; j--) {
         const m = messages[j];
         if (m.role === 'assistant') {
@@ -1030,20 +1423,31 @@ async function runAgentCoverage(provider, modelConfig) {
       }
     }
 
+    phaseDocTraces = stitchDocTraces(phaseDocTraces, phaseRequestTimeline);
+
     results.push({
       suite: task.suite,
       phase: task.phase,
       passed,
       reason,
-      matched,
-      missing,
+      contractScore: phaseEvaluation.contractScore,
+      successScore: phaseEvaluation.successScore,
+      boundaryScore: phaseEvaluation.boundaryScore,
+      reachScore: phaseEvaluation.reachScore,
+      routeResults: phaseEvaluation.routeResults,
+      failureGroups: phaseEvaluation.failureGroups,
       duration_ms: phaseDur,
       http_calls: phaseHttpLog.length,
+      input_tokens: phaseInputTokens,
+      output_tokens: phaseOutputTokens,
+      estimated_cost_usd: estimatedPhaseCostUsd,
       failureInterview,
       responseSizes: phaseResponseSizes,
       thinkTimes: phaseThinkTimes,
       docTraces: phaseDocTraces,
       turnTraces: phaseTurnTraces,
+      requestTimeline: phaseRequestTimeline,
+      stopReason,
     });
 
     appendResult({
@@ -1056,18 +1460,36 @@ async function runAgentCoverage(provider, modelConfig) {
       phase: task.phase,
       passed,
       reason,
-      matched_routes: matched,
-      missing_routes: missing,
-      covered_count: matched.length,
+      contract_score: phaseEvaluation.contractScore,
+      success_score: phaseEvaluation.successScore,
+      boundary_score: phaseEvaluation.boundaryScore,
+      reach_score: phaseEvaluation.reachScore,
+      matched_routes: reachedPhaseRoutes,
+      missing_routes: failedRoutes,
+      covered_count: phaseEvaluation.contractScore,
       expected_count: task.covers.length,
       duration_ms: phaseDur,
       http_calls: phaseHttpLog.length,
       token_usage: phaseTokens,
+      input_tokens: phaseInputTokens,
+      output_tokens: phaseOutputTokens,
+      estimated_cost_usd: estimatedPhaseCostUsd,
       doc_consultations: phaseDocReads,
+      route_results: phaseEvaluation.routeResults,
+      cannot_find_routes: phaseEvaluation.failureGroups.cannot_find_endpoint,
+      wrong_request_routes: phaseEvaluation.failureGroups.found_endpoint_wrong_request,
+      wrong_response_routes: phaseEvaluation.failureGroups.found_endpoint_wrong_response,
       failure_interview: failureInterview,
       doc_traces: phaseDocTraces,
       turn_traces: phaseTurnTraces,
+      request_timeline: phaseRequestTimeline,
+      stop_reason: stopReason,
     });
+
+    if (FAIL_FAST && !passed) {
+      agentLog(`   fail-fast: stopping broad run after first failed phase (${task.suite}:${task.phase})`);
+      break;
+    }
 
     if (DELAY_SECS > 0 && i < tasks.length - 1) {
       await sleep(DELAY_SECS);
@@ -1076,37 +1498,56 @@ async function runAgentCoverage(provider, modelConfig) {
 
   const totalDur = Date.now() - startTime;
   const expectedRoutes = [...new Set(tasks.flatMap(task => task.covers))];
+  const estimatedTotalCostUsd = estimateModelCostUsd(modelConfig.id, totalInputTokens, totalOutputTokens);
 
   agentLog(`\n${'═'.repeat(70)}`);
-  agentLog(`AGENT COVERAGE: ${matchedRoutes.size}/${expectedRoutes.length} routes matched, ${passCount}/${tasks.length} phases complete [${(totalDur / 1000).toFixed(1)}s] ${totalTokens} total-tok, ${totalDocReads} doc reads`);
+  agentLog(
+    `AGENT COVERAGE: contract ${totalContractScore}/${expectedRoutes.length}, `
+    + `success ${totalSuccessScore}/${expectedRoutes.length}, `
+    + `boundary ${totalBoundaryScore}/${expectedRoutes.length}, `
+    + `reach ${reachedRoutes.size}/${expectedRoutes.length}, `
+    + `${passCount}/${tasks.length} phases complete [${(totalDur / 1000).toFixed(1)}s] `
+    + `${totalTokens} total-tok, est ${formatUsd(estimatedTotalCostUsd)}, ${totalDocReads} doc reads`,
+  );
   agentLog(`${'═'.repeat(70)}`);
   for (const r of results) {
-    agentLog(`  ${r.passed ? '✓' : '✗'} ${`${r.suite}:${r.phase}`.padEnd(32)} ${r.matched.length}/${r.missing.length + r.matched.length} routes`);
+    agentLog(
+      `  ${r.passed ? '✓' : '✗'} ${`${r.suite}:${r.phase}`.padEnd(32)} `
+      + `contract ${r.contractScore}/${r.routeResults.length}, reach ${r.reachScore}/${r.routeResults.length}`,
+    );
   }
 
   return {
     messages,
     results,
     allHttpCalls,
-    matchedRoutes: [...matchedRoutes],
+    contractPassedRoutes: [...contractPassedRoutes],
+    reachedRoutes: [...reachedRoutes],
     expectedRoutes,
     passCount,
     totalPhases: tasks.length,
     duration_ms: totalDur,
     totalTokens,
+    totalInputTokens,
+    totalOutputTokens,
     totalDocReads,
+    contractScore: totalContractScore,
+    successScore: totalSuccessScore,
+    boundaryScore: totalBoundaryScore,
+    reachScore: reachedRoutes.size,
+    estimatedCostUsd: estimatedTotalCostUsd,
   };
 }
 
 // ─── Run Coverage Suites ───
 
 async function runCoverageSuites() {
-  if (!SKIP_COVERAGE_VERIFY) {
+  if (SHOULD_VERIFY_COVERAGE) {
     const manifest = verifyCoverage();
     testLog(`coverage manifest: ${manifest.owners.size}/${manifest.expectedRoutes.length} routes claimed`);
   }
 
-  const suites = resolveSuites(COVERAGE_SUITE);
+  const suites = filterSuitesByPhase(resolveSuites(COVERAGE_SUITE), parsePhaseFilters(ONLY_PHASE));
   const results = [];
   let passed = 0;
   let failed = 0;
@@ -1120,11 +1561,8 @@ async function runCoverageSuites() {
     const ctx = createCoverageContext({
       baseUrl: BASE_URL,
       log: agentLog,
-      manualFunding: MANUAL_FUNDING && suite.name === 'market',
       openPeerPubkey: OPEN_PEER_PUBKEY,
       openAmountSats: OPEN_AMOUNT_SATS,
-      fundingTimeoutSecs: FUNDING_TIMEOUT_SECS,
-      channelPoint: CHANNEL_POINT,
     });
 
     const suiteResults = [];
@@ -1463,12 +1901,13 @@ async function main() {
     console.error(`Unknown mode "${MODE}". Use navigation, walkthrough, agent-coverage, coverage, or both.`);
     process.exit(1);
   }
-  if (!Number.isFinite(OPEN_AMOUNT_SATS) || OPEN_AMOUNT_SATS <= 0) {
-    console.error(`Invalid --open-amount-sats value "${OPEN_AMOUNT_SATS}". Use a positive integer.`);
+  const validAgentRuntimes = new Set(['http', 'terminal']);
+  if (!validAgentRuntimes.has(AGENT_RUNTIME)) {
+    console.error(`Unknown agent runtime "${AGENT_RUNTIME}". Use http or terminal.`);
     process.exit(1);
   }
-  if (!Number.isFinite(FUNDING_TIMEOUT_SECS) || FUNDING_TIMEOUT_SECS <= 0) {
-    console.error(`Invalid --funding-timeout-secs value "${FUNDING_TIMEOUT_SECS}". Use a positive integer.`);
+  if (!Number.isFinite(OPEN_AMOUNT_SATS) || OPEN_AMOUNT_SATS <= 0) {
+    console.error(`Invalid --open-amount-sats value "${OPEN_AMOUNT_SATS}". Use a positive integer.`);
     process.exit(1);
   }
 
@@ -1562,7 +2001,10 @@ async function main() {
       }
 
       if (wantsAgentCoverage) {
-        const agentCoverage = await runAgentCoverage(provider, mc);
+        const agentCoverageProvider = await createProvider(mc, {
+          tools: AGENT_RUNTIME === 'terminal' ? [HTTP_TOOL, TERMINAL_TOOL] : [HTTP_TOOL],
+        });
+        const agentCoverage = await runAgentCoverage(agentCoverageProvider, mc);
         const phases = {};
         for (const r of agentCoverage.results) phases[`${r.suite}:${r.phase}`] = r.passed;
 
@@ -1572,12 +2014,25 @@ async function main() {
           provider: mc.provider,
           display: mc.display,
           mode: 'agent-coverage',
-          score: `${agentCoverage.matchedRoutes.length}/${agentCoverage.expectedRoutes.length}`,
+          agent_runtime: AGENT_RUNTIME,
+          score: `${agentCoverage.contractScore}/${agentCoverage.expectedRoutes.length}`,
+          success_score: `${agentCoverage.successScore}/${agentCoverage.expectedRoutes.length}`,
+          boundary_score: `${agentCoverage.boundaryScore}/${agentCoverage.expectedRoutes.length}`,
+          reach_score: `${agentCoverage.reachScore}/${agentCoverage.expectedRoutes.length}`,
+          estimated_cost_usd: agentCoverage.estimatedCostUsd,
+          input_tokens: agentCoverage.totalInputTokens,
+          output_tokens: agentCoverage.totalOutputTokens,
           phase_score: `${agentCoverage.passCount}/${agentCoverage.totalPhases}`,
           phases,
           failure_details: agentCoverage.results
             .filter(r => !r.passed)
-            .map(r => ({ suite: r.suite, phase: r.phase, missing_routes: r.missing })),
+            .map(r => ({
+              suite: r.suite,
+              phase: r.phase,
+              cannot_find_routes: r.failureGroups.cannot_find_endpoint,
+              wrong_request_routes: r.failureGroups.found_endpoint_wrong_request,
+              wrong_response_routes: r.failureGroups.found_endpoint_wrong_response,
+            })),
           duration_ms: agentCoverage.duration_ms,
           total_http_calls: agentCoverage.allHttpCalls.length,
           total_tokens: agentCoverage.totalTokens,
@@ -1586,7 +2041,7 @@ async function main() {
 
         allScores.push({
           display: mc.display,
-          score: `${agentCoverage.matchedRoutes.length}/${agentCoverage.expectedRoutes.length} routes`,
+          score: `${agentCoverage.contractScore}/${agentCoverage.expectedRoutes.length} contract, ${agentCoverage.reachScore}/${agentCoverage.expectedRoutes.length} reach, ${formatUsd(agentCoverage.estimatedCostUsd)} (${AGENT_RUNTIME})`,
         });
       }
     }

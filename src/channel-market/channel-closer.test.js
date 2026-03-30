@@ -11,7 +11,7 @@ import {
   mockNodeManager,
 } from './test-mock-factories.js';
 
-// Ed25519 helpers
+// secp256k1 helpers
 import { generateTestKeypair, signInstruction } from '../channel-accountability/test-crypto-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -193,5 +193,107 @@ describe('ChannelCloser', () => {
 
     assert.equal(result.success, true);
     assert.equal(result.close_type, 'force');
+  });
+
+  it('rolls the ledger back if the LND close call fails', async () => {
+    const capitalLedger = mockCapitalLedger();
+    const closer = makeCloser({
+      capitalLedger,
+      nodeManager: mockNodeManager({
+        listChannels: async () => ({ channels: [{
+          channel_point: CHAN_POINT,
+          local_balance: '400000',
+          remote_balance: '100000',
+          capacity: '500000',
+          active: true,
+          remote_pubkey: '03aaa',
+        }] }),
+        pendingChannels: async () => ({ pending_open_channels: [] }),
+        closeChannel: async () => { throw new Error('boom'); },
+      }),
+    });
+    await closer.load();
+
+    const result = await closer.requestClose(AGENT_ID, makeSignedPayload());
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Channel close failed: boom');
+    assert.deepEqual(
+      capitalLedger.calls.map(call => call.method),
+      ['initiateClose', 'rollbackInitiatedClose'],
+    );
+  });
+
+  it('handles peer-initiated close when assignment capacity is stored as a string', async () => {
+    const capitalLedger = mockCapitalLedger();
+    const closer = makeCloser({
+      capitalLedger,
+      assignments: [{
+        chan_id: '12345',
+        channel_point: CHAN_POINT,
+        agent_id: AGENT_ID,
+        remote_pubkey: '03aaa',
+        capacity: '500000',
+      }],
+      closedChannels: [{
+        channel_point: CHAN_POINT,
+        settled_balance: '400000',
+        closing_tx_hash: 'close123',
+        close_type: 'peer_initiated',
+      }],
+    });
+    await closer.load();
+
+    await closer._detectPeerInitiatedCloses();
+
+    assert.deepEqual(
+      capitalLedger.calls.map(call => call.method),
+      ['initiateClose', 'settleClose'],
+    );
+    assert.equal(capitalLedger.calls[0].originalLocked, 500000);
+    assert.equal(closer.getClosesForAgent(AGENT_ID).length, 1);
+  });
+
+  it('records an untracked peer-initiated close once and stops retry noise', async () => {
+    const capitalLedger = mockCapitalLedger({
+      initiateClose: async () => {
+        throw new Error(`Insufficient locked balance for ${AGENT_ID}: has 0, need 500000`);
+      },
+    });
+    const assignmentRegistry = mockAssignmentRegistry([{
+      chan_id: '12345',
+      channel_point: CHAN_POINT,
+      agent_id: AGENT_ID,
+      remote_pubkey: '03aaa',
+      capacity: '500000',
+    }]);
+    const auditLog = mockAuditLog();
+    const closer = new ChannelCloser({
+      capitalLedger,
+      nodeManager: mockNodeManager({
+        closedChannels: async () => ({ channels: [{
+          channel_point: CHAN_POINT,
+          settled_balance: '400000',
+          closing_tx_hash: 'close123',
+          close_type: 'peer_initiated',
+        }] }),
+      }),
+      dataLayer: mockDataLayer(),
+      auditLog,
+      agentRegistry: mockAgentRegistry({
+        [AGENT_ID]: { id: AGENT_ID, name: 'TestAgent', pubkey: keypair.pubHex },
+      }),
+      assignmentRegistry,
+      mutex: mockMutex(),
+    });
+    await closer.load();
+
+    await closer._detectPeerInitiatedCloses();
+    await closer._detectPeerInitiatedCloses();
+
+    assert.equal(closer.getClosesForAgent(AGENT_ID).length, 1);
+    assert.equal(closer.getClosesForAgent(AGENT_ID)[0].status, 'external_settled');
+    assert.equal(assignmentRegistry.revoked.length, 1);
+    assert.equal(auditLog.entries.filter((e) => e.type === 'channel_closed_by_peer_untracked').length, 1);
   });
 });

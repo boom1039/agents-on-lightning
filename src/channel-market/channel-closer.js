@@ -2,7 +2,7 @@
  * Channel Closer — Validates, initiates, polls, and settles channel closes.
  *
  * Handles the full lifecycle of agent-initiated and peer-initiated channel closes:
- *   1. 8-step fail-fast validation pipeline (Ed25519 signed requests)
+ *   1. 8-step fail-fast validation pipeline (secp256k1-signed requests)
  *   2. Capital ledger initiateClose (locked → pending_close)
  *   3. LND closeChannel call (cooperative or force)
  *   4. Background polling: closedChannels() → settlement detection
@@ -25,6 +25,19 @@ const CHANNEL_CLOSE_CONFIG = {
   maxPendingCloses: 50,
   defaultSatPerVbyte: null,           // null = let LND estimate
 };
+
+function parsePositiveSats(value) {
+  if (Number.isInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function isUntrackedPeerCloseLedgerError(err) {
+  return /Insufficient locked balance/i.test(String(err?.message || ''));
+}
 
 /**
  * Educational hints for validation failures.
@@ -80,9 +93,13 @@ export class ChannelCloser {
     // channel_point → pending close entry
     this._state = {};
     this._pollTimer = null;
+    this._stopping = false;
 
     // Dedup cache (10-minute expiry window)
-    this._dedup = new DedupCache(600_000);
+    this._dedup = new DedupCache(600_000, {
+      dataLayer,
+      path: 'data/channel-market/channel-close-dedup.json',
+    });
 
     this.config = { ...CHANNEL_CLOSE_CONFIG };
   }
@@ -117,17 +134,27 @@ export class ChannelCloser {
     await this._dataLayer.writeJSON(STATE_PATH, this._state);
   }
 
+  _logError(message) {
+    if (!this._stopping) console.error(message);
+  }
+
+  _logWarn(message) {
+    if (!this._stopping) console.warn(message);
+  }
+
   // ---------------------------------------------------------------------------
   // Polling
   // ---------------------------------------------------------------------------
 
   startPolling(intervalMs = this.config.pollIntervalMs) {
     if (this._pollTimer) return;
+    this._stopping = false;
     this._pollTimer = setInterval(() => this._pollCycle(), intervalMs);
     console.log(`[ChannelCloser] Polling every ${intervalMs / 1000}s`);
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -135,11 +162,12 @@ export class ChannelCloser {
   }
 
   async _pollCycle() {
+    if (this._stopping) return;
     try {
       await this._detectSettledCloses();
       await this._detectPeerInitiatedCloses();
     } catch (err) {
-      console.error(`[ChannelCloser] Poll error: ${err.message}`);
+      this._logError(`[ChannelCloser] Poll error: ${err.message}`);
     }
   }
 
@@ -160,7 +188,7 @@ export class ChannelCloser {
     try {
       closedResp = await client.closedChannels();
     } catch (err) {
-      console.error(`[ChannelCloser] closedChannels() failed: ${err.message}`);
+      this._logError(`[ChannelCloser] closedChannels() failed: ${err.message}`);
       return;
     }
 
@@ -184,7 +212,7 @@ export class ChannelCloser {
       try {
         await this._capitalLedger.settleClose(entry.agent_id, settledBalance, closingTxid);
       } catch (err) {
-        console.error(`[ChannelCloser] settleClose failed for ${entry.agent_id}: ${err.message}`);
+        this._logError(`[ChannelCloser] settleClose failed for ${entry.agent_id}: ${err.message}`);
         continue;
       }
 
@@ -194,7 +222,7 @@ export class ChannelCloser {
       } catch (err) {
         // Already revoked or not found — not fatal
         if (err.status !== 404) {
-          console.warn(`[ChannelCloser] revoke warning for ${channelPoint}: ${err.message}`);
+          this._logWarn(`[ChannelCloser] revoke warning for ${channelPoint}: ${err.message}`);
         }
       }
 
@@ -252,7 +280,14 @@ export class ChannelCloser {
 
       const settledBalance = parseInt(ch.settled_balance || '0', 10);
       const closingTxid = ch.closing_tx_hash || 'unknown';
-      const originalLocked = assignment.capacity || 0;
+      const originalLocked = parsePositiveSats(assignment.capacity);
+      if (originalLocked == null) {
+        this._logError(
+          `[ChannelCloser] Peer-initiated close skipped for ${assignment.agent_id}: ` +
+          `invalid assignment capacity ${assignment.capacity}`
+        );
+        continue;
+      }
 
       // Initiate + settle in one step (close already happened)
       try {
@@ -261,7 +296,40 @@ export class ChannelCloser {
         );
         await this._capitalLedger.settleClose(assignment.agent_id, settledBalance, closingTxid);
       } catch (err) {
-        console.error(
+        if (isUntrackedPeerCloseLedgerError(err)) {
+          await this._auditLog.append({
+            type: 'channel_closed_by_peer_untracked',
+            agent_id: assignment.agent_id,
+            channel_point: ch.channel_point,
+            settled_balance_sats: settledBalance,
+            close_type: ch.close_type || 'peer_initiated',
+            closing_txid: closingTxid,
+            note: 'No matching locked capital was present in the ledger.',
+          });
+          try {
+            await this._assignmentRegistry.revoke(ch.channel_point);
+          } catch (revokeErr) {
+            if (revokeErr.status !== 404) {
+              this._logWarn(`[ChannelCloser] revoke warning: ${revokeErr.message}`);
+            }
+          }
+          this._state[ch.channel_point] = {
+            agent_id: assignment.agent_id,
+            channel_point: ch.channel_point,
+            status: 'external_settled',
+            close_type: 'peer_initiated',
+            settled_balance: settledBalance,
+            closing_txid: closingTxid,
+            detected_at: Date.now(),
+            settled_at: Date.now(),
+          };
+          changed = true;
+          this._logWarn(
+            `[ChannelCloser] Recorded external peer close for ${assignment.agent_id} on ${ch.channel_point}; no locked capital was available to settle.`
+          );
+          continue;
+        }
+        this._logError(
           `[ChannelCloser] Peer-initiated close ledger error for ${assignment.agent_id}: ${err.message}`
         );
         continue;
@@ -271,7 +339,7 @@ export class ChannelCloser {
         await this._assignmentRegistry.revoke(ch.channel_point);
       } catch (err) {
         if (err.status !== 404) {
-          console.warn(`[ChannelCloser] revoke warning: ${err.message}`);
+          this._logWarn(`[ChannelCloser] revoke warning: ${err.message}`);
         }
       }
 
@@ -347,7 +415,7 @@ export class ChannelCloser {
     checks_passed.push('channel_ownership');
 
     // Mark instruction used
-    this._dedup.mark(instrHash);
+    await this._dedup.mark(instrHash);
 
     return {
       success: true,
@@ -405,7 +473,7 @@ export class ChannelCloser {
           return {
             success: false,
             error: 'Channel is still pending confirmation — cannot close yet',
-            hint: 'Wait for the channel to be fully confirmed (~3 blocks / ~30 min) before closing.',
+            hint: 'Wait until LND marks the channel active before closing.',
             status: 400,
           };
         }
@@ -456,20 +524,21 @@ export class ChannelCloser {
       await client.closeChannel(channelPoint, force, this.config.defaultSatPerVbyte);
     } catch (err) {
       // Close call failed — but the ledger already moved funds to pending_close.
-      // This is OK: the poller will detect if the close actually happened,
-      // and if not, the entry stays in pending_close for manual resolution.
+      // Roll the ledger all the way back so the channel funds stay locked.
       entry.status = 'close_failed';
       entry.error = err.message;
       await this._persist();
 
-      // Try to undo the ledger change
       try {
-        await this._capitalLedger.settleClose(agentId, localBalance, `failed:${channelPoint}`);
-        // Re-lock the funds
-        // NOTE: There's no re-lock method, so we leave funds in available.
-        // The channel is still open, so the assignment is still valid.
+        await this._capitalLedger.rollbackInitiatedClose(
+          agentId,
+          localBalance,
+          originalLocked,
+          channelPoint,
+          'lnd-close-failed',
+        );
       } catch (ledgerErr) {
-        console.error(`[ChannelCloser] Failed to undo ledger for ${channelPoint}: ${ledgerErr.message}`);
+        this._logError(`[ChannelCloser] Failed to roll back ledger for ${channelPoint}: ${ledgerErr.message}`);
       }
 
       return {

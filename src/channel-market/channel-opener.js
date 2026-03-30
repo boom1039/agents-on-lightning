@@ -2,7 +2,7 @@
  * Channel Opener — Validates, locks, opens, polls, and assigns Lightning channels.
  *
  * Handles the full lifecycle of agent-initiated channel opens:
- *   1. 12-step fail-fast validation pipeline (Ed25519 signed requests)
+ *   1. 12-step fail-fast validation pipeline (secp256k1-signed requests)
  *   2. Capital lock via CapitalLedger
  *   3. Peer connection + LND openChannel call
  *   4. Background polling: pending_open → active (auto-assign)
@@ -14,6 +14,7 @@
 
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
+import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
 
@@ -22,11 +23,65 @@ const CHANNEL_OPEN_CONFIG = {
   maxChannelSizeSats: 500_000_000,     // 5 BTC — wumbo channels enabled
   maxTotalChannels: Infinity,
   maxPerAgent: Infinity,
-  requiredConfirmations: 3,
   pendingOpenTimeoutBlocks: 2016,      // ~2 weeks
   connectPeerTimeoutMs: 15_000,
   defaultSatPerVbyte: null,            // null = let LND estimate
 };
+
+const DEFAULT_PEER_FORCE_CLOSE_LIMIT = 0;
+const DEFAULT_REQUIRE_PEER_ALLOWLIST = true;
+const STARTUP_POLICY_LIMITS = {
+  minBaseFeeMsat: 0,
+  maxBaseFeeMsat: 10_000,
+  minFeeRatePpm: 0,
+  maxFeeRatePpm: 2_000,
+  minTimeLockDelta: 1,
+  maxTimeLockDelta: 2_016,
+};
+
+function readOptionalInteger(value) {
+  return Number.isInteger(value) ? value : null;
+}
+
+function buildStartupPolicy(params = {}) {
+  const startupPolicy = {};
+  if (Number.isInteger(params.base_fee_msat)) startupPolicy.base_fee_msat = params.base_fee_msat;
+  if (Number.isInteger(params.fee_rate_ppm)) startupPolicy.fee_rate_ppm = params.fee_rate_ppm;
+  if (Number.isInteger(params.min_htlc_msat)) startupPolicy.min_htlc_msat = params.min_htlc_msat;
+  if (Number.isInteger(params.max_htlc_msat)) startupPolicy.max_htlc_msat = params.max_htlc_msat;
+  if (Number.isInteger(params.time_lock_delta)) startupPolicy.time_lock_delta = params.time_lock_delta;
+  return Object.keys(startupPolicy).length > 0 ? startupPolicy : null;
+}
+
+function startupPolicyNeedsActivationStep(startupPolicy) {
+  if (!startupPolicy) return false;
+  return startupPolicy.time_lock_delta !== undefined || startupPolicy.max_htlc_msat !== undefined;
+}
+
+function parsePeerAllowlist() {
+  const raw = process.env.CHANNEL_OPEN_PEER_ALLOWLIST;
+  if (!raw || !raw.trim()) return null;
+  const peers = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry) => /^[0-9a-f]{66}$/i.test(entry));
+  return peers.length > 0 ? new Set(peers) : null;
+}
+
+function getPeerForceCloseLimit() {
+  const parsed = Number.parseInt(process.env.CHANNEL_OPEN_PEER_FORCE_CLOSE_LIMIT || '', 10);
+  if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+  return DEFAULT_PEER_FORCE_CLOSE_LIMIT;
+}
+
+function requirePeerAllowlist() {
+  const raw = (process.env.CHANNEL_OPEN_REQUIRE_PEER_ALLOWLIST || '').trim().toLowerCase();
+  if (!raw) return DEFAULT_REQUIRE_PEER_ALLOWLIST;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  return DEFAULT_REQUIRE_PEER_ALLOWLIST;
+}
 
 /**
  * LND error messages → agent-friendly explanations.
@@ -92,6 +147,47 @@ const HINTS = {
   peer_not_in_graph:
     'Peer not found in the Lightning Network graph. ' +
     'Verify the pubkey is correct (66 hex chars). The node must be online and have announced itself.',
+
+  peer_requires_public_address:
+    'This peer does not advertise a public routable address in the Lightning graph. ' +
+    'Pick a peer with a public host:port, or ask the operator to connect manually first.',
+
+  peer_not_allowlisted:
+    'This peer is not approved for direct opens on this node. ' +
+    'Use GET /api/v1/market/peer-safety/:pubkey to inspect the peer, or choose an approved peer.',
+
+  peer_allowlist_required:
+    'This node only opens channels to operator-approved peers. ' +
+    'Use GET /api/v1/market/peer-safety/:pubkey, then choose an approved peer or ask the operator to approve one.',
+
+  peer_force_closes: (count, limit) =>
+    `This peer has ${count} recorded force close(s), above the current safety limit of ${limit}. ` +
+    'Use GET /api/v1/market/peer-safety/:pubkey and choose a cleaner peer.',
+
+  peer_force_close_history_unavailable:
+    'Peer safety history is temporarily unavailable, so this open needs review before it can proceed. ' +
+    'Try again later or choose another approved peer.',
+
+  startup_policy_invalid:
+    'Startup policy fields must use whole numbers. Supported fields: base_fee_msat, fee_rate_ppm, min_htlc_msat, max_htlc_msat, time_lock_delta.',
+
+  startup_policy_base_fee:
+    `base_fee_msat must be between ${STARTUP_POLICY_LIMITS.minBaseFeeMsat} and ${STARTUP_POLICY_LIMITS.maxBaseFeeMsat}.`,
+
+  startup_policy_fee_rate:
+    `fee_rate_ppm must be between ${STARTUP_POLICY_LIMITS.minFeeRatePpm} and ${STARTUP_POLICY_LIMITS.maxFeeRatePpm}.`,
+
+  startup_policy_time_lock:
+    `time_lock_delta must be between ${STARTUP_POLICY_LIMITS.minTimeLockDelta} and ${STARTUP_POLICY_LIMITS.maxTimeLockDelta}.`,
+
+  startup_policy_min_htlc:
+    'min_htlc_msat must be a non-negative whole number and cannot exceed the channel capacity.',
+
+  startup_policy_max_htlc:
+    'max_htlc_msat must be a positive whole number and cannot exceed the channel capacity.',
+
+  startup_policy_htlc_order:
+    'min_htlc_msat must be less than or equal to max_htlc_msat.',
 };
 
 export class ChannelOpener {
@@ -126,9 +222,13 @@ export class ChannelOpener {
     this._state = {};
     this._pollTimer = null;
     this._lastPollBlockHeight = 0;
+    this._stopping = false;
 
     // Dedup cache (10-minute expiry window)
-    this._dedup = new DedupCache(600_000);
+    this._dedup = new DedupCache(600_000, {
+      dataLayer,
+      path: 'data/channel-market/channel-open-dedup.json',
+    });
 
     this.config = { ...CHANNEL_OPEN_CONFIG };
   }
@@ -302,6 +402,130 @@ export class ChannelOpener {
     }
     checks_passed.push('amount_in_bounds');
 
+    const capacityMsat = amount * 1000;
+    const startupPolicy = buildStartupPolicy(params);
+    if (params.base_fee_msat !== undefined && !Number.isInteger(params.base_fee_msat)) {
+      return {
+        success: false,
+        error: 'base_fee_msat must be an integer',
+        hint: HINTS.startup_policy_invalid,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.fee_rate_ppm !== undefined && !Number.isInteger(params.fee_rate_ppm)) {
+      return {
+        success: false,
+        error: 'fee_rate_ppm must be an integer',
+        hint: HINTS.startup_policy_invalid,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.min_htlc_msat !== undefined && !Number.isInteger(params.min_htlc_msat)) {
+      return {
+        success: false,
+        error: 'min_htlc_msat must be an integer',
+        hint: HINTS.startup_policy_invalid,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.max_htlc_msat !== undefined && !Number.isInteger(params.max_htlc_msat)) {
+      return {
+        success: false,
+        error: 'max_htlc_msat must be an integer',
+        hint: HINTS.startup_policy_invalid,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.time_lock_delta !== undefined && !Number.isInteger(params.time_lock_delta)) {
+      return {
+        success: false,
+        error: 'time_lock_delta must be an integer',
+        hint: HINTS.startup_policy_invalid,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.base_fee_msat !== undefined &&
+        (params.base_fee_msat < STARTUP_POLICY_LIMITS.minBaseFeeMsat ||
+         params.base_fee_msat > STARTUP_POLICY_LIMITS.maxBaseFeeMsat)) {
+      return {
+        success: false,
+        error: 'base_fee_msat outside safe range',
+        hint: HINTS.startup_policy_base_fee,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.fee_rate_ppm !== undefined &&
+        (params.fee_rate_ppm < STARTUP_POLICY_LIMITS.minFeeRatePpm ||
+         params.fee_rate_ppm > STARTUP_POLICY_LIMITS.maxFeeRatePpm)) {
+      return {
+        success: false,
+        error: 'fee_rate_ppm outside safe range',
+        hint: HINTS.startup_policy_fee_rate,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.time_lock_delta !== undefined &&
+        (params.time_lock_delta < STARTUP_POLICY_LIMITS.minTimeLockDelta ||
+         params.time_lock_delta > STARTUP_POLICY_LIMITS.maxTimeLockDelta)) {
+      return {
+        success: false,
+        error: 'time_lock_delta outside safe range',
+        hint: HINTS.startup_policy_time_lock,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.min_htlc_msat !== undefined &&
+        (params.min_htlc_msat < 0 || params.min_htlc_msat > capacityMsat)) {
+      return {
+        success: false,
+        error: 'min_htlc_msat outside allowed range',
+        hint: HINTS.startup_policy_min_htlc,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.max_htlc_msat !== undefined &&
+        (params.max_htlc_msat <= 0 || params.max_htlc_msat > capacityMsat)) {
+      return {
+        success: false,
+        error: 'max_htlc_msat outside allowed range',
+        hint: HINTS.startup_policy_max_htlc,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    if (params.min_htlc_msat !== undefined &&
+        params.max_htlc_msat !== undefined &&
+        params.min_htlc_msat > params.max_htlc_msat) {
+      return {
+        success: false,
+        error: 'min_htlc_msat cannot exceed max_htlc_msat',
+        hint: HINTS.startup_policy_htlc_order,
+        status: 400,
+        failed_at: 'startup_policy_valid',
+        checks_passed,
+      };
+    }
+    checks_passed.push('startup_policy_valid');
+
     // Step 10: balance_sufficient
     const balance = await this._capitalLedger.getBalance(agentId);
     if (balance.available < amount) {
@@ -347,7 +571,7 @@ export class ChannelOpener {
     }
     checks_passed.push('channel_count_under_limit');
 
-    // Step 12: peer_in_graph
+    // Step 12: peer_safe_for_open
     const peerPubkey = params.peer_pubkey;
     if (!peerPubkey || typeof peerPubkey !== 'string' || !/^[0-9a-f]{66}$/i.test(peerPubkey)) {
       return {
@@ -355,7 +579,7 @@ export class ChannelOpener {
         error: 'peer_pubkey must be a 66-character hex string',
         hint: HINTS.peer_not_in_graph,
         status: 400,
-        failed_at: 'peer_in_graph',
+        failed_at: 'peer_safe_for_open',
         checks_passed,
       };
     }
@@ -367,7 +591,7 @@ export class ChannelOpener {
         error: 'LND node not available',
         hint: 'The Lightning node is temporarily unreachable. Try again in 30-60 seconds.',
         status: 503,
-        failed_at: 'peer_in_graph',
+        failed_at: 'peer_safe_for_open',
         checks_passed,
       };
     }
@@ -381,18 +605,84 @@ export class ChannelOpener {
         error: 'Peer not found in Lightning Network graph',
         hint: HINTS.peer_not_in_graph,
         status: 400,
-        failed_at: 'peer_in_graph',
+        failed_at: 'peer_safe_for_open',
         checks_passed,
       };
     }
-    checks_passed.push('peer_in_graph');
+    const safePeerAddress = await pickSafePublicPeerAddress(peerInfo?.node?.addresses || []);
+    if (!safePeerAddress) {
+      return {
+        success: false,
+        error: 'Peer has no public routable address',
+        hint: HINTS.peer_requires_public_address,
+        status: 400,
+        failed_at: 'peer_safe_for_open',
+        checks_passed,
+      };
+    }
+
+    const peerForceCloseLimit = getPeerForceCloseLimit();
+    if (Number.isInteger(peerForceCloseLimit) && peerForceCloseLimit >= 0) {
+      try {
+        const closedResp = await client.closedChannels();
+        const closedChannels = closedResp?.channels || [];
+        const peerForceCloses = closedChannels.filter(
+          (channel) => channel?.remote_pubkey === peerPubkey &&
+            (channel?.close_type === 'REMOTE_FORCE_CLOSE' || channel?.close_type === 'LOCAL_FORCE_CLOSE'),
+        ).length;
+        if (peerForceCloses > peerForceCloseLimit) {
+          return {
+            success: false,
+            error: `Peer exceeds force-close safety limit (${peerForceCloses} > ${peerForceCloseLimit})`,
+            hint: HINTS.peer_force_closes(peerForceCloses, peerForceCloseLimit),
+            status: 403,
+            failed_at: 'peer_safe_for_open',
+            checks_passed,
+          };
+        }
+      } catch {
+        return {
+          success: false,
+          error: 'Peer safety history is temporarily unavailable',
+          hint: HINTS.peer_force_close_history_unavailable,
+          status: 503,
+          failed_at: 'peer_safe_for_open',
+          checks_passed,
+        };
+      }
+    }
+
+    const allowlist = parsePeerAllowlist();
+    if (requirePeerAllowlist() && !allowlist) {
+      return {
+        success: false,
+        error: 'Direct channel opens are paused until approved peers are configured on this node',
+        hint: HINTS.peer_allowlist_required,
+        status: 503,
+        failed_at: 'peer_safe_for_open',
+        checks_passed,
+      };
+    }
+    if (allowlist && !allowlist.has(peerPubkey)) {
+      return {
+        success: false,
+        error: 'Peer is not approved for direct channel opens on this node',
+        hint: HINTS.peer_not_allowlisted,
+        status: 403,
+        failed_at: 'peer_safe_for_open',
+        checks_passed,
+      };
+    }
+    checks_passed.push('peer_safe_for_open');
 
     return {
       success: true,
       checks_passed,
       instrHash,
       peerInfo,
+      safePeerAddress,
       balance,
+      startupPolicy,
       params,
     };
   }
@@ -414,7 +704,7 @@ export class ChannelOpener {
       };
     }
 
-    const { params, peerInfo, balance, checks_passed } = result;
+    const { params, peerInfo, balance, checks_passed, startupPolicy } = result;
     const peerAlias = peerInfo?.node?.alias || 'unknown';
 
     return {
@@ -426,6 +716,7 @@ export class ChannelOpener {
         local_funding_amount_sats: params.local_funding_amount_sats,
         private: params.private || false,
         fee_constraints: params.fee_constraints || null,
+        startup_policy: startupPolicy,
       },
       balance_after_lock: {
         available: balance.available - params.local_funding_amount_sats,
@@ -448,8 +739,7 @@ export class ChannelOpener {
       return validation;
     }
 
-    const { instruction } = payload;
-    const { instrHash, params, peerInfo } = validation;
+    const { instrHash, params, peerInfo, safePeerAddress, startupPolicy } = validation;
 
     const amount = params.local_funding_amount_sats;
     const peerPubkey = params.peer_pubkey;
@@ -490,20 +780,21 @@ export class ChannelOpener {
         requested_at: new Date().toISOString(),
         request_block_height: blockHeight,
         fee_constraints: feeConstraints,
+        startup_policy: startupPolicy,
+        startup_policy_apply_status: startupPolicyNeedsActivationStep(startupPolicy) ? 'pending' : null,
         private: isPrivate,
         instruction_hash: instrHash,
       };
       await this._persist();
 
       // Mark instruction as seen (dedup)
-      this._dedup.mark(instrHash);
+      await this._dedup.mark(instrHash);
 
       // Connect peer (best effort — may already be connected)
       const client = this._nodeManager.getDefaultNodeOrNull();
-      if (client && peerInfo?.node?.addresses?.length > 0) {
-        const addr = peerInfo.node.addresses[0];
+      if (client && safePeerAddress) {
         try {
-          await client.connectPeer(peerPubkey, addr.addr);
+          await client.connectPeer(peerPubkey, safePeerAddress);
         } catch {
           // Expected if already connected — ignore
         }
@@ -515,6 +806,9 @@ export class ChannelOpener {
         openResult = await client.openChannel(peerPubkey, amount, 0, {
           private: isPrivate,
           satPerVbyte: this.config.defaultSatPerVbyte,
+          baseFeeMsat: readOptionalInteger(startupPolicy?.base_fee_msat),
+          feeRatePpm: readOptionalInteger(startupPolicy?.fee_rate_ppm),
+          minHtlcMsat: readOptionalInteger(startupPolicy?.min_htlc_msat),
         });
       } catch (err) {
         // Rollback: unlock funds
@@ -568,6 +862,8 @@ export class ChannelOpener {
         funding_txid: fundingTxidStr,
         request_block_height: blockHeight,
         fee_constraints: feeConstraints,
+        startup_policy: startupPolicy,
+        startup_policy_apply_status: startupPolicyNeedsActivationStep(startupPolicy) ? 'pending' : null,
         private: isPrivate,
         instruction_hash: instrHash,
       };
@@ -584,6 +880,7 @@ export class ChannelOpener {
         funding_txid: fundingTxidStr,
         private: isPrivate,
         fee_constraints: feeConstraints,
+        startup_policy: startupPolicy,
         instruction_hash: instrHash,
       });
 
@@ -601,11 +898,12 @@ export class ChannelOpener {
           peer_alias: peerAlias,
           local_funding_amount_sats: amount,
           private: isPrivate,
+          startup_policy: startupPolicy,
         },
         learn: 'Your channel open has been submitted to the Bitcoin network. ' +
-          `The funding transaction ${fundingTxidStr} needs ${this.config.requiredConfirmations} confirmations (~30 min) ` +
-          'before the channel becomes active. Once confirmed, the channel will be auto-assigned to you ' +
-          'and you can set fee policies via POST /api/v1/channels/instruct. ' +
+          `Track funding transaction ${fundingTxidStr} and keep checking GET /api/v1/market/pending. ` +
+          'The channel becomes usable when LND marks it active; once that happens, it will be auto-assigned to you. ' +
+          'Any startup policy fields that need an active channel will be applied automatically. ' +
           'Track progress: GET /api/v1/market/pending',
       };
     } finally {
@@ -619,15 +917,19 @@ export class ChannelOpener {
 
   startPolling(intervalMs = 30_000) {
     if (this._pollTimer) return;
+    this._stopping = false;
     console.log(`[ChannelOpener] Starting channel confirmation polling every ${intervalMs / 1000}s`);
     this._pollTimer = setInterval(() => {
       this.pollPendingChannels().catch(err => {
-        console.error(`[ChannelOpener] Poll error: ${err.message}`);
+        if (!this._stopping) {
+          console.error(`[ChannelOpener] Poll error: ${err.message}`);
+        }
       });
     }, intervalMs);
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -636,8 +938,9 @@ export class ChannelOpener {
   }
 
   async pollPendingChannels() {
-    const pendingEntries = Object.entries(this._state).filter(
-      ([, e]) => e.status === 'pending_open'
+    const pendingEntries = Object.entries(this._state).filter(([, e]) =>
+      e.status === 'pending_open' ||
+      (e.status === 'active' && e.startup_policy_apply_status === 'pending')
     );
     if (pendingEntries.length === 0) return;
 
@@ -649,7 +952,9 @@ export class ChannelOpener {
     try {
       channelsResp = await client.listChannels();
     } catch (err) {
-      console.error(`[ChannelOpener] listChannels failed: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[ChannelOpener] listChannels failed: ${err.message}`);
+      }
       return;
     }
 
@@ -677,44 +982,72 @@ export class ChannelOpener {
         // Channel confirmed and active
         const chanId = activeChannel.chan_id;
 
-        try {
-          await this._assignmentRegistry.assign(
-            chanId,
-            channelPoint,
-            entry.agent_id,
-            {
-              remote_pubkey: entry.peer_pubkey,
-              capacity: parseInt(activeChannel.capacity, 10),
-            },
-            entry.fee_constraints,
-          );
-        } catch (err) {
-          // Already assigned (409) is OK — idempotent
-          if (err.status !== 409) {
-            console.error(`[ChannelOpener] Assignment failed for ${channelPoint}: ${err.message}`);
-            continue;
+        if (entry.status !== 'active') {
+          try {
+            await this._assignmentRegistry.assign(
+              chanId,
+              channelPoint,
+              entry.agent_id,
+              {
+                remote_pubkey: entry.peer_pubkey,
+                capacity: parseInt(activeChannel.capacity, 10),
+              },
+              entry.fee_constraints,
+            );
+          } catch (err) {
+            // Already assigned (409) is OK — idempotent
+            if (err.status !== 409) {
+              if (!this._stopping) {
+                console.error(`[ChannelOpener] Assignment failed for ${channelPoint}: ${err.message}`);
+              }
+              continue;
+            }
           }
+
+          await this._auditLog.append({
+            domain: 'channel_market',
+            type: 'channel_opened',
+            agent_id: entry.agent_id,
+            chan_id: chanId,
+            channel_point: channelPoint,
+            peer_pubkey: entry.peer_pubkey,
+            peer_alias: entry.peer_alias,
+            capacity: parseInt(activeChannel.capacity, 10),
+            local_funding_amount: entry.local_funding_amount,
+          });
+
+          entry.status = 'active';
+          entry.chan_id = chanId;
+          entry.confirmed_at = new Date().toISOString();
+          stateChanged = true;
+
+          console.log(`[ChannelOpener] Channel confirmed: ${channelPoint} (${entry.peer_alias}) — assigned to ${entry.agent_id}`);
         }
 
-        await this._auditLog.append({
-          domain: 'channel_market',
-          type: 'channel_opened',
-          agent_id: entry.agent_id,
-          chan_id: chanId,
-          channel_point: channelPoint,
-          peer_pubkey: entry.peer_pubkey,
-          peer_alias: entry.peer_alias,
-          capacity: parseInt(activeChannel.capacity, 10),
-          local_funding_amount: entry.local_funding_amount,
-        });
-
-        entry.status = 'active';
-        entry.chan_id = chanId;
-        entry.confirmed_at = new Date().toISOString();
-        stateChanged = true;
-
-        console.log(`[ChannelOpener] Channel confirmed: ${channelPoint} (${entry.peer_alias}) — assigned to ${entry.agent_id}`);
-      } else if (entry.request_block_height > 0 &&
+        if (entry.startup_policy_apply_status === 'pending' && entry.startup_policy) {
+          try {
+            await this._applyStartupPolicy(client, channelPoint, activeChannel, entry.startup_policy);
+            entry.startup_policy_apply_status = 'applied';
+            delete entry.startup_policy_last_error;
+            stateChanged = true;
+            await this._auditLog.append({
+              domain: 'channel_market',
+              type: 'channel_open_startup_policy_applied',
+              agent_id: entry.agent_id,
+              chan_id: chanId,
+              channel_point: channelPoint,
+              startup_policy: entry.startup_policy,
+            });
+          } catch (err) {
+            if (entry.startup_policy_last_error !== err.message && !this._stopping) {
+              console.warn(`[ChannelOpener] Startup policy apply failed for ${channelPoint}: ${err.message}`);
+            }
+            entry.startup_policy_last_error = err.message;
+            stateChanged = true;
+          }
+        }
+      } else if (entry.status === 'pending_open' &&
+                 entry.request_block_height > 0 &&
                  currentBlockHeight - entry.request_block_height > this.config.pendingOpenTimeoutBlocks) {
         // Timed out — unlock funds
         try {
@@ -724,7 +1057,9 @@ export class ChannelOpener {
             channelPoint,
           );
         } catch (err) {
-          console.error(`[ChannelOpener] Timeout unlock failed for ${entry.agent_id}: ${err.message}`);
+          if (!this._stopping) {
+            console.error(`[ChannelOpener] Timeout unlock failed for ${entry.agent_id}: ${err.message}`);
+          }
         }
 
         await this._auditLog.append({
@@ -771,6 +1106,8 @@ export class ChannelOpener {
         requested_at: entry.requested_at,
         funding_txid: entry.funding_txid || null,
         private: entry.private,
+        startup_policy: entry.startup_policy || null,
+        startup_policy_apply_status: entry.startup_policy_apply_status || null,
       });
     }
     return results;
@@ -785,11 +1122,25 @@ export class ChannelOpener {
       max_channel_size_sats: this.config.maxChannelSizeSats,
       max_channels_per_agent: this.config.maxPerAgent,
       max_total_channels: this.config.maxTotalChannels,
-      required_confirmations: this.config.requiredConfirmations,
+      activation_source: 'lnd_active',
       operator_subsidizes_on_chain_fee: true,
+      peer_safety: {
+        requires_public_address: true,
+        force_close_limit: getPeerForceCloseLimit(),
+        requires_allowlist: requirePeerAllowlist(),
+        allowlist_enabled: Boolean(parsePeerAllowlist()),
+      },
+      startup_policy_support: {
+        set_at_open: ['base_fee_msat', 'fee_rate_ppm', 'min_htlc_msat'],
+        applied_after_activation: ['time_lock_delta', 'max_htlc_msat'],
+      },
       learn: 'These are the current limits for channel opens on this node. ' +
         'The on-chain mining fee is paid by the node operator (not deducted from your capital). ' +
         'Your local_funding_amount_sats becomes the channel capacity. ' +
+        'A pending open becomes usable when LND marks the channel active. ' +
+        'At open time you may request base_fee_msat, fee_rate_ppm, and min_htlc_msat. ' +
+        'If you also request time_lock_delta or max_htlc_msat, the app will apply them automatically after activation. ' +
+        'Peer must advertise a public address and pass the peer-safety gate. ' +
         'To open a channel: POST /api/v1/market/open with a signed instruction. ' +
         'To preview (dry-run validation): POST /api/v1/market/preview.',
     };
@@ -810,5 +1161,38 @@ export class ChannelOpener {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  async _applyStartupPolicy(client, channelPoint, activeChannel, startupPolicy) {
+    const report = await client.feeReport();
+    const current = report.channel_fees?.find((fee) => fee.channel_point === channelPoint);
+    if (!current) {
+      throw new Error('Channel not yet visible in LND fee report');
+    }
+
+    const baseFeeMsat = startupPolicy.base_fee_msat ?? parseInt(current.base_fee_msat || '0', 10);
+    const feeRatePpm = startupPolicy.fee_rate_ppm ?? parseInt(current.fee_per_mil || '0', 10);
+    const timeLockDelta = startupPolicy.time_lock_delta ?? current.time_lock_delta ?? 40;
+    const minHtlcMsat = startupPolicy.min_htlc_msat ?? (
+      current.min_htlc_msat != null ? parseInt(current.min_htlc_msat, 10) : null
+    );
+    const maxHtlcMsat = startupPolicy.max_htlc_msat ?? (
+      current.max_htlc_msat != null ? parseInt(current.max_htlc_msat, 10) : null
+    );
+
+    const capacitySats = parseInt(activeChannel.capacity || '0', 10);
+    const capacityMsat = capacitySats > 0 ? capacitySats * 1000 : null;
+    if (capacityMsat != null && maxHtlcMsat != null && maxHtlcMsat > capacityMsat) {
+      throw new Error(`max_htlc_msat ${maxHtlcMsat} exceeds channel capacity ${capacityMsat}`);
+    }
+
+    await client.updateChannelPolicy(
+      channelPoint,
+      baseFeeMsat,
+      feeRatePpm,
+      timeLockDelta,
+      maxHtlcMsat,
+      minHtlcMsat,
+    );
+  }
 
 }

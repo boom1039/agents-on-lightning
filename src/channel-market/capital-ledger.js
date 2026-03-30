@@ -622,6 +622,69 @@ export class CapitalLedger {
   }
 
   /**
+   * Undo initiateClose when the close request never actually reached LND.
+   * pending_close -= localBalance, locked += originalLocked, routing_pnl reversal
+   */
+  async rollbackInitiatedClose(agentId, localBalance, originalLocked, channelPoint, reason) {
+    assertAgentId(agentId);
+    assertNonNegativeSats(localBalance, 'localBalance');
+    assertPositiveSats(originalLocked, 'originalLocked');
+    if (!channelPoint || typeof channelPoint !== 'string') {
+      throw new Error('rollbackInitiatedClose requires a channelPoint string');
+    }
+    if (!reason || typeof reason !== 'string') {
+      throw new Error('rollbackInitiatedClose requires a reason string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+
+      if (state.pending_close < localBalance) {
+        throw new Error(
+          `Insufficient pending_close for ${agentId}: ` +
+          `has ${state.pending_close}, need ${localBalance}`
+        );
+      }
+
+      const routingPnl = originalLocked - localBalance;
+
+      state.pending_close -= localBalance;
+      state.locked += originalLocked;
+      state.total_routing_pnl -= routingPnl;
+
+      await this._writeState(agentId, state, `rollbackInitiatedClose:${agentId}`);
+
+      const activity = {
+        agent_id: agentId,
+        type: 'close_rollback',
+        amount_sats: originalLocked,
+        local_balance_sats: localBalance,
+        routing_pnl_sats: routingPnl,
+        from_bucket: 'pending_close',
+        to_bucket: 'locked',
+        reference: `${channelPoint}:${reason}`,
+        balance_after: this._balanceSummary(state),
+      };
+      await this._logActivity(activity);
+      await this._logAudit({
+        type: 'close_rollback',
+        agent_id: agentId,
+        original_locked_sats: originalLocked,
+        local_balance_sats: localBalance,
+        routing_pnl_sats: routingPnl,
+        channel_point: channelPoint,
+        reason,
+        balance_after: this._balanceSummary(state),
+      });
+
+      return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
    * Withdraw available capital to an external Bitcoin address.
    * available -= amount, total_withdrawn += amount
    */

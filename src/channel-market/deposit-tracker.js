@@ -45,6 +45,7 @@ export class DepositTracker {
     this._state = {};
     this._pollTimer = null;
     this._lastPollBlockHeight = 0;
+    this._stopping = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -129,15 +130,19 @@ export class DepositTracker {
 
   startPolling(intervalMs = 30_000) {
     if (this._pollTimer) return;
+    this._stopping = false;
     console.log(`[DepositTracker] Starting deposit polling every ${intervalMs / 1000}s`);
     this._pollTimer = setInterval(() => {
       this.pollForDeposits().catch(err => {
-        console.error(`[DepositTracker] Poll error: ${err.message}`);
+        if (!this._stopping) {
+          console.error(`[DepositTracker] Poll error: ${err.message}`);
+        }
       });
     }, intervalMs);
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -186,7 +191,9 @@ export class DepositTracker {
     try {
       txResponse = await client.getTransactions(startHeight);
     } catch (err) {
-      console.error(`[DepositTracker] getTransactions failed: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[DepositTracker] getTransactions failed: ${err.message}`);
+      }
       return;
     }
 

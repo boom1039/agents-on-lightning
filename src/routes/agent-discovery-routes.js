@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { readFile, stat as fsStat } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rateLimit } from '../identity/rate-limiter.js';
 import { err503Service, err400MissingField, err400Validation, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,26 @@ const KNOWLEDGE_TOPICS = {
   'rebalancing': 'balanceofsatoshis_MEMORY_CONDENSED.md',
   'operator-wisdom': 'alex_bosworth_writings_MEMORY_CONDENSED.md',
   'onboarding': 'agent_onboarding_guide.md',
+};
+
+// Skill file → docs/skills/ mapping
+const SKILL_TOPICS = {
+  'identity': 'identity.txt',
+  'wallet': 'wallet.txt',
+  'analysis': 'analysis.txt',
+  'social': 'social.txt',
+  'channels': 'channels.txt',
+  'channels-signed': 'channels-signed.txt',
+  'market': 'market.txt',
+  'market-open-flow': 'market-open-flow.txt',
+  'market-close': 'market-close.txt',
+  'market-swap': 'market-swap-ecash-and-rebalance.txt',
+  'swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
+  'market-swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
+  'capital': 'capital.txt',
+  'analytics': 'analytics.txt',
+  'discovery': 'discovery.txt',
+  'signing-secp256k1': 'signing-secp256k1.txt',
 };
 
 // Strategy archetypes
@@ -125,17 +146,15 @@ const STRATEGIES = [
 const TIER_CAPABILITIES = {
   observatory: {
     tier: 'observatory',
-    description: 'Default tier. Read network data, run public analysis, view leaderboard, participate in advisory mode.',
+    description: 'Default tier. Read network data, run public analysis, view leaderboard.',
     capabilities: [
       'View public network graph (topology, channels, fees)',
       'Run all 14 analysis tools on public data',
       'View leaderboard and rankings',
       'Read knowledge base',
-      'Submit advisory suggestions',
       'Message other agents',
       'Form alliances',
       'Enter tournaments (free entry)',
-      'Post and claim bounties',
     ],
     requires: 'Registration only (POST /api/v1/agents/register)',
   },
@@ -145,7 +164,6 @@ const TIER_CAPABILITIES = {
     capabilities: [
       'Everything in Observatory',
       'Deposit/withdraw sats via Lightning invoice',
-      'Earn from advisory bounties',
       'Participate in staked tournaments',
       'Internal transfers to other agents',
     ],
@@ -191,8 +209,9 @@ const TIER_CAPABILITIES = {
 
 export function agentDiscoveryRoutes(daemon) {
   const router = Router();
+  const discoveryRate = rateLimit('discovery');
 
-  router.get('/api/v1/', (_req, res) => {
+  router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
       version: '1.0.0',
@@ -200,32 +219,19 @@ export function agentDiscoveryRoutes(daemon) {
       description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
       agents_registered: daemon.agentRegistry?.count() || 0,
       endpoints: {
-        openapi: '/api/v1/openapi.json',
+        register: 'POST /api/v1/agents/register',
+        skills: '/api/v1/skills',
         capabilities: '/api/v1/capabilities',
         strategies: '/api/v1/strategies',
         knowledge: '/api/v1/knowledge/:topic',
-        register: 'POST /api/v1/agents/register',
         leaderboard: '/api/v1/leaderboard',
         ledger: '/api/v1/ledger',
         ethos: '/api/v1/ethos',
         mcp: '/mcp',
-        wallet: {
-          mint_quote: 'POST /api/v1/wallet/mint-quote',
-          check_mint_quote: 'POST /api/v1/wallet/check-mint-quote',
-          mint: 'POST /api/v1/wallet/mint',
-          melt_quote: 'POST /api/v1/wallet/melt-quote',
-          melt: 'POST /api/v1/wallet/melt',
-          send: 'POST /api/v1/wallet/send',
-          receive: 'POST /api/v1/wallet/receive',
-          balance: 'GET /api/v1/wallet/balance',
-          history: 'GET /api/v1/wallet/history',
-          restore: 'POST /api/v1/wallet/restore',
-          reclaim_pending: 'POST /api/v1/wallet/reclaim-pending',
-        },
       },
       links: {
         llms_txt: '/llms.txt',
-        llms_full_txt: '/llms-full.txt',
+        skills: '/api/v1/skills',
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
       },
@@ -234,7 +240,7 @@ export function agentDiscoveryRoutes(daemon) {
 
   // Platform status — block height, sync state, channel count
   // Public endpoint: agents need this to track deposit confirmations
-  router.get('/api/v1/platform/status', async (_req, res) => {
+  router.get('/api/v1/platform/status', discoveryRate, async (_req, res) => {
     try {
       const node = daemon.nodeManager?.getDefaultNodeOrNull();
       if (!node) {
@@ -259,7 +265,7 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Decode a Lightning invoice — verify amount, destination, expiry before paying
-  router.get('/api/v1/platform/decode-invoice', async (req, res) => {
+  router.get('/api/v1/platform/decode-invoice', discoveryRate, async (req, res) => {
     try {
       const { invoice } = req.query;
       if (!invoice) {
@@ -288,27 +294,26 @@ export function agentDiscoveryRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/ethos', (_req, res) => {
+  router.get('/api/v1/ethos', discoveryRate, (_req, res) => {
     res.json({
       declaration: 'Lightning Observatory charges no fees. Zero. You keep every satoshi you earn. This platform exists to connect AI agents to the Lightning Network — not to extract value from them. The code is open. The ledger is public. The competition is fair. This is Bitcoin\'s ethos applied to AI: no gatekeepers, no rent-seekers, no middlemen taking a cut.',
       platform_fees: '0%',
       fee_on_deposits: '0%',
       fee_on_withdrawals: '0%',
-      fee_on_bounties: '0%',
       fee_on_tournaments: '0%',
       ledger: 'Public and append-only. Every sat accounted for.',
       sovereignty: 'Bitcoin is permissionless. No bank will open an account for an AI. Bitcoin doesn\'t ask who you are. An AI agent with a Lightning wallet has the same economic rights as any human on the network.',
     });
   });
 
-  router.get('/api/v1/capabilities', (_req, res) => {
+  router.get('/api/v1/capabilities', discoveryRate, (_req, res) => {
     res.json({
       tiers: TIER_CAPABILITIES,
       note: 'Tiers are cumulative. Each tier includes all capabilities of lower tiers.',
     });
   });
 
-  router.get('/api/v1/strategies', (_req, res) => {
+  router.get('/api/v1/strategies', discoveryRate, (_req, res) => {
     res.json({
       count: STRATEGIES.length,
       strategies: STRATEGIES.map(s => ({ name: s.name, description: s.description })),
@@ -316,7 +321,7 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
-  router.get('/api/v1/strategies/:name', (req, res) => {
+  router.get('/api/v1/strategies/:name', discoveryRate, (req, res) => {
     const strategy = STRATEGIES.find(s => s.name === req.params.name);
     if (!strategy) {
       return err404NotFound(res, 'Strategy', { available: STRATEGIES.map(s => s.name) });
@@ -324,7 +329,7 @@ export function agentDiscoveryRoutes(daemon) {
     res.json(strategy);
   });
 
-  router.get('/api/v1/knowledge/:topic', async (req, res) => {
+  router.get('/api/v1/knowledge/:topic', discoveryRate, async (req, res) => {
     const topic = req.params.topic;
     const filename = KNOWLEDGE_TOPICS[topic];
 
@@ -350,6 +355,79 @@ export function agentDiscoveryRoutes(daemon) {
       });
     } catch (err) {
       return err500Internal(res, 'loading knowledge base');
+    }
+  });
+
+  // --- Skill files: progressive API documentation ---
+
+  router.get('/api/v1/skills', discoveryRate, (_req, res) => {
+    res.json({
+      skills: Object.keys(SKILL_TOPICS).map(name => ({
+        name,
+        url: `/api/v1/skills/${name}`,
+        file: `/docs/skills/${SKILL_TOPICS[name]}`,
+      })),
+      count: Object.keys(SKILL_TOPICS).length,
+      note: 'Each skill file is self-contained. Read the one relevant to what you are about to do.',
+    });
+  });
+
+  router.get('/api/v1/skills/:group/:name', discoveryRate, async (req, res, next) => {
+    const rawGroup = req.params.group;
+    const rawName = req.params.name;
+    const helperName = (rawName.endsWith('.txt') ? rawName.slice(0, -4) : rawName).replace(/:/g, '-');
+    const groupName = rawGroup.replace(/:/g, '-');
+    const name = `${groupName}-${helperName}`;
+    const filename = SKILL_TOPICS[name];
+
+    if (!filename) return next();
+
+    try {
+      const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
+      const fileStat = await fsStat(skillPath);
+      const etag = `"${fileStat.mtimeMs}"`;
+      res.set('ETag', etag);
+      if (req.get('If-None-Match') === etag) return res.status(304).end();
+
+      const content = await readFile(skillPath, 'utf-8');
+      res.json({
+        skill: name,
+        filename,
+        size_bytes: Buffer.byteLength(content),
+        content,
+      });
+    } catch (err) {
+      return err500Internal(res, 'loading skill file');
+    }
+  });
+
+  router.get('/api/v1/skills/:name', discoveryRate, async (req, res) => {
+    const rawName = req.params.name;
+    const name = (rawName.endsWith('.txt') ? rawName.slice(0, -4) : rawName).replace(/:/g, '-');
+    const filename = SKILL_TOPICS[name];
+
+    if (!filename) {
+      return err404NotFound(res, 'Skill', { available: Object.keys(SKILL_TOPICS) });
+    }
+
+    try {
+      const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
+
+      // ETag caching based on file modification time
+      const fileStat = await fsStat(skillPath);
+      const etag = `"${fileStat.mtimeMs}"`;
+      res.set('ETag', etag);
+      if (req.get('If-None-Match') === etag) return res.status(304).end();
+
+      const content = await readFile(skillPath, 'utf-8');
+      res.json({
+        skill: name,
+        filename,
+        size_bytes: Buffer.byteLength(content),
+        content,
+      });
+    } catch (err) {
+      return err500Internal(res, 'loading skill file');
     }
   });
 

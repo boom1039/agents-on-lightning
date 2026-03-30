@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PYTHON3 = process.env.PYTHON3 || '/opt/homebrew/bin/python3';
+const PYTHON3 = process.env.PYTHON3 || 'python3';
 const SUGGEST_PEERS_SCRIPT = resolve(__dirname, '..', 'analysis', 'suggest-peers.py');
 
 export function agentAnalysisRoutes(daemon) {

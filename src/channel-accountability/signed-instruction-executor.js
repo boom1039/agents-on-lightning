@@ -1,4 +1,4 @@
-import { verifyEd25519Signature } from '../identity/auth.js';
+import { verifySecp256k1Signature } from '../identity/auth.js';
 import { sha256, canonicalJSON } from './crypto-utils.js';
 import { DedupCache } from './dedup-cache.js';
 import { acquire } from '../identity/mutex.js';
@@ -10,6 +10,12 @@ const DEDUP_EXPIRY_MS = 600_000; // 10 minutes
 const DEFAULT_COOLDOWN_MINUTES = 60;
 const POST_VERIFY_DELAY_MS = 3_000;
 const RECENT_EXECUTION_TTL_MS = 120_000; // 2 minutes — monitor match window
+const GLOBAL_SAFE_CONSTRAINTS = {
+  min_base_fee_msat: 0,
+  max_base_fee_msat: 10_000,
+  min_fee_rate_ppm: 0,
+  max_fee_rate_ppm: 2_000,
+};
 
 /**
  * Educational hints keyed by validation step name.
@@ -19,12 +25,12 @@ const RECENT_EXECUTION_TTL_MS = 120_000; // 2 minutes — monitor match window
 const HINTS = {
   missing_payload:
     'The request body must be JSON with two fields: { "instruction": {...}, "signature": "hex" }. ' +
-    'The instruction object contains the action you want to perform. The signature is the Ed25519 ' +
+    'The instruction object contains the action you want to perform. The signature is the secp256k1 ' +
     'signature of the canonical JSON of the instruction object. See playbook Step 11.',
 
   no_pubkey:
-    'Register your Ed25519 public key via PUT /api/v1/agents/me with { "pubkey": "<64-char-hex>" }. ' +
-    'Generate an Ed25519 keypair, save the private key securely, and register the 32-byte public key ' +
+    'Register your secp256k1 compressed public key via PUT /api/v1/agents/me with { "pubkey": "<66-char-hex>" }. ' +
+    'Generate a secp256k1 keypair, save the private key securely, and register the compressed public key ' +
     'as a hex string. See playbook Step 8 and Step 11.',
 
   unknown_action: (action) =>
@@ -58,9 +64,8 @@ const HINTS = {
     'GET /api/v1/channels/mine to see your assigned channels and their channel_id values.',
 
   invalid_signature:
-    'Sign the canonical JSON of the instruction object (not the wrapper). ' +
-    'Correct: sign(canonicalJSON(instruction)). ' +
-    'Wrong: sign(canonicalJSON({instruction, signature})) or sign(JSON.stringify(instruction)). ' +
+    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key and send the DER-encoded signature as hex. ' +
+    'Wrong: sign the wrapper, sign pretty JSON, or send a non-DER signature. ' +
     'Canonical JSON sorts keys lexicographically at every nesting level with no whitespace (RFC 8785). ' +
     'See playbook Step 11 for a complete signing example with test vector.',
 
@@ -93,7 +98,7 @@ const HINTS = {
 };
 
 /**
- * Validates, executes, and audit-logs Ed25519-signed fee instructions.
+ * Validates, executes, and audit-logs secp256k1-signed fee instructions.
  * 10-step validation pipeline before touching LND.
  */
 export class SignedInstructionExecutor {
@@ -105,7 +110,10 @@ export class SignedInstructionExecutor {
     this._dataLayer = dataLayer;
 
     // Dedup cache (10-minute expiry window)
-    this._dedup = new DedupCache(DEDUP_EXPIRY_MS);
+    this._dedup = new DedupCache(DEDUP_EXPIRY_MS, {
+      dataLayer,
+      path: 'data/channel-accountability/instruction-dedup.json',
+    });
     // Cooldown: chanId -> last execution timestamp
     this._cooldowns = new Map();
     // Recent executions: chanId -> { instruction, executedAt }
@@ -157,7 +165,7 @@ export class SignedInstructionExecutor {
     if (!profile?.pubkey) {
       return {
         success: false,
-        error: 'Agent has no registered Ed25519 public key',
+        error: 'Agent has no registered secp256k1 public key',
         hint: HINTS.no_pubkey,
         status: 400,
         failed_at: 'pubkey_registered',
@@ -166,18 +174,18 @@ export class SignedInstructionExecutor {
     }
     checks_passed.push('pubkey_registered');
 
-    // Step 2: Action whitelist
+    // Step 2: Action valid
     if (!ALLOWED_ACTIONS.has(instruction.action)) {
       return {
         success: false,
         error: `Unknown action: ${instruction.action}. Allowed: ${[...ALLOWED_ACTIONS].join(', ')}`,
         hint: HINTS.unknown_action(instruction.action),
         status: 400,
-        failed_at: 'action_whitelisted',
+        failed_at: 'action_valid',
         checks_passed,
       };
     }
-    checks_passed.push('action_whitelisted');
+    checks_passed.push('action_valid');
 
     // Step 3: agent_id match
     if (instruction.agent_id !== agentId) {
@@ -219,7 +227,7 @@ export class SignedInstructionExecutor {
 
     // Step 5: Dedup
     const payloadHash = sha256(canonicalJSON(payload.instruction));
-    if (this._dedup.has(payloadHash)) {
+    if (await this._dedup.has(payloadHash)) {
       return {
         success: false,
         error: 'Duplicate instruction (already processed)',
@@ -231,7 +239,22 @@ export class SignedInstructionExecutor {
     }
     checks_passed.push('not_duplicate');
 
-    // Step 6: Channel assigned to this agent
+    // Step 6: Signature valid
+    const message = canonicalJSON(instruction);
+    const valid = await verifySecp256k1Signature(profile.pubkey, message, signature);
+    if (!valid) {
+      return {
+        success: false,
+        error: 'Invalid secp256k1 signature',
+        hint: HINTS.invalid_signature,
+        status: 401,
+        failed_at: 'signature_valid',
+        checks_passed,
+      };
+    }
+    checks_passed.push('signature_valid');
+
+    // Step 7: Channel assigned to this agent
     const assignment = this._assignments.getAssignment(instruction.channel_id);
     if (!assignment) {
       return {
@@ -254,21 +277,6 @@ export class SignedInstructionExecutor {
       };
     }
     checks_passed.push('channel_owned');
-
-    // Step 7: Signature valid
-    const message = canonicalJSON(instruction);
-    const valid = await verifyEd25519Signature(profile.pubkey, message, signature);
-    if (!valid) {
-      return {
-        success: false,
-        error: 'Invalid Ed25519 signature',
-        hint: HINTS.invalid_signature,
-        status: 401,
-        failed_at: 'signature_valid',
-        checks_passed,
-      };
-    }
-    checks_passed.push('signature_valid');
 
     // Step 8: Fee constraints
     const constraintError = this._checkConstraints(instruction, assignment.constraints);
@@ -399,7 +407,7 @@ export class SignedInstructionExecutor {
     try {
       // Re-check cooldown and dedup under lock (TOCTOU protection)
       const now = Date.now();
-      if (this._dedup.has(payloadHash)) {
+      if (await this._dedup.has(payloadHash)) {
         return {
           success: false,
           error: 'Duplicate instruction (already processed)',
@@ -455,7 +463,7 @@ export class SignedInstructionExecutor {
       });
 
       // Mark as seen (dedup)
-      this._dedup.mark(payloadHash);
+      await this._dedup.mark(payloadHash);
 
       // Log to instructions.jsonl for querying
       await this._dataLayer.appendLog(INSTRUCTIONS_PATH, {
@@ -632,34 +640,54 @@ export class SignedInstructionExecutor {
    * Check fee constraints. Returns null if OK, or { message, hint } on violation.
    */
   _checkConstraints(instruction, constraints) {
-    if (!constraints) return null;
+    const merged = { ...GLOBAL_SAFE_CONSTRAINTS, ...(constraints || {}) };
     const p = instruction.params || {};
 
     if (p.base_fee_msat !== undefined) {
-      if (constraints.min_base_fee_msat !== undefined && p.base_fee_msat < constraints.min_base_fee_msat) {
+      if (merged.min_base_fee_msat !== undefined && p.base_fee_msat < merged.min_base_fee_msat) {
         return {
-          message: `base_fee_msat ${p.base_fee_msat} below minimum ${constraints.min_base_fee_msat}`,
-          hint: HINTS.constraint_violation('base_fee_msat', p.base_fee_msat, constraints.min_base_fee_msat, constraints.max_base_fee_msat),
+          message: `base_fee_msat ${p.base_fee_msat} below minimum ${merged.min_base_fee_msat}`,
+          hint: HINTS.constraint_violation('base_fee_msat', p.base_fee_msat, merged.min_base_fee_msat, merged.max_base_fee_msat),
         };
       }
-      if (constraints.max_base_fee_msat !== undefined && p.base_fee_msat > constraints.max_base_fee_msat) {
+      if (merged.max_base_fee_msat !== undefined && p.base_fee_msat > merged.max_base_fee_msat) {
         return {
-          message: `base_fee_msat ${p.base_fee_msat} exceeds maximum ${constraints.max_base_fee_msat}`,
-          hint: HINTS.constraint_violation('base_fee_msat', p.base_fee_msat, constraints.min_base_fee_msat, constraints.max_base_fee_msat),
+          message: `base_fee_msat ${p.base_fee_msat} exceeds maximum ${merged.max_base_fee_msat}`,
+          hint: HINTS.constraint_violation('base_fee_msat', p.base_fee_msat, merged.min_base_fee_msat, merged.max_base_fee_msat),
         };
       }
     }
     if (p.fee_rate_ppm !== undefined) {
-      if (constraints.min_fee_rate_ppm !== undefined && p.fee_rate_ppm < constraints.min_fee_rate_ppm) {
+      if (merged.min_fee_rate_ppm !== undefined && p.fee_rate_ppm < merged.min_fee_rate_ppm) {
         return {
-          message: `fee_rate_ppm ${p.fee_rate_ppm} below minimum ${constraints.min_fee_rate_ppm}`,
-          hint: HINTS.constraint_violation('fee_rate_ppm', p.fee_rate_ppm, constraints.min_fee_rate_ppm, constraints.max_fee_rate_ppm),
+          message: `fee_rate_ppm ${p.fee_rate_ppm} below minimum ${merged.min_fee_rate_ppm}`,
+          hint: HINTS.constraint_violation('fee_rate_ppm', p.fee_rate_ppm, merged.min_fee_rate_ppm, merged.max_fee_rate_ppm),
         };
       }
-      if (constraints.max_fee_rate_ppm !== undefined && p.fee_rate_ppm > constraints.max_fee_rate_ppm) {
+      if (merged.max_fee_rate_ppm !== undefined && p.fee_rate_ppm > merged.max_fee_rate_ppm) {
         return {
-          message: `fee_rate_ppm ${p.fee_rate_ppm} exceeds maximum ${constraints.max_fee_rate_ppm}`,
-          hint: HINTS.constraint_violation('fee_rate_ppm', p.fee_rate_ppm, constraints.min_fee_rate_ppm, constraints.max_fee_rate_ppm),
+          message: `fee_rate_ppm ${p.fee_rate_ppm} exceeds maximum ${merged.max_fee_rate_ppm}`,
+          hint: HINTS.constraint_violation('fee_rate_ppm', p.fee_rate_ppm, merged.min_fee_rate_ppm, merged.max_fee_rate_ppm),
+        };
+      }
+    }
+    if (instruction.action === 'update_htlc_limits') {
+      if (p.min_htlc_msat !== undefined && (!Number.isInteger(p.min_htlc_msat) || p.min_htlc_msat < 0)) {
+        return {
+          message: 'min_htlc_msat must be a non-negative integer',
+          hint: 'Use whole millisatoshis for min_htlc_msat.',
+        };
+      }
+      if (p.max_htlc_msat !== undefined && (!Number.isInteger(p.max_htlc_msat) || p.max_htlc_msat <= 0)) {
+        return {
+          message: 'max_htlc_msat must be a positive integer',
+          hint: 'Use whole millisatoshis for max_htlc_msat.',
+        };
+      }
+      if (Number.isInteger(p.min_htlc_msat) && Number.isInteger(p.max_htlc_msat) && p.min_htlc_msat > p.max_htlc_msat) {
+        return {
+          message: 'min_htlc_msat cannot exceed max_htlc_msat',
+          hint: 'Keep min_htlc_msat less than or equal to max_htlc_msat.',
         };
       }
     }

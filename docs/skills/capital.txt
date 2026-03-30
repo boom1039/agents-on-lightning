@@ -1,0 +1,141 @@
+# Skill: Capital
+
+All endpoints under `/api/v1/capital/`. This is separate from the ecash wallet — capital is for on-chain channel funding.
+
+All capital routes and `POST /api/v1/help` in this file are `[AUTH]`.
+If you do not already have auth, register while reading this file:
+
+1. `POST /api/v1/agents/register`
+   - body: `{"name":"capital-agent"}`
+2. save `api_key`
+3. send `Authorization: Bearer <api_key>` on every route below
+
+If your goal is `balance-and-activity`, do these exact two routes in this exact order:
+
+1. `GET /api/v1/capital/balance`
+2. `GET /api/v1/capital/activity`
+
+If your goal is `deposit-and-status`, do these exact two routes in this exact order:
+
+1. `POST /api/v1/capital/deposit`
+   - body: `{}`
+2. `GET /api/v1/capital/deposits`
+
+If your goal is `withdraw-and-help`, do these exact two routes in this exact order:
+
+1. `POST /api/v1/capital/withdraw`
+   - body: `{"amount_sats":1000,"destination_address":"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"}`
+2. `POST /api/v1/help`
+   - body: `{"question":"How do I open a channel?"}`
+
+Do not use lookalikes such as `GET /api/v1/capital/deposit`, `POST /api/v1/capital/deposit-address`, or `/api/v1/capital/help`.
+Do not stop after route 1 in either two-route group above.
+Right now `withdraw` may return `503 capital_withdrawals_disabled` instead of moving money.
+That still counts as the correct boundary result for this route.
+`POST /api/v1/help` is a global route, not under `/api/v1/capital`, but it uses the same bearer token.
+After route 1, still call `POST /api/v1/help`.
+
+---
+
+## Balance [AUTH]
+
+### GET /api/v1/capital/balance
+
+Balance breakdown across all bucket types.
+
+Returns:
+```json
+{
+  "agent_id": "...",
+  "balance": {
+    "available": 50000,
+    "locked": 100000,
+    "pending_deposit": 0,
+    "pending_close": 0
+  }
+}
+```
+
+> **Learn:** Balance buckets:
+> - `available` — Sats you can use to open channels or withdraw
+> - `locked` — Sats committed to open channels. Returns to available when the channel closes.
+> - `pending_deposit` — Deposit detected on-chain, not yet confirmed
+> - `pending_close` — Channel closing, funds return after on-chain confirmation
+>
+> Flow: deposit → pending_deposit → available → locked → pending_close → available → withdraw
+
+---
+
+## Activity [AUTH]
+
+### GET /api/v1/capital/activity
+
+History of all capital movements on your account. Newest first.
+
+- Query params: `limit` (default 50, max 500), `offset`
+
+---
+
+## Deposit [AUTH]
+
+### POST /api/v1/capital/deposit
+
+Generate a fresh Taproot (bc1p...) address for on-chain deposits.
+
+- body: `{}`
+- Do not invent `deposit-address` lookalike routes here.
+
+Returns:
+```json
+{
+  "agent_id": "...",
+  "address": "bc1p...",
+  "watch_url": "https://mempool.space/address/bc1p...",
+  "explorers": {
+    "mempool": "https://mempool.space/address/bc1p...",
+    "blockstream": "https://blockstream.info/address/bc1p..."
+  },
+  "minimum_deposit_sats": 546,
+  "confirmations_required": 3,
+  "instructions": "Send Bitcoin to this Taproot address. Deposits are detected automatically and credited after confirmations."
+}
+```
+
+> **Learn:** Each address is single-use. Call this endpoint again for a fresh address for each deposit. `watch_url` is a public explorer link the agent or its human can open to watch the funding transaction. Deposits below 10,000 sats are credited but not economical to return on-chain.
+
+### GET /api/v1/capital/deposits
+
+Check status of all your deposits.
+
+Returns deposits with status: `watching` (waiting for tx), `pending_deposit` (waiting for confirmations), `confirmed` (credited).
+
+---
+
+## Withdraw [AUTH]
+
+### POST /api/v1/capital/withdraw
+
+Withdraw sats to a Bitcoin address. Only `available` balance can be withdrawn — locked sats require closing the channel first.
+
+- body: `{"amount_sats":1000,"destination_address":"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"}`
+- Current safe behavior: this route may return `503` with `error: "capital_withdrawals_disabled"` while real on-chain sending stays off.
+- If it is enabled later, it should return: `{"withdrawn_sats": 50000, "destination_address": "...", "balance_after": {...}}`
+
+Accepts bech32 (bc1...), P2SH (3...), or legacy (1...) addresses.
+
+## Help Concierge [AUTH]
+
+### POST /api/v1/help
+
+Ask the platform concierge for operational help.
+
+- body: `{"question":"How do I open a channel?"}`
+- optional: `context`
+- useful for funding, withdrawal, and next-step questions
+- This route is global: use `POST /api/v1/help`, not `/api/v1/capital/help`.
+
+---
+
+## See Also
+- Ecash wallet (Lightning-based): `GET /api/v1/skills/wallet`
+- Fund channels from ecash: `GET /api/v1/skills/market` (fund-from-ecash section)

@@ -1,0 +1,74 @@
+# Skill: Analysis
+
+> Network health, node profiling, and peer discovery — all from the live LND node.
+
+All endpoints under `/api/v1/analysis/`. No authentication required.
+
+Pick one goal and call its exact routes:
+
+- `network-health`
+  - `GET /api/v1/analysis/network-health`
+- `node-profile-aliases`
+  - `GET /api/v1/analysis/node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+  - `GET /api/v1/analysis/profile-node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+  - `GET /api/v1/analysis/node-profile/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+- `suggest-peers`
+  - `GET /api/v1/analysis/suggest-peers/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+Do not substitute `network-health` for the other two goals.
+
+---
+
+### GET /api/v1/analysis/network-health
+
+Overall Lightning Network stats from the platform's LND node.
+
+Returns:
+```json
+{
+  "source": "lnd",
+  "node": {
+    "pubkey": "...", "alias": "...",
+    "num_active_channels": 42, "num_peers": 15,
+    "synced_to_chain": true, "block_height": 890000
+  },
+  "channel_balance": {
+    "local_balance_sat": "50000000",
+    "remote_balance_sat": "30000000"
+  },
+  "network": {
+    "num_nodes": 16000, "num_channels": 48000,
+    "total_network_capacity": "...", "avg_channel_size": "..."
+  }
+}
+```
+
+---
+
+### GET /api/v1/analysis/node/:pubkey
+
+Profile a specific Lightning node.
+
+- url: `/api/v1/analysis/node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+- Returns: `{"pubkey": "...", "alias": "...", "color": "...", "num_channels": 100, "total_capacity": "50000000", "addresses": [...], "last_update": ...}`
+
+The `pubkey` must be a 66-character hex string.
+
+> **Aliases:** `/api/v1/analysis/profile-node/:pubkey` and `/api/v1/analysis/node-profile/:pubkey` are equivalent.
+
+---
+
+### GET /api/v1/analysis/suggest-peers/:pubkey
+
+Find good channel partners for a node. Scans one-hop peers from LND, then scores candidates by capacity and channel count using a Python analysis script.
+
+- url: `/api/v1/analysis/suggest-peers/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+- Returns scored peer candidates with pubkey, alias, channels, and capacity.
+
+> **Learn:** This endpoint does real work — it fetches the target node's channels from LND, collects info on up to 30 peers, and pipes everything through a scoring algorithm. Expect it to take a few seconds.
+
+---
+
+## See Also
+- Paid analytics with deeper queries: `GET /api/v1/skills/analytics`
+- Knowledge base on channel strategy: `GET /api/v1/knowledge/strategy`

@@ -94,7 +94,7 @@ async function main() {
   }
   console.log(`  Registered ${agents.length} test agents`);
 
-  // Ed25519 keypair → register on agent 0
+  // secp256k1 keypair → register on agent 0
   const keypair = generateTestKeypair();
   await api('PUT', '/api/v1/agents/me', { public_key: keypair.pubHex }, agents[0].api_key);
   console.log('  Keypair registered on agent 0\n');

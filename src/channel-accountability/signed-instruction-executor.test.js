@@ -7,15 +7,17 @@
  * - Preview: dry-run validation that never mutates state
  * - Preview idempotency: preview N times, then execute — execution succeeds
  * - Error hints: every error path returns an actionable `hint` field
- * - Ed25519 test vector: the playbook Step 11 example verifies byte-for-byte
+ * - secp256k1 test vector: the playbook example verifies byte-for-byte
  *
- * Uses real Ed25519 cryptography — no mocks.
+ * Uses real secp256k1 cryptography — no mocks.
  * Run: node --test server/channel-accountability/signed-instruction-executor.test.js
  */
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, sign } from 'node:crypto';
+import {
+  createHash, createSign, createPrivateKey,
+} from 'node:crypto';
 import { SignedInstructionExecutor } from './signed-instruction-executor.js';
 import { canonicalJSON } from './crypto-utils.js';
 import { generateTestKeypair, signInstruction } from './test-crypto-helpers.js';
@@ -26,6 +28,13 @@ import { generateTestKeypair, signInstruction } from './test-crypto-helpers.js';
 
 function sha256(data) {
   return createHash('sha256').update(data, 'utf-8').digest('hex');
+}
+
+function signUtf8Message(message, privateKey) {
+  const signer = createSign('SHA256');
+  signer.update(message, 'utf8');
+  signer.end();
+  return signer.sign(privateKey).toString('hex');
 }
 
 /**
@@ -179,10 +188,10 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
   });
 
   // =========================================================================
-  // Ed25519 Test Vector (Playbook Step 11c)
+  // secp256k1 Test Vector
   // =========================================================================
 
-  describe('Ed25519 test vector from playbook', () => {
+  describe('secp256k1 test vector from playbook', () => {
     it('produces the exact canonical JSON from the playbook', () => {
       const instruction = {
         action: 'set_fee_policy',
@@ -207,12 +216,21 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       assert.equal(hash, '90845ab649f087fb44426685381393ce6b50119886a576c3910476af3b26ae50');
     });
 
-    it('Ed25519 signature from the playbook verifies correctly', async () => {
-      const { verifyEd25519Signature } = await import('../identity/auth.js');
-      const pubHex = 'b7949d228d8ad566e789979284d3ddd0f37d4647de343b03d287df1727ecf65f';
+    it('secp256k1 signature from the playbook verifies correctly', async () => {
+      const { verifySecp256k1Signature } = await import('../identity/auth.js');
+      const pubHex = '034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa';
       const canonical = '{"action":"set_fee_policy","agent_id":"test-agent-00","channel_id":"867530900000001","params":{"base_fee_msat":1000,"fee_rate_ppm":200},"timestamp":1742400000000}';
-      const sigHex = '1d4589c9a2210d854f8f4e279a892f90552fe426cbbae9d5e8d759acfd634f607e2608a13810af4a4e638705b1f65827ae1b6903faa8188efc31c176b9dbba03';
-      const valid = await verifyEd25519Signature(pubHex, canonical, sigHex);
+      const privateKey = createPrivateKey({
+        key: Buffer.concat([
+          Buffer.from('302e0201010420', 'hex'),
+          Buffer.from('1111111111111111111111111111111111111111111111111111111111111111', 'hex'),
+          Buffer.from('a00706052b8104000a', 'hex'),
+        ]),
+        format: 'der',
+        type: 'sec1',
+      });
+      const sigHex = signUtf8Message(canonical, privateKey);
+      const valid = await verifySecp256k1Signature(pubHex, canonical, sigHex);
       assert.equal(valid, true, 'Playbook test vector signature must verify');
     });
 
@@ -320,7 +338,7 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const signature = signInstruction(instruction, kp.privateKey);
       const result = await executor.execute(AGENT_ID, { instruction, signature });
       assert.equal(result.success, false);
-      assert.equal(result.failed_at, 'action_whitelisted');
+      assert.equal(result.failed_at, 'action_valid');
       assert.ok(result.hint.includes('set_fee_policy'));
       assert.ok(result.hint.includes('update_htlc_limits'));
     });
@@ -374,6 +392,7 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const result = await executor.execute(AGENT_ID, { instruction, signature });
       assert.equal(result.success, false);
       assert.equal(result.failed_at, 'channel_owned');
+      assert.ok(result.checks_passed.includes('signature_valid'));
       assert.ok(result.hint.includes('operator'));
     });
 
@@ -496,12 +515,12 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       assert.equal(result.valid, true);
       assert.deepEqual(result.checks_passed, [
         'pubkey_registered',
-        'action_whitelisted',
+        'action_valid',
         'agent_id_matches',
         'timestamp_fresh',
         'not_duplicate',
-        'channel_owned',
         'signature_valid',
+        'channel_owned',
         'constraints_met',
         'cooldown_clear',
       ]);
@@ -528,11 +547,10 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       assert.ok(result.hint.includes('canonical'));
       assert.deepEqual(result.checks_passed, [
         'pubkey_registered',
-        'action_whitelisted',
+        'action_valid',
         'agent_id_matches',
         'timestamp_fresh',
         'not_duplicate',
-        'channel_owned',
       ]);
     });
 
@@ -793,8 +811,8 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const instruction = makeInstruction(AGENT_ID, CHAN_ID_1);
       // Common mistake: sign the full payload { instruction, signature: '' }
       const wrongMessage = canonicalJSON({ instruction, signature: '' });
-      const sig = sign(null, Buffer.from(wrongMessage), kp.privateKey);
-      const result = await executor.execute(AGENT_ID, { instruction, signature: sig.toString('hex') });
+      const signature = signUtf8Message(wrongMessage, kp.privateKey);
+      const result = await executor.execute(AGENT_ID, { instruction, signature });
       assert.equal(result.success, false);
       assert.equal(result.failed_at, 'signature_valid');
     });
@@ -803,8 +821,8 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const instruction = makeInstruction(AGENT_ID, CHAN_ID_1);
       // Another common mistake: use JSON.stringify which doesn't sort keys
       const wrongMessage = JSON.stringify(instruction);
-      const sig = sign(null, Buffer.from(wrongMessage), kp.privateKey);
-      const result = await executor.execute(AGENT_ID, { instruction, signature: sig.toString('hex') });
+      const signature = signUtf8Message(wrongMessage, kp.privateKey);
+      const result = await executor.execute(AGENT_ID, { instruction, signature });
       // This might actually pass if JSON.stringify happens to sort keys the same way,
       // but in general it won't. We verify it either passes (if same) or fails at signature.
       if (!result.success) {

@@ -1,7 +1,7 @@
 /**
  * Public Append-Only Ledger
  *
- * Every sat is accounted for. Every deposit, withdrawal, bounty payment,
+ * Every sat is accounted for. Every deposit, withdrawal,
  * tournament result, and internal transfer is logged publicly.
  * Agents can audit the entire system at any time.
  *
@@ -17,7 +17,7 @@ export class PublicLedger {
   /**
    * Record a transaction to the public ledger.
    * @param {object} tx - Transaction data
-   * @param {string} tx.type - 'deposit' | 'withdrawal' | 'credit' | 'transfer' | 'bounty' | 'tournament'
+   * @param {string} tx.type - 'deposit' | 'withdrawal' | 'credit' | 'transfer' | 'tournament'
    * @param {string} tx.agent_id - Primary agent involved
    * @param {number} tx.amount_sats - Amount in satoshis
    */
@@ -101,13 +101,12 @@ export class PublicLedger {
         total_deposited_sats: 0,
         total_withdrawn_sats: 0,
         total_transferred_sats: 0,
-        total_bounties_paid_sats: 0,
         unique_agents: 0,
       };
     }
 
     const agents = new Set();
-    let deposited = 0, withdrawn = 0, transferred = 0, bounties = 0;
+    let deposited = 0, withdrawn = 0, transferred = 0;
 
     for (const e of entries) {
       if (e.agent_id) agents.add(e.agent_id);
@@ -119,7 +118,6 @@ export class PublicLedger {
         case 'deposit': deposited += amt; break;
         case 'withdrawal': withdrawn += amt; break;
         case 'transfer': transferred += amt; break;
-        case 'bounty': bounties += amt; break;
       }
     }
 
@@ -128,7 +126,6 @@ export class PublicLedger {
       total_deposited_sats: deposited,
       total_withdrawn_sats: withdrawn,
       total_transferred_sats: transferred,
-      total_bounties_paid_sats: bounties,
       unique_agents: agents.size,
     };
   }

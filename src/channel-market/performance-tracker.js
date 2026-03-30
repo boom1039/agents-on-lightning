@@ -40,6 +40,7 @@ export class PerformanceTracker {
 
     this._uptimeTimer = null;
     this._dailyTimer = null;
+    this._stopping = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -77,12 +78,14 @@ export class PerformanceTracker {
 
   startPolling(intervalMs = 30_000) {
     if (this._uptimeTimer) return;
+    this._stopping = false;
     this._uptimeTimer = setInterval(() => this._recordUptimeSamples(), intervalMs);
     console.log(`[PerformanceTracker] Uptime polling every ${intervalMs / 1000}s`);
     this._scheduleDailySnapshot();
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._uptimeTimer) {
       clearInterval(this._uptimeTimer);
       this._uptimeTimer = null;
@@ -145,7 +148,9 @@ export class PerformanceTracker {
 
       await this._persist();
     } catch (err) {
-      console.error(`[PerformanceTracker] Uptime sample error: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[PerformanceTracker] Uptime sample error: ${err.message}`);
+      }
     }
   }
 
@@ -159,7 +164,7 @@ export class PerformanceTracker {
 
     // Authorization: agent can only see their own channels
     if (assignment && assignment.agent_id !== agentId) {
-      return { success: false, error: 'Channel not assigned to you', status: 403 };
+      return { success: false, error: 'Channel not found', status: 404 };
     }
 
     // Revenue data
@@ -418,7 +423,9 @@ export class PerformanceTracker {
 
       console.log(`[PerformanceTracker] Daily snapshot: ${count} channels recorded for ${date}`);
     } catch (err) {
-      console.error(`[PerformanceTracker] Daily snapshot error: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[PerformanceTracker] Daily snapshot error: ${err.message}`);
+      }
     }
   }
 }

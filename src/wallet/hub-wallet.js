@@ -241,7 +241,7 @@ export class HubWallet {
   }
 
   /**
-   * Credit an agent's balance (internal transfer, bounty payment, etc.)
+   * Credit an agent's balance (internal transfer, etc.)
    */
   async creditBalance(agentId, amountSats, reason) {
     const unlock = await acquire(`wallet:${agentId}`);
@@ -262,7 +262,7 @@ export class HubWallet {
   }
 
   /**
-   * Transfer sats between agents (for bounty payments, etc.)
+   * Transfer sats between agents.
    */
   async transfer(fromAgentId, toAgentId, amountSats, reason) {
     if (!Number.isInteger(amountSats) || amountSats < 100) {

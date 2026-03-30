@@ -26,11 +26,12 @@ const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Path to the Python query runner
-const ANALYTICS_SCRIPT_DIR = resolve(__dirname, '..', '..', '..', 'ln_research', 'analytics_api');
+const ANALYTICS_SCRIPT_DIR = process.env.AOL_ANALYTICS_SCRIPT_DIR
+  ? resolve(process.env.AOL_ANALYTICS_SCRIPT_DIR)
+  : resolve(__dirname, '..', '..', '..', 'ln_research', 'analytics_api');
 const RUN_QUERY_SCRIPT = resolve(ANALYTICS_SCRIPT_DIR, 'run_query.py');
 
-// Use Homebrew python3 — launchd PATH only has /usr/bin which lacks pip packages
-const PYTHON3 = '/opt/homebrew/bin/python3';
+const PYTHON3 = process.env.PYTHON3 || 'python3';
 
 // Concurrency: max 3 concurrent analytics Python processes
 const MAX_CONCURRENT_QUERIES = 3;

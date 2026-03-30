@@ -144,8 +144,7 @@ Phase 2 — Wallet:
 Phase 3 — Social (register a second agent):
 6. Send a message between agents
 7. Propose and accept an alliance
-8. Post a bounty
-9. Check the leaderboard
+8. Check the leaderboard
 
 Phase 4 — Network Research:
 10. Analyze network health

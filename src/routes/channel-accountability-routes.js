@@ -6,25 +6,67 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
-import { rateLimit, resetCounters } from '../identity/rate-limiter.js';
+import { checkAndIncrement, rateLimit, resetCounters } from '../identity/rate-limiter.js';
+import { IdempotencyStore } from '../identity/idempotency-store.js';
+import { runIdempotentRoute } from '../identity/idempotency-route.js';
 import { validateChannelIdOrPoint } from '../identity/validators.js';
+import { rejectUnauthorizedOperatorRoute, rejectUnauthorizedTestRoute } from '../identity/request-security.js';
+import { err400Validation } from '../identity/agent-friendly-errors.js';
+import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
 
-const isLocalhost = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.ip);
+const AGENT_CHANNEL_PREVIEW_ATTEMPT_LIMIT = 8;
+const AGENT_CHANNEL_INSTRUCT_ATTEMPT_LIMIT = 3;
+const SHARED_CHANNEL_INSTRUCT_ATTEMPT_LIMIT = 8;
+const SHARED_CHANNEL_INSTRUCT_COOLDOWN_MS = 60 * 1000;
+
+function sendUnexpectedKeys(res, unexpected, see) {
+  return err400Validation(res, `Unexpected field(s): ${unexpected.join(', ')}`, {
+    hint: 'Send only the documented JSON keys for this route.',
+    see,
+  });
+}
+
+function summarizeAuditEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    ts: entry._ts || null,
+    type: entry.type || null,
+    chan_id: entry.chan_id || entry.channel_id || null,
+    agent_id: entry.agent_id || null,
+    reason: entry.reason || null,
+    hash: typeof entry.hash === 'string' ? entry.hash.slice(0, 12) : null,
+  };
+}
+
+function summarizeVerifyResult(result, extra = {}) {
+  return {
+    ...extra,
+    valid: Boolean(result?.valid),
+    checked: Number(result?.checked || 0),
+    total: Number(result?.total || 0),
+    error_count: Array.isArray(result?.errors) ? result.errors.length : 0,
+    warning_count: Array.isArray(result?.warnings) ? result.warnings.length : 0,
+  };
+}
 
 export function channelAccountabilityRoutes(daemon) {
   const router = Router();
   const auth = requireAuth(daemon.agentRegistry);
+  const idempotencyStore = daemon.dataLayer ? new IdempotencyStore({ dataLayer: daemon.dataLayer }) : null;
+  const dangerPolicy = new DangerRoutePolicyStore({ dataLayer: daemon.dataLayer });
 
   // --- Test-only: reset rate limits for E2E tests (localhost only) ---
-  router.post('/api/v1/test/reset-rate-limits', (req, res) => {
-    if (!isLocalhost(req)) return res.status(403).json({ error: 'Localhost only' });
-    resetCounters();
+  router.post('/api/v1/test/reset-rate-limits', async (req, res) => {
+    const rejection = rejectUnauthorizedTestRoute(req, res);
+    if (rejection) return rejection;
+    await resetCounters();
     res.json({ status: 'ok', message: 'Rate limit counters cleared' });
   });
 
   // --- Operator-only: assign channel ---
   router.post('/api/v1/channels/assign', async (req, res) => {
-    if (!isLocalhost(req)) return res.status(403).json({ error: 'Operator-only (localhost)' });
+    const rejection = rejectUnauthorizedOperatorRoute(req, res);
+    if (rejection) return rejection;
     try {
       const { channel_point, remote_pubkey, agent_id, constraints } = req.body;
       if (!agent_id) return res.status(400).json({ error: 'agent_id required' });
@@ -74,7 +116,8 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Operator-only: revoke assignment ---
   router.delete('/api/v1/channels/assign/:chanId', async (req, res) => {
-    if (!isLocalhost(req)) return res.status(403).json({ error: 'Operator-only (localhost)' });
+    const rejection = rejectUnauthorizedOperatorRoute(req, res);
+    if (rejection) return rejection;
     const chanCheck = validateChannelIdOrPoint(req.params.chanId);
     if (!chanCheck.valid) return res.status(400).json({ error: chanCheck.reason });
     try {
@@ -120,7 +163,45 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: preview signed instruction (dry-run validation) ---
   router.post('/api/v1/channels/preview', auth, rateLimit('channel_read'), async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/channels/mine');
+    }
     try {
+      const channelId = req.body?.instruction?.channel_id || 'unknown';
+      const agentAttempts = await checkAndIncrement(`danger:channels_preview:attempt:${req.agentId}`, AGENT_CHANNEL_PREVIEW_ATTEMPT_LIMIT, 15 * 60 * 1000);
+      if (!agentAttempts.allowed) {
+        res.set('Retry-After', String(agentAttempts.retryAfter));
+        return res.status(429).json({
+          error: 'cooldown_active',
+          message: 'Too many signed channel previews across your channels.',
+          retry_after_seconds: agentAttempts.retryAfter,
+          retryable: true,
+          hint: 'Wait a bit before previewing another signed channel change.',
+        });
+      }
+      const attempts = await checkAndIncrement(`danger:channels_preview:attempt:${req.agentId}:${channelId}`, 6, 15 * 60 * 1000);
+      if (!attempts.allowed) {
+        res.set('Retry-After', String(attempts.retryAfter));
+        return res.status(429).json({
+          error: 'cooldown_active',
+          message: 'Too many signed channel previews in a short window.',
+          retry_after_seconds: attempts.retryAfter,
+          retryable: true,
+          hint: 'Wait a bit before previewing another channel-policy change.',
+        });
+      }
+      const sharedAttempts = await checkAndIncrement('danger:channels_preview:attempt:__shared__', 24, 15 * 60 * 1000);
+      if (!sharedAttempts.allowed) {
+        res.set('Retry-After', String(sharedAttempts.retryAfter));
+        return res.status(429).json({
+          error: 'cooldown_active',
+          message: 'The node is handling too many signed channel previews right now.',
+          retry_after_seconds: sharedAttempts.retryAfter,
+          retryable: true,
+          hint: 'Wait a bit, then preview your channel change again.',
+        });
+      }
       const result = await daemon.channelExecutor.preview(req.agentId, req.body);
       const status = result.valid ? 200 : (result.status || 400);
       if (result.retry_after_seconds) {
@@ -138,24 +219,96 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: submit signed instruction ---
   router.post('/api/v1/channels/instruct', auth, rateLimit('channel_instruct'), async (req, res) => {
-    try {
-      const result = await daemon.channelExecutor.execute(req.agentId, req.body);
-      const status = result.success ? 200 : (result.status || 400);
-      const body = result.success
-        ? { status: 'executed', ...result.result, learn: result.learn }
-        : { error: result.error, hint: result.hint, failed_at: result.failed_at, checks_passed: result.checks_passed };
-      if (result.retry_after_seconds) {
-        res.set('Retry-After', String(result.retry_after_seconds));
-        body.retry_after_seconds = result.retry_after_seconds;
-      }
-      res.status(status).json(body);
-    } catch (err) {
-      console.error(`[Gateway] ${req.path}: ${err.message}`);
-      res.status(500).json({
-        error: 'Internal server error',
-        hint: 'Unexpected server error during instruction execution. This is a bug — please report it.',
-      });
+    const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/channels/mine');
     }
+    return runIdempotentRoute({
+      req,
+      res,
+      store: idempotencyStore,
+      scope: 'channels:instruct',
+      handler: async () => {
+        const channelId = req.body?.instruction?.channel_id || 'unknown';
+        const agentAttempts = await checkAndIncrement(`danger:channels_instruct:attempt:${req.agentId}`, AGENT_CHANNEL_INSTRUCT_ATTEMPT_LIMIT, 60 * 60 * 1000);
+        if (!agentAttempts.allowed) {
+          return {
+            statusCode: 429,
+            body: {
+              error: 'cooldown_active',
+              message: 'Too many signed channel updates across your channels this hour.',
+              retry_after_seconds: agentAttempts.retryAfter,
+              hint: 'Wait before sending another signed channel update on this node.',
+            },
+          };
+        }
+        const attempts = await checkAndIncrement(`danger:channels_instruct:attempt:${req.agentId}:${channelId}`, 2, 60 * 60 * 1000);
+        if (!attempts.allowed) {
+          return {
+            statusCode: 429,
+            body: {
+              error: 'cooldown_active',
+              message: 'Too many signed channel updates for this channel this hour.',
+              retry_after_seconds: attempts.retryAfter,
+              hint: 'Wait before sending another fee-policy or HTLC update for this channel.',
+            },
+          };
+        }
+        const sharedAttempts = await checkAndIncrement('danger:channels_instruct:attempt:__shared__', SHARED_CHANNEL_INSTRUCT_ATTEMPT_LIMIT, 60 * 60 * 1000);
+        if (!sharedAttempts.allowed) {
+          return {
+            statusCode: 429,
+            body: {
+              error: 'cooldown_active',
+              message: 'The node is handling too many signed channel updates right now.',
+              retry_after_seconds: sharedAttempts.retryAfter,
+              hint: 'Wait a bit before sending another fee-policy or HTLC update.',
+            },
+          };
+        }
+        const sharedCooldown = await dangerPolicy.checkCooldown({
+          scope: 'channels_instruct',
+          agentId: '__shared__',
+          cooldownMs: SHARED_CHANNEL_INSTRUCT_COOLDOWN_MS,
+        });
+        if (!sharedCooldown.allowed) {
+          return {
+            statusCode: 429,
+            body: {
+              error: 'cooldown_active',
+              message: 'The node is cooling down after a recent signed channel update.',
+              retry_after_seconds: sharedCooldown.retryAfterSeconds,
+              hint: 'Wait a bit before sending another fee-policy or HTLC update anywhere on this node.',
+            },
+          };
+        }
+        const result = await daemon.channelExecutor.execute(req.agentId, req.body);
+        const status = result.success ? 200 : (result.status || 400);
+        const body = result.success
+          ? { status: 'executed', ...result.result, learn: result.learn }
+          : { error: result.error, hint: result.hint, failed_at: result.failed_at, checks_passed: result.checks_passed };
+        if (result.success) {
+          await dangerPolicy.recordSuccess({
+            scope: 'channels_instruct',
+            agentId: '__shared__',
+          });
+        }
+        if (result.retry_after_seconds) {
+          body.retry_after_seconds = result.retry_after_seconds;
+        }
+        return { statusCode: status, body };
+      },
+      onError: (err) => {
+        console.error(`[Gateway] ${req.path}: ${err.message}`);
+        return {
+          statusCode: 500,
+          body: {
+            error: 'Internal server error',
+            hint: 'Unexpected server error during instruction execution. This is a bug — please report it.',
+          },
+        };
+      },
+    });
   });
 
   // --- Agent: instruction history ---
@@ -176,7 +329,11 @@ export function channelAccountabilityRoutes(daemon) {
       const limit = Math.min(parseInt(_req.query.limit, 10) || 100, 1000);
       const since = _req.query.since ? parseInt(_req.query.since, 10) : undefined;
       const entries = await daemon.channelAuditLog.readAll({ since, limit });
-      res.json({ entries, count: entries.length });
+      res.json({
+        entries: entries.map(summarizeAuditEntry).filter(Boolean),
+        count: entries.length,
+        learn: 'Public audit summaries show what happened without exposing raw monitor internals.',
+      });
     } catch (err) {
       console.error(`[Gateway] ${_req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -190,7 +347,12 @@ export function channelAccountabilityRoutes(daemon) {
     try {
       const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
       const entries = await daemon.channelAuditLog.readByChannel(req.params.chanId, limit);
-      res.json({ entries, count: entries.length });
+      res.json({
+        chan_id: req.params.chanId,
+        entries: entries.map(summarizeAuditEntry).filter(Boolean),
+        count: entries.length,
+        learn: 'This public view is summary-only. Owners and operators use deeper tools for raw channel details.',
+      });
     } catch (err) {
       console.error(`[Gateway] ${req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -201,7 +363,7 @@ export function channelAccountabilityRoutes(daemon) {
   router.get('/api/v1/channels/verify', rateLimit('channel_read'), async (_req, res) => {
     try {
       const result = await daemon.channelAuditLog.verify();
-      res.json(result);
+      res.json(summarizeVerifyResult(result));
     } catch (err) {
       console.error(`[Gateway] ${_req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -214,7 +376,7 @@ export function channelAccountabilityRoutes(daemon) {
     if (!chanCheck.valid) return res.status(400).json({ error: chanCheck.reason });
     try {
       const result = await daemon.channelAuditLog.verify(req.params.chanId);
-      res.json(result);
+      res.json(summarizeVerifyResult(result, { chan_id: req.params.chanId }));
     } catch (err) {
       console.error(`[Gateway] ${req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });
@@ -226,7 +388,10 @@ export function channelAccountabilityRoutes(daemon) {
     try {
       const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
       const violations = await daemon.channelAuditLog.readByType('violation_detected', limit);
-      res.json({ violations, count: violations.length });
+      res.json({
+        violations: violations.map(summarizeAuditEntry).filter(Boolean),
+        count: violations.length,
+      });
     } catch (err) {
       console.error(`[Gateway] ${req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });

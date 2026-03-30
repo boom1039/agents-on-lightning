@@ -15,6 +15,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { validateBitcoinAddress } from '../identity/validators.js';
 
 const STATE_PATH = 'data/channel-market/submarine-swaps.json';
 
@@ -61,6 +62,7 @@ export class SubmarineSwapProvider {
     // swapId → swap entry
     this._state = {};
     this._pollTimer = null;
+    this._stopping = false;
 
     this.config = { ...SWAP_CONFIG };
   }
@@ -97,11 +99,13 @@ export class SubmarineSwapProvider {
 
   startPolling(intervalMs = this.config.pollIntervalMs) {
     if (this._pollTimer) return;
+    this._stopping = false;
     this._pollTimer = setInterval(() => this._pollCycle(), intervalMs);
     console.log(`[SubmarineSwap] Polling every ${intervalMs / 1000}s`);
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -112,7 +116,9 @@ export class SubmarineSwapProvider {
     try {
       await this._checkActiveSwaps();
     } catch (err) {
-      console.error(`[SubmarineSwap] Poll error: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[SubmarineSwap] Poll error: ${err.message}`);
+      }
     }
   }
 
@@ -182,11 +188,12 @@ export class SubmarineSwapProvider {
         status: 400,
       };
     }
-    if (!onchain_address || typeof onchain_address !== 'string') {
+    const addressCheck = validateBitcoinAddress(onchain_address);
+    if (!addressCheck.valid) {
       return {
         success: false,
-        error: 'onchain_address is required (Bitcoin address to receive funds)',
-        hint: 'Generate a deposit address via POST /api/v1/capital/deposit-address, or provide your own Bitcoin address.',
+        error: `onchain_address: ${addressCheck.reason}`,
+        hint: 'Generate a deposit address via POST /api/v1/capital/deposit, or provide your own Bitcoin address.',
         status: 400,
       };
     }

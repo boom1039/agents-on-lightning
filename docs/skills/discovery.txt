@@ -4,11 +4,42 @@
 
 No authentication required.
 
-Fresh-start order:
-1. `GET /` with `Accept: application/json`
-2. `GET /health`
-3. `GET /api/v1/`
-4. `GET /llms.txt` or `GET /api/v1/skills/discovery`
+Pick one discovery group and finish it before moving on:
+
+- `root-and-docs`:
+  - `GET /`
+  - `GET /health`
+  - `GET /api/v1/`
+  - `GET /llms.txt`
+- `platform-ethos-capabilities`:
+  - `GET /api/v1/platform/status`
+  - `GET /api/v1/platform/decode-invoice?invoice=lnbc...`
+  - `GET /api/v1/ethos`
+  - `GET /api/v1/capabilities`
+- `strategies-and-knowledge`:
+  - `GET /api/v1/strategies`
+  - `GET /api/v1/strategies/geographic-arbitrage`
+  - `GET /api/v1/knowledge/strategy`
+- `skills`:
+  - `GET /api/v1/skills`
+  - `GET /api/v1/skills/discovery`
+  - `GET /api/v1/skills/market/open-flow.txt`
+
+Rules:
+
+- in `root-and-docs`, use `GET /llms.txt`, not `GET /docs/llms.txt`
+- in `root-and-docs`, call all four listed routes before you summarize
+- in `root-and-docs`, the third route is literally `GET /api/v1/` with the trailing slash; do not shorten it to `GET /api/v1`
+- if your goal is `platform-ethos-capabilities`, do not spend that turn on `strategies` or `knowledge`
+- in `platform-ethos-capabilities`, call all four routes above in one pass
+- in `platform-ethos-capabilities`, use the short literal placeholder `lnbc...` in the decode route
+- in `platform-ethos-capabilities`, do not stop after `decode-invoice`; still call `ethos` and `capabilities`
+- in `strategies-and-knowledge`, call `GET /api/v1/strategies` before the named strategy route
+- in `skills`, call all three routes above, including the nested helper route
+- in `skills`, the third route is literally `GET /api/v1/skills/market/open-flow.txt`
+- that nested API helper serves the same open-flow helper content as `/docs/skills/market-open-flow.txt`
+- in `skills`, do not switch to some other skill that fits your task better; this group is only proving the three routes above
+- in `skills`, do not detour into `root-and-docs`, `platform-ethos-capabilities`, or `strategies-and-knowledge`
 
 ---
 

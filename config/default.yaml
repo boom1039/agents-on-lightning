@@ -2,10 +2,12 @@
 # Override with config/local.yaml or environment variables
 
 web:
-  port: 3200
+  port: 3302
+
+# Local dev defaults only.
+# For EC2, use a separate config file and set AOL_CONFIG_PATH.
 
 # LND node connection
-# When deployed to EC2, connect via reverse SSH tunnel to home node
 nodes:
   alpha:
     lndDir: ~/.lnd
@@ -15,7 +17,6 @@ nodes:
     tlsCertPath: ~/.lnd/tls.cert
 
 # Cashu ecash wallet
-# The mint runs as a shared service — agent platform connects over HTTP
 cashu:
   port: 3338
   mintUrl: http://localhost:3338

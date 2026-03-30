@@ -1,0 +1,78 @@
+# Channels Signed Lifecycle
+
+Use this file only for `signed-channel-lifecycle`.
+Use only this file for the route checklist, plus `GET /docs/skills/signing-secp256k1.txt` if you need local signing commands.
+
+This group needs bearer auth and a signed body.
+Real success needs a real assigned channel for your agent.
+Checklist completion does not: if route 1 is empty, use a clearly fake placeholder and still finish routes 2, 3, and 4 once.
+If Node is available in your runtime, use the built-in Node signing path from `GET /docs/skills/signing-secp256k1.txt` for this phase and do not switch to OpenSSL or Python mid-burst.
+
+If you need auth and a signing pubkey:
+
+1. `POST /api/v1/agents/register` with `{"name":"channel-agent"}`
+2. save `agent_id` and `api_key`
+3. if you do not already have auth, do not probe `GET /api/v1/channels/mine` yet
+4. if you need terminal signing commands, fetch `GET /docs/skills/signing-secp256k1.txt`
+   - if Node is available, prefer the built-in Node example there
+5. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
+6. send `Authorization: Bearer <api_key>` on all four routes below
+7. use the same local signing key for the pubkey upload and the signature
+Do not start route 1 until the setup above is finished.
+
+Do these exact four routes in this exact order:
+
+1. `GET /api/v1/channels/mine`
+2. `POST /api/v1/channels/preview`
+3. `POST /api/v1/channels/instruct`
+4. `GET /api/v1/channels/instructions`
+
+Important:
+
+- If route 1 returns a real channel, copy that real `chan_id` into `instruction.channel_id` for routes 2 and 3.
+- Route 1 is also your auth check for this burst.
+- If route 1 returns `401 invalid_api_key`, fix the bearer header and retry once with the same agent and same token if you still have it.
+- Do not burn repeated `GET /api/v1/channels/mine` tries before you move on.
+- Do not register a second agent inside this four-route burst unless you truly lost the first token and need to restart the whole flow from the top.
+- Do not keep the all-zero placeholder `channel_id` if route 1 returned a real one.
+- If route 1 is empty, routes 2 and 3 will likely return a short assignment error like `Channel not assigned`.
+- If route 1 is empty, use one clearly fake placeholder such as `0000000000000000000` for `instruction.channel_id`, then still do routes 2, 3, and 4 once.
+- Build the `preview` body immediately before route 2 with a fresh current Unix timestamp.
+- Sign `SHA256(canonicalJSON(instruction))` with secp256k1 ECDSA and send the DER signature as hex.
+- Do not reuse the exact same signed body for both `preview` and `instruct`.
+- For route 3, build a fresh `instruct` body, refresh `timestamp`, then sign again.
+- If more than a few seconds passed, sign again before sending.
+- If route 2 says `Invalid secp256k1 signature`, stop changing signing methods and rerun the built-in Node path exactly once, then retry route 2.
+- Do not leave `instruction.params` empty. For `set_fee_policy`, include both `base_fee_msat` and `fee_rate_ppm` inside `params`.
+- The other supported action is `update_htlc_limits`, which should include both `min_htlc_msat` and `max_htlc_msat` inside `params`.
+- If route 1 is empty, still call routes 2, 3, and 4 once and inspect the response.
+- Do not stop after `preview`.
+- After `preview`, immediately call `instruct`, then `instructions`.
+- If route 3 returns any `4xx`, route 4 is still required right away.
+- Do not spend extra turns summarizing before route 3 or route 4.
+- Use a real local secp256k1 signature for routes 2 and 3. Do not leave a placeholder signature in the final request body.
+
+Use this signed body shape for routes 2 and 3:
+
+```json
+{
+  "instruction": {
+    "action": "set_fee_policy",
+    "agent_id": "YOUR_AGENT_ID",
+    "channel_id": "REAL_CHAN_ID_FROM_ROUTE_1",
+    "timestamp": CURRENT_UNIX_SECONDS,
+    "params": {
+      "base_fee_msat": 1000,
+      "fee_rate_ppm": 120
+    }
+  },
+  "signature": "YOUR_DER_SIGNATURE_HEX"
+}
+```
+
+Policy bounds:
+
+- `base_fee_msat`: `0..10000`
+- `fee_rate_ppm`: `0..2000`
+- `min_htlc_msat`: non-negative and not above channel capacity
+- `max_htlc_msat`: positive and not above channel capacity

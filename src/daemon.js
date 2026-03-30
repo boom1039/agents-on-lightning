@@ -13,6 +13,7 @@ import { resolve, join } from 'node:path';
 // Identity
 import { AgentRegistry } from './identity/registry.js';
 import { acquire as acquireMutex } from './identity/mutex.js';
+import { configureRateLimiterPersistence } from './identity/rate-limiter.js';
 
 // Wallet
 import { PublicLedger } from './wallet/ledger.js';
@@ -45,18 +46,23 @@ import {
 export class AgentDaemon {
   constructor(configPath) {
     this._configPath = configPath;
+    this._stopping = false;
   }
 
   async start() {
     console.log('[AgentDaemon] Starting...');
     const t0 = Date.now();
+    this._startupWarnings = [];
+    this._startupError = null;
 
     // 1. Config + DataLayer
     this.config = await loadConfig(this._configPath);
-    this.dataLayer = new DataLayer(getProjectRoot());
+    this.dataLayer = new DataLayer(process.env.AOL_DATA_DIR || getProjectRoot());
+    configureRateLimiterPersistence({ dataLayer: this.dataLayer });
 
     // 2. Load API key (for help endpoint)
     if (!process.env.ANTHROPIC_API_KEY) {
+      this._startupWarnings.push('ANTHROPIC_API_KEY missing');
       for (const keyPath of [
         join(process.env.HOME || '', '.config', 'anthropic', 'api_key'),
         resolve(getProjectRoot(), 'data', '.api-key'),
@@ -76,6 +82,7 @@ export class AgentDaemon {
     }
     if (this.nodeManager.getNodeNames().length === 0) {
       console.warn('[AgentDaemon] No LND nodes connected — running in limited mode');
+      this._startupWarnings.push('No LND nodes connected');
     }
 
     // 4. Agent identity + wallet
@@ -259,6 +266,7 @@ export class AgentDaemon {
       await this.helpEndpoint.initialize();
     } catch (err) {
       console.warn(`[AgentDaemon] Help endpoint init failed: ${err.message}`);
+      this._startupWarnings.push(`Help endpoint unavailable: ${err.message}`);
       this.helpEndpoint = null;
     }
 
@@ -277,6 +285,8 @@ export class AgentDaemon {
   }
 
   async stop() {
+    if (this._stopping) return;
+    this._stopping = true;
     clearInterval(this._leaderboardTimer);
     this.channelMonitor?.stop?.();
     this.depositTracker?.stopPolling?.();
@@ -286,5 +296,18 @@ export class AgentDaemon {
     this.swapProvider?.stopPolling?.();
     this.performanceTracker?.stopPolling?.();
     console.log('[AgentDaemon] Stopped');
+  }
+
+  getHealthSummary() {
+    const nodes = this.nodeManager?.getNodeNames()?.length || 0;
+    const degraded = Boolean(this._startupError) || nodes === 0;
+    return {
+      status: degraded ? 'degraded' : 'ok',
+      degraded,
+      agents: this.agentRegistry?.count?.() || 0,
+      nodes,
+      warnings: [...(this._startupWarnings || [])],
+      startup_error: this._startupError,
+    };
   }
 }

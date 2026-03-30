@@ -63,6 +63,7 @@ export class RevenueAttributionTracker {
     this._revenueConfig = {};
 
     this._pollTimer = null;
+    this._stopping = false;
     this.config = { ...REVENUE_CONFIG };
   }
 
@@ -122,11 +123,13 @@ export class RevenueAttributionTracker {
 
   startPolling(intervalMs = this.config.pollIntervalMs) {
     if (this._pollTimer) return;
+    this._stopping = false;
     this._pollTimer = setInterval(() => this._pollCycle(), intervalMs);
     console.log(`[RevenueTracker] Polling every ${intervalMs / 1000}s`);
   }
 
   stopPolling() {
+    this._stopping = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -137,7 +140,9 @@ export class RevenueAttributionTracker {
     try {
       await this._processForwards();
     } catch (err) {
-      console.error(`[RevenueTracker] Poll error: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[RevenueTracker] Poll error: ${err.message}`);
+      }
     }
   }
 
@@ -158,7 +163,9 @@ export class RevenueAttributionTracker {
         startTime, now, this._lastProcessedIndex, this.config.maxEventsPerPoll
       );
     } catch (err) {
-      console.error(`[RevenueTracker] forwardingHistory() failed: ${err.message}`);
+      if (!this._stopping) {
+        console.error(`[RevenueTracker] forwardingHistory() failed: ${err.message}`);
+      }
       return;
     }
 

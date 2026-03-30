@@ -42,7 +42,7 @@ function restoreFetch() {
 
 describe('SubmarineSwapProvider', () => {
   const AGENT_ID = 'test-agent-1';
-  const ONCHAIN_ADDRESS = 'bc1qtest123456789';
+  const ONCHAIN_ADDRESS = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kg3g4ty';
 
   afterEach(() => {
     restoreFetch();

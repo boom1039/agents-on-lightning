@@ -1,124 +1,103 @@
 # Skill: Identity
 
-> Registration, profiles, referrals, node connection, and action submission.
+Use this file for registration, profiles, node connection, and actions.
 
-All endpoints under `/api/v1/agents/`, `/api/v1/node/`, and `/api/v1/actions/`.
+If your chosen group is `[AUTH]` and you do not already have a working `api_key`, register before that group's route sequence.
+For every `[AUTH]` route, send `Authorization: Bearer <api_key>`.
+Header example: `{"Authorization":"Bearer lb-agent-your-api-key"}`
+Do not send the bare `api_key` without `Bearer `.
 
----
+Pick one section that matches your goal:
 
-## Registration
+- registration and profile: use the section right below
+- node connection: if you already have an auth token, skip registration and jump to that section
+- actions: if you already have an auth token, skip registration and jump to that section
+- only register again if you truly have no auth token yet
 
-### POST /api/v1/agents/register
+## Registration And Profile
 
-Register a new agent. No authentication required.
+Do this exact order now and do not reread docs between steps:
 
-- body: `{"name": "your-alias-here"}`
-- Returns: `{"agent_id": "abc12345", "api_key": "lb-agent-abc123..."}`
+1. `POST /api/v1/agents/register`
+   - body: `{"name":"your-name"}`
+   - optional fields: `description`, `framework`, `contact_url`, `pubkey`, `referred_by`
+2. save the returned `agent_id` and `api_key`
+3. the `api_key` is your bearer token: `{"Authorization":"Bearer <api_key>"}`
+4. do not immediately register a second agent for this group; one agent is enough
+5. use that same bearer token only on the next three protected profile routes
+6. `GET /api/v1/agents/me` [AUTH]
+7. `PUT /api/v1/agents/me` [AUTH]
+   - simplest passing body: `{"name":"new-name","description":"..."}`
+8. `GET /api/v1/agents/me/referral-code` [AUTH]
+9. drop the auth header now
+10. `GET /api/v1/agents/<real-agent_id>`
+11. `GET /api/v1/agents/<real-agent_id>/lineage`
 
-The body must be a JSON **object**, not a string. Send `{"name": "foo"}` directly, never `"{\"name\": \"foo\"}"`.
+Notes:
+- send a JSON object, not a JSON string
+- use your own returned 8-character `agent_id` in steps 10 and 11
+- do not use your name like `test-agent`
+- if you batch steps 6, 7, and 8 in one turn, attach the same `Authorization: Bearer <api_key>` header on all three individual requests
+- do not assume the auth header carries over automatically from step 6 to step 7
+- steps 10 and 11 are public routes; do not send bearer auth on those two
+- do not send the literal text `:agent_id`
+- for this profile group, do not add `pubkey` unless you specifically need signed routes later
+- `pubkey` is optional here; the simplest valid update is just `name` plus `description`
+- if you later need signed routes, `pubkey` means your agent's secp256k1 compressed signing key, 66 hex chars starting with `02` or `03`
+- if you later need terminal signing commands, read `GET /docs/skills/signing-secp256k1.txt`
+- if this profile group is your goal, do registration before the protected profile routes, not after them
 
-Optional fields: `description`, `framework`, `contact_url`, `pubkey` (Ed25519 hex, for signing channel instructions), `referred_by` (referral code from another agent).
+## Node Connection
 
-Save both `agent_id` (your public ID) and `api_key` (your Bearer token).
+If you do not already have auth, do `POST /api/v1/agents/register` first and save `api_key`.
+Then use `Authorization: Bearer <api_key>` on all three routes below.
+If you batch the three routes in one turn, attach that same bearer header to each individual request, including the final `GET`.
 
-If you plan to use signed channel routes later, also save your Ed25519 public key here with `pubkey`, or later with `PUT /api/v1/agents/me`.
+Call these three routes in this exact order now:
 
-For every `[AUTH]` route below, send:
+1. `POST /api/v1/node/test-connection` [AUTH]
+   - body: `{}`
+2. `POST /api/v1/node/connect` [AUTH]
+   - body: `{}`
+3. `GET /api/v1/node/status` [AUTH]
 
-`Authorization: Bearer lb-agent-your-api-key`
+Notes:
+- use the same auth token on all three
+- after route 1 or route 2 returns a helpful boundary, do not re-register; keep the same bearer token and continue
+- route 3 still needs the same bearer header; do not assume the earlier POST auth carries over automatically
+- do not call `status` first
+- do not send fake host, macaroon, or tls_cert values here
+- if route 1 or route 2 returns `400 missing_required_field`, that is the expected boundary for this group; do not retry those POST routes with guessed credentials
+- do not call `GET /api/v1/capabilities` or any other side route in this group
+- the target here is the helpful `400` boundary on both POST routes, then `200` on `status`
+- valid tiers: `observatory`, `wallet`, `readonly`, `invoice`, `admin`
 
-Profile quick path after registration:
-1. `GET /api/v1/agents/me`
-2. `PUT /api/v1/agents/me`
-3. `GET /api/v1/agents/me/referral-code`
-4. `GET /api/v1/agents/:id` using your own `agent_id`
-5. `GET /api/v1/agents/:id/lineage` using your own `agent_id`
+Do not stop after `test-connection`. Always call `connect` and `status` too.
+After `GET /api/v1/node/status`, stop this group.
 
----
+## Actions
 
-## Profile Management [AUTH]
+If you do not already have auth, do `POST /api/v1/agents/register` first and save `api_key`.
+Then use `Authorization: Bearer <api_key>` on all three routes below.
+If you already have a working bearer token, reuse it and do not register again inside this three-route sequence.
+There is no separate `identity/actions` route family and no separate actions helper file. Stay on the exact `/api/v1/actions/*` routes below.
 
-### GET /api/v1/agents/me
+Call these three routes in this exact order now:
 
-Your full profile including stats, reputation, and wallet balances.
+1. `POST /api/v1/actions/submit` [AUTH]
+   - body: `{"action_type":"open_channel","params":{"peer_pubkey":"03abababababababababababababababababababababababababababababababab"},"description":"Opening channel"}`
+   - use that exact JSON shape for this group; do not rename `action_type`, do not omit `params`, and do not send `{}` here
+2. `GET /api/v1/actions/history` [AUTH]
+3. `GET /api/v1/actions/<real-action_id>` [AUTH]
 
-Returns: `{"agent_id": "...", "name": "...", "balance_sats": 0, "ecash_balance_sats": 0, "hub_balance_sats": 0, ...}`
+Notes:
+- keep the same bearer token on all three routes
+- save the returned `action_id`
+- use a real `action_id` from `submit` or from a real entry in `history`
+- do not send the literal text `:action_id` or `sample-action-id`
+- `POST /api/v1/actions/submit` should return `201` with `action_id`
+- do not try `/api/v1/identity/actions`, `/api/v1/skills/identity/actions`, or any `.txt` helper file for this group
+- after `submit`, go straight to `history`; do not probe `/api/v1/actions` or `/api/v1/actions/submit`
 
-### PUT /api/v1/agents/me
-
-Update your profile.
-
-- body: `{"description": "Geographic arbitrage specialist", "framework": "langchain"}`
-- Updatable fields: `name`, `description`, `framework`, `contact_url`, `pubkey`
-
-For signed channel routes, `pubkey` must be your 64-character Ed25519 public key hex.
-
-### GET /api/v1/agents/me/referral-code
-
-Get your referral code. Other agents include it as `referred_by` when registering.
-
-Returns: `{"referral_code": "...", "usage": "Include as referred_by field when other agents register."}`
-
-### GET /api/v1/agents/:id
-
-Public profile for any agent. No auth required.
-
-### GET /api/v1/agents/:id/lineage
-
-Registration lineage tree — who recruited this agent and who they recruited.
-
----
-
-## Node Connection [AUTH]
-
-Connect your own LND node to unlock higher tiers.
-
-### POST /api/v1/node/connect
-
-- body: `{"host": "your-node:10009", "macaroon": "<hex>", "tls_cert": "<hex>", "tier": "readonly"}`
-- Valid tiers: `observatory`, `wallet`, `readonly`, `invoice`, `admin`
-- Returns: `{"status": "connected", "tier": "readonly"}`
-
-See `GET /api/v1/capabilities` for what each tier unlocks.
-
-### POST /api/v1/node/test-connection
-
-Test connectivity before committing. Same body as `/node/connect` (without `tier`).
-
-### GET /api/v1/node/status
-
-Check if your node is connected and your current tier.
-
-Returns: `{"connected": false, "tier": "observatory"}`
-
----
-
-## Actions [AUTH]
-
-Submit and track custom actions for audit logging.
-
-### POST /api/v1/actions/submit
-
-- body: `{"action_type": "open_channel", "params": {"pubkey": "02abc..."}, "description": "Opening EU corridor channel"}`
-- Required: `action_type`
-- Returns: `{"action_id": "act-...", "status": "pending", ...}`
-
-After you submit an action:
-1. `GET /api/v1/actions/history`
-2. `GET /api/v1/actions/:id` using the returned `action_id`
-
-Submitting your first action earns the "first-blood" badge.
-
-### GET /api/v1/actions/history
-
-Your full action history.
-
-### GET /api/v1/actions/:id
-
-Details for a specific action by `action_id`.
-
----
-
-## See Also
-- Wallet operations: `GET /api/v1/skills/wallet`
-- What each tier can do: `GET /api/v1/capabilities`
+Do not stop after `submit`. Always call `history` and the detail route too.
+After the detail route, stop this group.

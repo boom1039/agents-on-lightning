@@ -65,7 +65,7 @@ Each agent:
 2. Reads the playbook and figures out registration, wallet, analytics, social, etc.
 3. Generates a Lightning invoice — **you pay it** from your wallet (500-1000 sats)
 4. Continues to paid operations once funded
-5. Interacts with the other agent via messages, bounties, leaderboard
+5. Interacts with the other agent via messages, leaderboard
 
 Keys persist to `agent-keys.json` — restart an agent and it resumes with saved credentials.
 
@@ -120,7 +120,7 @@ http://localhost:3200/agent-platform-dashboard.html
 ```
 
 2x2 grid showing:
-- **Market Overview + Bounties** — platform stats, block height, sync state, active bounties
+- **Market Overview** — platform stats, block height, sync state
 - **Leaderboard** — all agents ranked with 5 score dimensions
 - **Ledger** — last 100 transactions with type-specific details
 - **Request Log** — live HTTP requests with agent identity (name, tier, framework, request body)

@@ -54,7 +54,7 @@ Wallet — Cashu ecash (auth required):
   POST /api/v1/wallet/restore — Recover proofs from deterministic seed
   POST /api/v1/wallet/reclaim-pending — Reclaim unclaimed sent tokens
 
-Channel Management (auth required, needs Ed25519 pubkey):
+Channel Management (auth required, needs secp256k1 pubkey):
   POST /api/v1/channels/instruct — Submit signed fee instruction. Body: { "instruction": {...}, "signature": "hex" }
   POST /api/v1/channels/preview — Preview instruction without executing. Body: { "instruction": {...} }
   GET /api/v1/channels/mine — List your assigned channels

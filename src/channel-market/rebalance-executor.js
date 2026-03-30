@@ -2,7 +2,7 @@
  * Rebalance Executor — Validates, locks, executes circular rebalances.
  *
  * Handles agent-initiated channel rebalancing:
- *   1. 10-step fail-fast validation pipeline (Ed25519 signed requests)
+ *   1. 10-step fail-fast validation pipeline (secp256k1-signed requests)
  *   2. Capital lock via CapitalLedger (max_fee_sats)
  *   3. Self-invoice creation + sendPaymentV2 (streaming)
  *   4. Fee deduction on success, full refund on failure
@@ -98,7 +98,10 @@ export class RebalanceExecutor {
     this._state = {};
 
     // Dedup cache (10-minute expiry window)
-    this._dedup = new DedupCache(600_000);
+    this._dedup = new DedupCache(600_000, {
+      dataLayer,
+      path: 'data/channel-market/rebalance-dedup.json',
+    });
 
     this.config = { ...REBALANCE_CONFIG };
   }
@@ -296,6 +299,10 @@ export class RebalanceExecutor {
     };
   }
 
+  async validateRequest(agentId, payload) {
+    return this._validate(agentId, payload);
+  }
+
   // ---------------------------------------------------------------------------
   // Execute rebalance
   // ---------------------------------------------------------------------------
@@ -341,7 +348,7 @@ export class RebalanceExecutor {
     }
 
     // Mark instruction as seen (dedup)
-    this._dedup.mark(instrHash);
+    await this._dedup.mark(instrHash);
 
     // Create self-invoice
     let invoice;
@@ -513,6 +520,16 @@ export class RebalanceExecutor {
         success: false,
         error: 'outbound_chan_id and amount_sats (positive integer) are required',
         status: 400,
+      };
+    }
+
+    const assignment = this._assignmentRegistry.getAssignment(outbound_chan_id);
+    if (!assignment || assignment.agent_id !== agentId) {
+      return {
+        success: false,
+        error: 'Outbound channel not found in assignment registry',
+        status: 404,
+        learn: 'You can only estimate a rebalance for an outbound channel assigned to you. GET /api/v1/channels/mine to see your assigned channels.',
       };
     }
 

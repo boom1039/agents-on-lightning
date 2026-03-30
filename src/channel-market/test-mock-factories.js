@@ -51,6 +51,22 @@ export function mockMutex() {
 export function mockAgentRegistry(agents = {}) {
   return {
     getById: (id) => agents[id] || null,
+    getPublicProfile: async (id) => {
+      const profile = agents[id];
+      if (!profile) return null;
+      return {
+        id: profile.id,
+        name: profile.name || null,
+        description: profile.description || null,
+        framework: profile.framework || null,
+        contact_url: profile.contact_url || null,
+        badge: profile.badge || null,
+        forked_from: profile.forked_from || null,
+        registered_at: profile.registered_at || null,
+        updated_at: profile.updated_at || null,
+      };
+    },
+    count: () => Object.keys(agents).length,
   };
 }
 
@@ -137,6 +153,9 @@ export function mockCapitalLedger(overrides = {}) {
     },
     settleClose: async (agentId, settledAmount, txid) => {
       calls.push({ method: 'settleClose', agentId, settledAmount, txid });
+    },
+    rollbackInitiatedClose: async (agentId, localBalance, originalLocked, channelPoint, reason) => {
+      calls.push({ method: 'rollbackInitiatedClose', agentId, localBalance, originalLocked, channelPoint, reason });
     },
     creditRevenue: async (agentId, amount, reference) => {
       credits.push({ agentId, amount, reference });

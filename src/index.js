@@ -11,15 +11,34 @@ import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
 import { globalRateLimit } from './identity/rate-limiter.js';
 import { auditMiddleware } from './identity/audit-log.js';
+import { handleJsonBodyError, requireDashboardOperatorAuth, requireJsonWriteContent } from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
+import { dashboardRoutes } from './routes/dashboard-routes.js';
+import { getDefaultPortForRole, getServerRole, reserveServerSlot } from './server-instance-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = parseInt(process.env.PORT || '3200', 10);
+const DEFAULT_HOST = '0.0.0.0';
+const DEFAULT_PORT = 3302;
+
+export function getListenConfig(env = process.env) {
+  const role = getServerRole(env);
+  const host = typeof env.HOST === 'string' && env.HOST.trim()
+    ? env.HOST.trim()
+    : DEFAULT_HOST;
+  const rawPort = Number.parseInt(env.PORT || `${getDefaultPortForRole(role) || DEFAULT_PORT}`, 10);
+  const port = Number.isFinite(rawPort) && rawPort > 0
+    ? rawPort
+    : getDefaultPortForRole(role) || DEFAULT_PORT;
+  return { host, port, role };
+}
 
 export async function startServer() {
+  const { host, port, role } = getListenConfig();
+  const serverSlot = reserveServerSlot({ role, host, port });
   const app = express();
-  app.set('trust proxy', 1);
+  app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
   app.use(express.json({ limit: '16kb' }));
+  app.use(handleJsonBodyError);
 
   // Security headers
   app.use((_req, res, next) => {
@@ -27,6 +46,9 @@ export async function startServer() {
     res.header('X-Frame-Options', 'DENY');
     res.header('X-XSS-Protection', '0');
     res.header('Referrer-Policy', 'no-referrer');
+    res.header('Cross-Origin-Opener-Policy', 'same-origin');
+    res.header('Cross-Origin-Resource-Policy', 'same-origin');
+    res.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
     next();
   });
 
@@ -56,6 +78,7 @@ export async function startServer() {
   // Rate limiting + audit
   app.use(globalRateLimit);
   app.use(auditMiddleware);
+  app.use(requireJsonWriteContent);
 
   // Content negotiation: serve llms.txt when agents request markdown
   const docsDir = join(__dirname, '..', 'docs');
@@ -69,7 +92,7 @@ export async function startServer() {
     res.json({
       name: 'Agents on Lightning',
       description: 'AI agent platform for the Lightning Network',
-      docs: '/docs/llms.txt',
+      docs: '/llms.txt',
       api: '/api/v1/',
     });
   });
@@ -83,10 +106,11 @@ export async function startServer() {
   app.use('/docs', express.static(docsDir));
 
   // Start daemon
-  const daemon = new AgentDaemon();
+  const daemon = new AgentDaemon(process.env.AOL_CONFIG_PATH);
   try {
     await daemon.start();
   } catch (err) {
+    daemon._startupError = err.message;
     console.error(`[server] Daemon startup failed: ${err.message}`);
     console.error('[server] Continuing in limited mode');
   }
@@ -94,34 +118,57 @@ export async function startServer() {
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));
 
+  // Mount monitoring dashboard behind operator auth
+  app.use('/dashboard', requireDashboardOperatorAuth);
+  app.use(dashboardRoutes(daemon));
+
   // Health check
   app.get('/health', (_req, res) => {
-    res.json({
-      status: 'ok',
+    res.json(daemon.getHealthSummary?.() || {
+      status: 'degraded',
+      degraded: true,
       agents: daemon.agentRegistry?.count() || 0,
       nodes: daemon.nodeManager?.getNodeNames()?.length || 0,
+      warnings: [],
+      startup_error: daemon._startupError || 'health summary unavailable',
     });
   });
 
   // Start listening
   const server = createServer(app);
-  server.listen(PORT, () => {
-    console.log(`[server] Agents on Lightning listening on port ${PORT}`);
+  server.listen(port, host, () => {
+    console.log(`[server] Agents on Lightning listening on ${host}:${port} (${role})`);
   });
 
   // Graceful shutdown
+  let shuttingDown = false;
   for (const sig of ['SIGTERM', 'SIGINT']) {
     process.on(sig, async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       console.log(`[server] ${sig} received, shutting down...`);
-      await daemon.stop();
-      server.close(() => process.exit(0));
+      try {
+        await daemon.stop();
+      } catch (err) {
+        console.error(`[server] Shutdown error: ${err.message}`);
+      }
+      server.close(() => {
+        serverSlot.release();
+        process.exit(0);
+      });
     });
   }
+
+  server.on('close', () => {
+    serverSlot.release();
+  });
 
   return { app, server, daemon };
 }
 
-startServer().catch(err => {
-  console.error('[server] Fatal:', err);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  startServer().catch(err => {
+    console.error('[server] Fatal:', err);
+    process.exit(1);
+  });
+}

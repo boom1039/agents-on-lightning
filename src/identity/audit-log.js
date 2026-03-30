@@ -44,11 +44,21 @@ export function logRateLimitHit(category, ip, agentId) {
   });
 }
 
-export function logAuthFailure(ip, tokenPrefix) {
+export function logAuthFailure(ip, hadBearerToken) {
   return _append({
     event: 'auth_failure',
     ip: ip || null,
-    token_prefix: tokenPrefix || null,
+    had_bearer_token: Boolean(hadBearerToken),
+  });
+}
+
+export function logAuthorizationDenied(route, agentId, resourceId, ip) {
+  return _append({
+    event: 'authz_denied',
+    route,
+    agent_id: agentId || null,
+    resource_id: resourceId || null,
+    ip: ip || null,
   });
 }
 
@@ -83,15 +93,69 @@ export function logRegistrationAttempt(ip, success, agentId) {
 /**
  * Express middleware that logs all /api/v1/ requests to the audit log.
  */
-export function auditMiddleware(req, _res, next) {
-  if (req.path.startsWith('/api/v1/')) {
+export function classifyDocKind(path, accept = '') {
+  if (path === '/' && (accept.includes('text/markdown') || accept.includes('text/plain'))) {
+    return 'root-markdown';
+  }
+  if (path === '/llms.txt' || path === '/docs/llms.txt') {
+    return 'root';
+  }
+  if (path === '/api/v1/skills' || path.startsWith('/api/v1/skills/')) {
+    return 'skill-api';
+  }
+  if (path.startsWith('/docs/skills/')) {
+    return 'skill-static';
+  }
+  if (path.startsWith('/api/v1/knowledge/')) {
+    return 'knowledge-api';
+  }
+  return null;
+}
+
+export function getTrackedRequestMeta(req) {
+  const accept = req.headers?.accept || '';
+  const originalPath = ((req.originalUrl || req.url || req.path || '').split('?')[0]) || req.path || '';
+  const isRootDoc = originalPath === '/' && (accept.includes('text/markdown') || accept.includes('text/plain'));
+  const tracked =
+    originalPath.startsWith('/api/v1/')
+    || originalPath.startsWith('/docs/')
+    || originalPath === '/llms.txt'
+    || originalPath === '/health'
+    || originalPath === '/';
+
+  return {
+    accept,
+    originalPath,
+    isRootDoc,
+    tracked,
+    doc_kind: isRootDoc ? 'root-markdown' : classifyDocKind(originalPath, accept),
+  };
+}
+
+export function auditMiddleware(req, res, next) {
+  const {
+    accept,
+    originalPath,
+    tracked,
+    doc_kind,
+  } = getTrackedRequestMeta(req);
+
+  if (!tracked) return next();
+
+  const start = Date.now();
+  res.once('finish', () => {
     _append({
       event: 'api_request',
       method: req.method,
-      path: req.path,
-      ip: req.ip || null,
+      path: originalPath,
+      status: res.statusCode,
+      duration_ms: Date.now() - start,
+      ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
       agent_id: req.agentId || null,
+      accept: accept || null,
+      doc_kind,
     });
-  }
+  });
+
   next();
 }

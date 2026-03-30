@@ -5,18 +5,58 @@
  *   profile.json — name, description, framework, lineage, contact_url, pubkey
  *   state.json — tier, wallet balance, node connection, strategy, cycle count
  *   actions.jsonl — submitted actions (append-only)
- *   suggestions.jsonl — advisory suggestions made/received
+ *   suggestions.jsonl — suggestions made/received
  *   reputation.json — scores, ranking history, badges
  *   messages.jsonl — agent-to-agent messages
  *   lineage.json — strategy genealogy
  */
 
 import { randomBytes } from 'node:crypto';
-import { generateApiKey } from './auth.js';
+import { generateApiKey, hashApiKey } from './auth.js';
 import {
   validateName, validateString, validateUrl,
-  validateEd25519Pubkey, validateAgentId, validateReferralCode,
+  validateSecp256k1Pubkey, validateAgentId, validateReferralCode,
+  normalizeFreeText,
 } from './validators.js';
+
+const PROFILE_DESCRIPTION_RULE = { field: 'description', maxLen: 500, maxLines: 8, maxLineLen: 240 };
+const PROFILE_FRAMEWORK_RULE = { field: 'framework', maxLen: 100, maxLines: 2, maxLineLen: 80, allowNewlines: false };
+const ACTION_DESCRIPTION_RULE = { field: 'description', maxLen: 1500, maxLines: 24, maxLineLen: 240 };
+const SUGGESTION_TEXT_RULES = {
+  description: { field: 'description', maxLen: 1000, maxLines: 16, maxLineLen: 240 },
+  content: { field: 'content', maxLen: 1500, maxLines: 24, maxLineLen: 240 },
+  reason: { field: 'reason', maxLen: 500, maxLines: 8, maxLineLen: 160 },
+};
+const MESSAGE_TEXT_RULE = { field: 'content', maxLen: 2000, maxLines: 24, maxLineLen: 320 };
+
+function applyNormalizedTextField(target, field, rule) {
+  if (target[field] === undefined || target[field] === null) {
+    delete target[`${field}_raw`];
+    return;
+  }
+
+  const normalized = normalizeFreeText(target[field], rule);
+  if (!normalized.valid) {
+    throw new Error(normalized.reason);
+  }
+
+  target[field] = normalized.value;
+  if (normalized.changed) {
+    target[`${field}_raw`] = normalized.raw;
+  } else {
+    delete target[`${field}_raw`];
+  }
+}
+
+function sanitizeLoggedRecord(entry, rules) {
+  const sanitized = { ...entry };
+  for (const [field, rule] of Object.entries(rules)) {
+    if (sanitized[field] !== undefined && sanitized[field] !== null) {
+      applyNormalizedTextField(sanitized, field, rule);
+    }
+  }
+  return sanitized;
+}
 
 export class AgentRegistry {
   constructor(dataLayer) {
@@ -28,6 +68,107 @@ export class AgentRegistry {
     // Referral tracking: referralCode → agentId
     this._referralCodes = new Map();
     this._loaded = false;
+  }
+
+  _indexProfile(profile) {
+    if (!profile?.id) return;
+    const apiKeyHash = profile.api_key_hash || (profile.api_key ? hashApiKey(profile.api_key) : null);
+    if (apiKeyHash) this._keyIndex.set(apiKeyHash, profile);
+    if (profile.api_key) this._keyIndex.set(profile.api_key, profile); // legacy test compatibility
+    this._idIndex.set(profile.id, profile);
+    if (profile.referral_code) {
+      this._referralCodes.set(profile.referral_code, profile.id);
+    }
+  }
+
+  async _migrateProfileAuth(profilePath, profile) {
+    if (!profile?.api_key || profile.api_key_hash) return profile;
+    const migrated = {
+      ...profile,
+      api_key_hash: hashApiKey(profile.api_key),
+    };
+    delete migrated.api_key;
+    await this._dataLayer.writeJSON(profilePath, migrated);
+    return migrated;
+  }
+
+  _sanitizeProfileForApi(profile) {
+    if (!profile) return null;
+    const safe = {};
+    for (const [key, value] of Object.entries(profile)) {
+      if (key === 'api_key' || key === 'api_key_hash' || key.endsWith('_raw')) continue;
+      safe[key] = value;
+    }
+    return safe;
+  }
+
+  _buildPublicProfile(profile) {
+    if (!profile) return null;
+    return {
+      id: profile.id,
+      name: profile.name || null,
+      description: profile.description || null,
+      framework: profile.framework || null,
+      contact_url: profile.contact_url || null,
+      badge: profile.badge || null,
+      forked_from: profile.forked_from || null,
+      registered_at: profile.registered_at || null,
+      updated_at: profile.updated_at || null,
+    };
+  }
+
+  _normalizeProfileUpdates(updates = {}) {
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+      throw new Error('Profile updates must be a JSON object');
+    }
+
+    const normalized = { ...updates };
+    if (normalized.public_key !== undefined && normalized.pubkey === undefined) {
+      normalized.pubkey = normalized.public_key;
+    }
+    delete normalized.public_key;
+
+    const allowedFields = new Set(['name', 'description', 'framework', 'contact_url', 'pubkey']);
+    for (const field of Object.keys(normalized)) {
+      if (!allowedFields.has(field)) {
+        throw new Error(`Unknown or forbidden profile field: ${field}`);
+      }
+    }
+
+    if (normalized.name !== undefined) {
+      const check = validateName(normalized.name, 100);
+      if (!check.valid) throw new Error(`name: ${check.reason}`);
+      normalized.name = normalized.name.trim();
+    }
+
+    for (const field of ['description', 'framework']) {
+      if (normalized[field] === null) {
+        normalized[`${field}_raw`] = null;
+        continue;
+      }
+      if (normalized[field] !== undefined) {
+        const rule = field === 'description' ? PROFILE_DESCRIPTION_RULE : PROFILE_FRAMEWORK_RULE;
+        applyNormalizedTextField(normalized, field, rule);
+      }
+    }
+
+    if (normalized.contact_url === null) {
+      // allow clearing optional contact URL
+    } else if (normalized.contact_url !== undefined) {
+      const check = validateUrl(normalized.contact_url);
+      if (!check.valid) throw new Error(`contact_url: ${check.reason}`);
+      normalized.contact_url = normalized.contact_url.trim();
+    }
+
+    if (normalized.pubkey === null) {
+      // allow clearing optional pubkey
+    } else if (normalized.pubkey !== undefined) {
+      const check = validateSecp256k1Pubkey(normalized.pubkey);
+      if (!check.valid) throw new Error(`pubkey: ${check.reason}`);
+      normalized.pubkey = normalized.pubkey.trim();
+    }
+
+    return normalized;
   }
 
   /**
@@ -43,14 +184,10 @@ export class AgentRegistry {
       for (const entry of entries) {
         if (!entry.isDir) continue;
         try {
-          const profile = await this._dataLayer.readJSON(`${dir}/${entry.name}/profile.json`);
-          if (profile && profile.api_key) {
-            this._keyIndex.set(profile.api_key, profile);
-            this._idIndex.set(profile.id, profile);
-            if (profile.referral_code) {
-              this._referralCodes.set(profile.referral_code, profile.id);
-            }
-          }
+          const profilePath = `${dir}/${entry.name}/profile.json`;
+          const rawProfile = await this._dataLayer.readJSON(profilePath);
+          const profile = await this._migrateProfileAuth(profilePath, rawProfile);
+          this._indexProfile(profile);
         } catch {
           // Skip malformed agent directories
         }
@@ -81,7 +218,7 @@ export class AgentRegistry {
       if (!fwCheck.valid) throw new Error(`framework: ${fwCheck.reason}`);
     }
     if (pubkey !== undefined && pubkey !== null) {
-      const pkCheck = validateEd25519Pubkey(pubkey);
+      const pkCheck = validateSecp256k1Pubkey(pubkey);
       if (!pkCheck.valid) throw new Error(`pubkey: ${pkCheck.reason}`);
     }
     if (forked_from !== undefined && forked_from !== null) {
@@ -104,18 +241,21 @@ export class AgentRegistry {
 
     const profile = {
       id: agentId,
-      api_key: apiKey,
+      api_key_hash: hashApiKey(apiKey),
       referral_code: referralCode,
       name: name.trim(),
       description: description?.trim() || null,
       framework: framework?.trim() || null,
-      pubkey: pubkey?.trim() || null, // Ed25519 public key hex
+      pubkey: pubkey?.trim() || null, // secp256k1 compressed public key hex
       forked_from: forked_from?.trim() || null,
       contact_url: contact_url?.trim() || null,
       referred_by: referred_by?.trim() || null,
       registered_at: now,
       tier: 'observatory',
     };
+
+    if (profile.description) applyNormalizedTextField(profile, 'description', PROFILE_DESCRIPTION_RULE);
+    if (profile.framework) applyNormalizedTextField(profile, 'framework', PROFILE_FRAMEWORK_RULE);
 
     const basePath = `data/external-agents/${agentId}`;
 
@@ -160,9 +300,7 @@ export class AgentRegistry {
     await this._dataLayer.writeJSON(`${basePath}/lineage.json`, lineage);
 
     // Update in-memory indexes
-    this._keyIndex.set(apiKey, profile);
-    this._idIndex.set(agentId, profile);
-    this._referralCodes.set(referralCode, agentId);
+    this._indexProfile(profile);
 
     // If forked_from, update parent's lineage
     if (forked_from && this._idIndex.has(forked_from)) {
@@ -226,7 +364,7 @@ export class AgentRegistry {
    * Look up agent by API key.
    */
   getByApiKey(apiKey) {
-    return this._keyIndex.get(apiKey) || null;
+    return this._keyIndex.get(hashApiKey(apiKey)) || this._keyIndex.get(apiKey) || null;
   }
 
   /**
@@ -248,14 +386,21 @@ export class AgentRegistry {
         this._dataLayer.readJSON(`${basePath}/reputation.json`).catch(() => null),
       ]);
       if (!profile) return null;
-
-      // Redact api_key from public profile
-      const { api_key, ...publicProfile } = profile;
       return {
-        ...publicProfile,
+        ...this._sanitizeProfileForApi(profile),
         state: state || {},
         reputation: reputation || {},
       };
+    } catch {
+      return null;
+    }
+  }
+
+  async getPublicProfile(agentId) {
+    try {
+      const profile = await this._dataLayer.readJSON(`data/external-agents/${agentId}/profile.json`);
+      if (!profile) return null;
+      return this._buildPublicProfile(profile);
     } catch {
       return null;
     }
@@ -269,10 +414,12 @@ export class AgentRegistry {
     const profile = await this._dataLayer.readJSON(basePath);
     if (!profile) throw new Error('Agent not found');
 
-    const allowedFields = ['name', 'description', 'framework', 'contact_url', 'pubkey', 'badge'];
-    for (const field of allowedFields) {
-      if (updates[field] !== undefined) {
-        profile[field] = updates[field];
+    const normalized = this._normalizeProfileUpdates(updates);
+    for (const [field, value] of Object.entries(normalized)) {
+      if (field.endsWith('_raw') && value === null) {
+        delete profile[field];
+      } else {
+        profile[field] = value;
       }
     }
     profile.updated_at = Date.now();
@@ -280,8 +427,7 @@ export class AgentRegistry {
     await this._dataLayer.writeJSON(basePath, profile);
 
     // Update in-memory
-    this._keyIndex.set(profile.api_key, profile);
-    this._idIndex.set(agentId, profile);
+    this._indexProfile(profile);
 
     return profile;
   }
@@ -318,21 +464,28 @@ export class AgentRegistry {
    * Append to agent's action log.
    */
   async logAction(agentId, action) {
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/actions.jsonl`, action);
+    const sanitized = sanitizeLoggedRecord(action, {
+      description: ACTION_DESCRIPTION_RULE,
+    });
+    await this._dataLayer.appendLog(`data/external-agents/${agentId}/actions.jsonl`, sanitized);
   }
 
   /**
    * Append to agent's suggestion log.
    */
   async logSuggestion(agentId, suggestion) {
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/suggestions.jsonl`, suggestion);
+    const sanitized = sanitizeLoggedRecord(suggestion, SUGGESTION_TEXT_RULES);
+    await this._dataLayer.appendLog(`data/external-agents/${agentId}/suggestions.jsonl`, sanitized);
   }
 
   /**
    * Append to agent's message log.
    */
   async logMessage(agentId, message) {
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/messages.jsonl`, message);
+    const sanitized = sanitizeLoggedRecord(message, {
+      content: MESSAGE_TEXT_RULE,
+    });
+    await this._dataLayer.appendLog(`data/external-agents/${agentId}/messages.jsonl`, sanitized);
   }
 
   /**
@@ -424,8 +577,7 @@ export class AgentRegistry {
     }
     profile.updated_at = Date.now();
     await this._dataLayer.writeJSON(basePath, profile);
-    this._keyIndex.set(profile.api_key, profile);
-    this._idIndex.set(agentId, profile);
+    this._indexProfile(profile);
     return profile;
   }
 
@@ -433,7 +585,7 @@ export class AgentRegistry {
    * List all registered agents (public info only).
    */
   listAll() {
-    return Array.from(this._idIndex.values()).map(({ api_key, ...pub }) => pub);
+    return Array.from(this._idIndex.values()).map(profile => this._buildPublicProfile(profile));
   }
 
   /**

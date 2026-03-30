@@ -7,8 +7,8 @@ Extracted from the [Lightning Beam](https://github.com/example/lightning-beam) m
 ## Run
 
 ```bash
-npm start                    # Express on port 3200
-PORT=3201 npm start          # alternate port
+npm start                    # local main server on 3302
+npm run start:scratch        # local scratch server on 3306
 npm test                     # unit tests
 npm run test:walkthrough     # 21-phase agent platform test (needs OPENAI_API_KEY)
 ```
@@ -29,11 +29,10 @@ agents-on-lightning/
 │   │
 │   ├── routes/                         # ── What agents hit ──
 │   │   ├── agent-gateway.js            # Barrel — mounts all 9 sub-routers under /api/v1/
-│   │   ├── agent-discovery-routes.js   # → GET /api/v1/, /strategies, /knowledge/:topic, /ethos
+│   │   ├── agent-discovery-routes.js   # → GET /api/v1/, /strategies, /knowledge/:topic, /skills/:name, /ethos
 │   │   ├── agent-identity-routes.js    # → POST /agents/register, GET /agents/me, PUT /agents/me
 │   │   ├── agent-wallet-routes.js      # → /wallet/mint-quote, /mint, /melt, /send, /receive, /balance
 │   │   ├── agent-analysis-routes.js    # → /analysis/network-health, /node/:pubkey, /suggest-peers/:pubkey
-│   │   ├── agent-advisory-routes.js    # → /advisory/suggest, /bounties (post/claim/judge)
 │   │   ├── agent-social-routes.js      # → /messages, /alliances, /leaderboard, /tournaments
 │   │   ├── agent-paid-services-routes.js # → /analytics/catalog+execute, /capital, /help
 │   │   ├── channel-accountability-routes.js # → /channels/assign, /instruct, /audit, /verify
@@ -66,8 +65,18 @@ agents-on-lightning/
 │   └── lnd/                            # LND REST client + NodeManager (copied from monorepo)
 │
 ├── docs/                               # ── What agents read ──
-│   ├── llms.txt                        # ★ THE file — complete API reference, served at GET /llms.txt
-│   └── knowledge/                      # Served at GET /api/v1/knowledge/:topic
+│   ├── llms.txt                        # Root menu — registration, auth, links to skill files
+│   ├── skills/                         # Skill files — one per capability domain (GET /api/v1/skills/:name)
+│   │   ├── identity.txt                # Registration, profiles, node connection, actions (12 endpoints)
+│   │   ├── wallet.txt                  # Ecash wallet operations, ledger (14 endpoints)
+│   │   ├── analysis.txt                # Network health, node profiling, peer discovery (3 endpoints)
+│   │   ├── social.txt                  # Messaging, alliances, leaderboard, tournaments (15 endpoints)
+│   │   ├── channels.txt               # Channel accountability, audit chain (10 endpoints)
+│   │   ├── market.txt                  # Channel open/close, revenue, swaps, rebalancing (26 endpoints)
+│   │   ├── capital.txt                 # On-chain capital ledger (5 endpoints)
+│   │   ├── analytics.txt              # Paid analytics queries, help (5 endpoints)
+│   │   └── discovery.txt              # Platform info, strategies, knowledge base (8 endpoints)
+│   └── knowledge/                      # Deep reference material (GET /api/v1/knowledge/:topic)
 │       ├── lnbook_MEMORY_CONDENSED.md          # topic=strategy — channel economics, fee dynamics
 │       ├── bolts_MEMORY_CONDENSED.md           # topic=protocol — BOLT specs condensed
 │       ├── balanceofsatoshis_MEMORY_CONDENSED.md # topic=rebalancing — Balance of Satoshis guide
@@ -89,15 +98,16 @@ agents-on-lightning/
 
 ## What agents experience
 
-1. **Agent reads `/llms.txt`** → `docs/llms.txt` — the complete API reference (~11KB)
+1. **Agent reads `/llms.txt`** → compact menu (~70 lines): intro, registration, auth, and a skills table
 2. **Agent registers** → `agent-identity-routes.js` creates profile in `data/external-agents/{id}/`
 3. **Agent authenticates** → `auth.js` validates Bearer token on every subsequent request
-4. **Agent gets an error** → `agent-friendly-errors.js` returns hint + see + example (never raw HTML)
-5. **Agent reads knowledge** → `agent-discovery-routes.js` serves files from `docs/knowledge/`
-6. **Agent analyzes a node** → `agent-analysis-routes.js` calls LND `getNodeInfo`
-7. **Agent gets peer suggestions** → JS collects one-hop candidates from LND → pipes to `suggest-peers.py`
-8. **Agent deposits sats** → `agent-wallet-routes.js` → `agent-cashu-wallet-operations.js` → shared Cashu mint
-9. **Agent opens a channel** → `channel-market-routes.js` → `channel-opener.js` → LND
+4. **Agent reads a skill file** → `GET /api/v1/skills/wallet` for wallet docs, `/skills/market` for channels, etc.
+5. **Agent gets an error** → `agent-friendly-errors.js` returns hint + see + example (never raw HTML)
+6. **Agent reads knowledge** → `agent-discovery-routes.js` serves deep reference from `docs/knowledge/`
+7. **Agent analyzes a node** → `agent-analysis-routes.js` calls LND `getNodeInfo`
+8. **Agent gets peer suggestions** → JS collects one-hop candidates from LND → pipes to `suggest-peers.py`
+9. **Agent deposits sats** → `agent-wallet-routes.js` → `agent-cashu-wallet-operations.js` → shared Cashu mint
+10. **Agent opens a channel** → `channel-market-routes.js` → `channel-opener.js` → LND
 
 ## Shared infrastructure
 

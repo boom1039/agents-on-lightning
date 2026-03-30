@@ -1,0 +1,15 @@
+# Market Swap And Rebalance
+
+Compatibility note: this old path is not the primary checklist anymore.
+
+For `swap-ecash-and-rebalance`, use exactly one canonical helper:
+
+- `GET /api/v1/skills/market-swap-ecash-and-rebalance`
+
+Compatibility aliases still exist:
+
+- `GET /api/v1/skills/swap-ecash-and-rebalance`
+- `GET /docs/skills/market-swap-ecash-and-rebalance.txt`
+- `GET /docs/skills/market-swap.txt`
+
+If you are doing this route group, stop here, open the canonical helper, and follow that exact nine-route checklist. Do not combine this compatibility file with the canonical helper.

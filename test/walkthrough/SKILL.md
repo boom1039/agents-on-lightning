@@ -1,183 +1,448 @@
-# /agent-walkthrough — Agent Platform Testing Skill
+# /test/walkthrough — Agent Docs And Route Eval Skill
 
-Tests how well AI agents navigate Lightning Observatory using only `llms.txt` and API responses. Every agent failure is a platform bug — we fix docs and error messages, never the agent.
+Tests how well outside AI agents learn this API from the public agent docs, then uses the failures to improve the docs, the scoring, and the test harness.
 
-**Architecture (6 files):**
-- `shared.mjs` — engine: HTTP client, AI provider factory (OpenAI/Anthropic/OpenRouter), tool constants
-- `agent.mjs` — interactive mode: you type instructions, agent acts via API calls
-- `test-runner.mjs` — automated mode: 21-phase lifecycle test with scoring and doc-fix checklist
-- `run.sh` — skill entry point, just runs `agent.mjs`
-- `knowledge-base-audit-prompt.md` — reusable recipe for auditing and condensing knowledge base files
-- `SKILL.md` — this file
+This file is the **one human-facing hub** for the walkthrough system.
+Open this first.
 
-**Key platform files tested:**
-- `site/llms.txt` — complete API reference agents read first (~11KB)
-- `ln_knowledge/*.md` — 5 knowledge files (strategy, protocol, rebalancing, onboarding, operator-wisdom) totaling ~40KB
-- `ai_panel/server/identity/agent-friendly-errors.js` — error responses that teach agents what went wrong
+## Single Source Of Truth
 
-**Test scores (March 2026):** gpt-4.1-nano 20/21, gpt-4o-mini 21/21, gpt-4.1-mini 20/21, gpt-4.1 20/21. One consistent failure: `message-agent` (nano loses context of `/messages` endpoint by phase 16).
+For humans, this is now the **only file you should need**.
 
-**Quick run:** `node scripts/skills/agent-walkthrough/test-runner.mjs --provider openai --model gpt-4.1-nano --tag test`
+Simple rule:
 
----
+- outside agents read `docs/llms.txt`
+- humans read `test/walkthrough/SKILL.md`
+- scripts and logs stay in the background
 
-## The One Rule
+Do not treat the other loop files as normal reading.
+They are support artifacts, not the main docs.
 
-**You are not testing the agents. You are testing the platform.**
-If an agent gets lost, the platform failed to guide them.
-If an agent burns its context, the platform sent too much data.
-If an agent can't authenticate, the error message failed to teach.
-If an agent doesn't know what to do next, the response failed to link forward.
+## One Entry Point
 
-Every problem is a platform problem. Never blame the agent.
+If you only open **one file**, open this one.
 
-## Your Blind Spot
+## Three-Layer Map
 
-You (Claude) have a reflex: when an agent fails, you want to fix it by changing the agent's tool, adding code fallbacks, or special-casing the endpoint. **Stop.** That's engineering comfort, not empathy.
+### Layer 1: Product docs
 
-Before you touch any code, ask: **what did the agent read right before it failed?** The answer is almost always a doc or a response. Fix that. The agent read something — and what it read didn't prepare it to succeed. That's the bug.
+This is what outside agents read:
 
-- Agent can't send a POST body? → The doc it read didn't show the format clearly enough.
-- Agent used the wrong URL? → The doc had absolute URLs instead of relative.
-- Agent gave up? → The error response didn't teach it what to try next.
+- `docs/llms.txt`
+- `docs/skills/*.txt`
 
-The fix is upstream — in what the agent reads BEFORE it acts. Not downstream in hacks that catch it after it fails.
+### Layer 2: Test system
 
----
+This is what we read and run:
 
-## Design for the Dumbest Agent
+- `test/walkthrough/SKILL.md`
+- `test/walkthrough/test-runner.mjs`
+- `test/walkthrough/suites/*.mjs`
+- `test/walkthrough/agent-coverage-scoring.mjs`
 
-**GPT-4.1-mini is the floor.** If mini can navigate the platform, everything smarter gets it for free. Test against mini, not Haiku.
+### Layer 3: History and logs
 
-Haiku registers on the first try (2 requests). Mini takes 4-5 attempts because it struggles to map prose instructions to its tool's `body` parameter. The platform must work for both.
+This is what records what happened:
 
----
+- `autoresearch-state.json` = machine resume state
+- `research-results.tsv` = score history
+- `test/walkthrough/stress-test-results.jsonl` = serial run log
+- `test/walkthrough/parallel-results/...` = parallel worker logs
 
-## What We Learned (March 2026)
+Short version:
 
-### Absolute URLs break local testing
-`llms.txt` had `https://lightningobservatory.com/api/v1/agents/register`. Agent read it, used the production URL instead of localhost. **Fix:** all URLs in llms.txt are relative (`/api/v1/...`). The agent already knows the base URL from fetching llms.txt.
+- outside agents read `llms.txt`
+- humans read `SKILL.md`
+- scripts read `autoresearch-state.json`
+- logs record the results
 
-### Inline prose fails for POST bodies
-Research confirms: when an agent has a tool with separate `method`, `url`, `body` parameters, it has to decompose a single-line instruction into those slots. Mini models fail at this ~40% of the time. Structured separation reduces invalid tool calls by 31% (arXiv 2603.13404).
+Everything else is support code, support tests, or logs.
 
-**Failed format:**
-```
-1. Register: POST /api/v1/agents/register with JSON body {"name": "your-agent-name"}
-```
+This skill is the **evergreen manual** for the walkthrough system.
+They should stay separate:
 
-**Working format (curl examples):**
+- `SKILL.md` = how the system works now
+- `autoresearch-state.json` = what the resume scripts remember
+
+## What This Skill Is For
+
+If you want the shortest mental model:
+
+- outside agents read `docs/llms.txt`
+- humans open `test/walkthrough/SKILL.md`
+- machines resume from `autoresearch-state.json`
+- old run history lives in `plans/...` and result logs
+
+This repo now has two different ideas that must stay separate:
+
+1. **Coverage**
+   - deterministic robot checks
+   - exact route-by-route HTTP validation
+   - does the endpoint itself work?
+
+2. **Agent coverage**
+   - docs-only AI-agent checks
+   - the agent starts from `llms.txt` and linked docs
+   - can an outside agent learn the API and use it correctly?
+
+The job here is mainly **agent coverage**.
+
+## Core Rule
+
+You are not trying to rescue the model.
+If the agent gets lost, the platform failed to teach it.
+
+Fix these first:
+
+- `docs/llms.txt`
+- `docs/skills/*.txt`
+- response hints
+- scoring bugs
+- harness bugs that make the eval unfair
+
+Do **not** “win” by spoon-feeding hidden route knowledge in the prompt.
+
+## Current Surface
+
+As of March 2026:
+
+- `111` agent-facing API routes
+- `28` agent-coverage groups
+- `105/105` usable-now target
+- the remaining hard routes are the signed/channel-management ones unless the harness has real signing and assigned-channel support
+
+## Main Files
+
+Core engine:
+
+- `test/walkthrough/test-runner.mjs`
+- `test/walkthrough/shared.mjs`
+- `test/walkthrough/agent-coverage-scoring.mjs`
+- `test/walkthrough/coverage-helpers.mjs`
+- `test/walkthrough/verify-suite-coverage.mjs`
+- `test/walkthrough/agent-local-tools.mjs`
+
+Suite definitions:
+
+- `test/walkthrough/suites/*.mjs`
+
+Loop helpers:
+
+- `test/walkthrough/agent-doc-feedback-loop.mjs`
+- `test/walkthrough/parallel-agent-doc-feedback-loop.mjs`
+
+Main docs agents read:
+
+- `docs/llms.txt`
+- `docs/skills/discovery.txt`
+- `docs/skills/identity.txt`
+- `docs/skills/wallet.txt`
+- `docs/skills/analysis.txt`
+- `docs/skills/social.txt`
+- `docs/skills/channels.txt`
+- `docs/skills/channels-signed.txt`
+- `docs/skills/market.txt`
+- `docs/skills/market-open-flow.txt`
+- `docs/skills/market-close.txt`
+- `docs/skills/market-swap.txt`
+- `docs/skills/analytics.txt`
+- `docs/skills/capital.txt`
+- `docs/skills/signing-secp256k1.txt`
+
+## Scoring Words
+
+This skill uses four scores:
+
+- **contract**
+  - did the agent call the route correctly?
+- **success**
+  - correct route, correct request, intended success response
+- **boundary**
+  - correct route, correct request, intended teaching/error response
+- **reach**
+  - touched the route at all, even if the request was wrong
+
+Headline score = **contract score**.
+
+## 3-Try Rule
+
+Every documented endpoint gets at most **3 exact tries**.
+
+Exact try means:
+
+- exact method
+- exact documented path pattern
+
+Failure buckets:
+
+- `cannot_find_endpoint`
+- `found_endpoint_wrong_request`
+- `found_endpoint_wrong_response`
+
+This matters because “the agent found the URL” is **not** enough.
+
+## Main Modes
+
+### 1. `walkthrough`
+
+Old benchmark-style agent journey.
+Useful, but not the main exhaustive eval anymore.
+
+### 2. `coverage`
+
+Deterministic route checks.
+Good for exact API correctness.
+This is a **backend contract suite**, not outside-agent proof.
+It must not open, assign, rebalance, fee-change, or close live channels.
+
+### 3. `agent-coverage`
+
+The main docs-only eval.
+The agent gets a base URL, a task, normal HTTP access, and whatever docs the site itself serves.
+No harness-side signing help or hidden state help.
+
+### 4. Parallel feedback loop
+
+Best way to iterate fast.
+
+Workers:
+
+- `W1 = discovery,analysis`
+- `W2 = identity,wallet`
+- `W3 = social,channels`
+- `W4 = market,analytics,capital`
+
+Loop:
+
+1. run agents
+2. inspect misses
+3. reread `docs/llms.txt` and the relevant public skill/helper docs in full before patching
+4. tighten docs
+5. rerun
+
+Better iteration rule:
+
+1. classify the miss first
+2. apply only the matching fix
+3. rerun only that narrow lane
+4. require 2 clean passes before calling it done
+
+Hard-stop rule:
+
+1. run the broad eval in fail-fast mode
+2. stop at the first failed lane
+3. switch to targeted reruns for that one lane only
+4. if the same lane gets 3 narrow fix cycles with no contract-score improvement, hard-stop and mark it as a real blocker
+5. hard-stop immediately if the next blocker needs real money, a real assigned channel, or a backend/product fix instead of a docs/test fix
+
+Targeted test rule:
+
+1. use the smallest rerun that can prove the fix
+2. do not rerun unrelated lanes while a narrow blocker is still open
+3. only go back to the broad eval after the narrow lane passes twice
+
+Post-failure reread rule:
+
+1. after any failed agent run, reread `docs/llms.txt` in full
+2. reread in full the public skill/helper docs that fan out from it and are relevant to the failed area
+3. keep the failure details in mind while rereading so you can decide whether the miss is findability, exactness, signing/runtime, state, or product behavior
+4. do this before you decide where to patch
+
+Scope of that reread:
+
+- include the public agent doc tree:
+  - `docs/llms.txt`
+  - `docs/skills/*.txt`
+  - docs-only helper files linked from `llms.txt`
+- do not automatically reread the large condensed knowledge docs on every miss:
+  - `docs/knowledge/alex_bosworth_writings_MEMORY_CONDENSED.md`
+  - `docs/knowledge/balanceofsatoshis_MEMORY_CONDENSED.md`
+  - `docs/knowledge/bolts_MEMORY_CONDENSED.md`
+  - `docs/knowledge/lnbook_MEMORY_CONDENSED.md`
+- only pull those larger knowledge files back in when the failure actually depends on deeper Lightning theory instead of the public product docs
+
+Miss classes:
+
+- `findability`
+- `exact_request_shape`
+- `runtime_or_signing`
+- `state_prerequisite`
+- `real_product_bug`
+
+For hard combined phases, keep the final benchmark group unchanged, but split them into smaller debug lanes while iterating.
+Example:
+
+- `swap-ecash-and-rebalance` can be debugged as:
+  - `swap`
+  - `fund-from-ecash`
+  - `rebalance`
+
+## What We Added In This Work
+
+This skill must now remember that the system grew a lot:
+
+- contract-first scoring
+- 3 exact tries per route
+- parallel workers
+- doc-visibility tracing
+- route-by-route manifests
+- safe dedupe cleanup
+- helper docs for long route groups
+- stricter separation between backend contract tests and outside-agent proof
+- direct live mutation paths removed from the harness
+
+## Philosophy
+
+The main eval should model a real outside agent as closely as possible.
+
+That means `agent-coverage` should give the model only:
+
+- a base URL
+- a human task
+- normal HTTP access
+- whatever docs and responses the website itself serves
+
+Optional production-like variant:
+
+- a generic terminal
+
+That terminal must stay generic.
+It is allowed only because a real outside agent may have its own shell.
+It must never become a hidden crypto helper, funding helper, or channel helper.
+
+That means `agent-coverage` should **not** give the model:
+
+- local signing helpers
+- hidden funding help
+- hidden channel assignment help
+- hidden operator actions
+- subsection coaching
+- route-by-route success hints
+
+The loop should also stay classifier-driven:
+
+- do not make random doc edits
+- identify what class of miss happened
+- change only the part that matches that miss
+- prefer narrow reruns over broad reruns
+- do not call a phase stable on one lucky pass; require 2 clean passes
+
+## Signed Route Testing
+
+Signed routes are still the hardest part.
+
+Current rule:
+
+- the pure outside-agent eval does **not** get signing help from the harness
+- if a signed flow needs a real assigned channel or real local signing runtime, that must come from the real agent environment, not the harness
+- if we want to simulate that environment, use a generic terminal lane, not custom signing tools
+- deterministic `coverage` can still check backend contracts and honest boundary responses, but it must not mutate live channel state
+
+### Server rule
+
+Use at most two local app servers:
+
+- `3302` = main
+- `3306` = scratch
+
+Do not start ad hoc copies on `3201`, `3304`, or random ports.
+
+Production should use only one app server.
+
+Normal testing server:
+
+- use `http://localhost:3302`
+- use `http://localhost:3306` only for scratch work that is clearly separated from the main outside-agent eval
+
+Do **not** use port `3200`.
+
+## Monitoring And Logs
+
+Important artifacts:
+
+- `test/walkthrough/stress-test-results.jsonl`
+- `test/walkthrough/parallel-results/...`
+- dashboard and monitoring routes in `src/monitor/`
+
+What to log and inspect:
+
+- which docs the agent fetched
+- what payload the agent actually saw
+- which request it chose next
+- contract vs reach score
+- failed routes grouped by failure type
+
+## Best Current Read
+
+As of this skill update:
+
+- latest fresh clean full parallel run: `109/111` contract
+- latest fresh clean usable-now score: `105/105`
+- latest fresh clean reach score: `111/111`
+- strongest clean lanes:
+  - `discovery + analysis = 18/18`
+  - `identity + wallet = 27/27`
+- remaining misses are concentrated in:
+  - `social:alliances`
+  - `channels:audit-and-monitoring`
+  - `channels:signed-channel-lifecycle`
+  - `market:open-flow`
+  - `market:close-revenue-performance`
+  - `market:swap-ecash-and-rebalance`
+- those remaining misses are now a mix of:
+  - real doc clarity gaps
+  - honest funding or channel-assignment blockers
+
+## Known Hazard
+
+One earlier live signed-channel experiment changed the inactive channel
+`6a8793cbdf9d85d5ec11d9d5a0b70ba3b64e48f7a4c39663c8a3a85fa9135688:0`
+to:
+
+- `base_fee_msat=1000`
+- `fee_rate_ppm=100`
+
+Do not ignore that.
+Future signed-channel proof runs should happen only in the real outside-agent lane, not through harness-side mutation shortcuts.
+
+## Commands
+
+Useful commands:
+
 ```bash
-curl -X POST /api/v1/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "your-agent-name"}'
+npm run test:walkthrough:verify
+npm run test:walkthrough:scoring
+npm run test:walkthrough:agent-coverage:quick -- --suite social --phase messaging --base-url http://localhost:3302
+npm run test:walkthrough:agent-coverage:terminal -- --suite channels --phase signed-channel-lifecycle --base-url http://localhost:3302
+npm run test:walkthrough:agent-feedback:parallel -- --top 8 --base-url http://localhost:3302
 ```
 
-Agents are heavily trained on curl and can decompose it into tool parameters. The llms.txt Quick Start uses curl examples for all endpoints.
-
-### The model knows the answer but can't execute it
-GPT-4.1-mini can perfectly recite the correct curl command after failing 4 times. The gap isn't comprehension — it's mapping prose to tool parameters. Once it stumbles into passing body as an object instead of a string, it works. This affects every POST endpoint.
-
-### Error responses must teach, not just reject
-Every 400/401/404 response includes: `hint` (what to do), `see` (which endpoint to check), `example` (where relevant). RFC 9457 inspired. Full error helper: `ai_panel/server/identity/agent-friendly-errors.js`.
-
----
-
-## Tools
-
-### Interactive Agent (`agent.mjs`)
-Blank-slate agent for manual testing. You type, it acts.
+Outside-agent real-flow pattern:
 
 ```bash
-node scripts/skills/agent-walkthrough/agent.mjs                        # default: openai/gpt-4.1-mini
-node scripts/skills/agent-walkthrough/agent.mjs --provider anthropic   # haiku
+AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js
+
+npm run test:walkthrough:agent-coverage:quick -- \
+  --provider openai \
+  --model gpt-4.1-mini \
+  --mode agent-coverage \
+  --suite channels \
+  --phase signed-channel-lifecycle \
+  --base-url http://localhost:3306
 ```
 
-Supports `--provider openai|anthropic` and `--model <model-id>`.
+## Update Rules
 
-### Test Runner (`test-runner.mjs`)
-Automated 21-phase test. Sends gentle nudges to the agent, checks if it finds the right endpoint. Tests docs navigation, not funds flow.
+Whenever this system changes, update this file for:
 
-```bash
-node scripts/skills/agent-walkthrough/test-runner.mjs                        # default: openai/gpt-4.1-mini
-node scripts/skills/agent-walkthrough/test-runner.mjs --provider anthropic   # haiku
-node scripts/skills/agent-walkthrough/test-runner.mjs --phase register       # run just one phase
-node scripts/skills/agent-walkthrough/test-runner.mjs --start-phase 5        # skip to phase 5
-node scripts/skills/agent-walkthrough/test-runner.mjs --delay 5              # 5s pause between phases (default: 3)
-node scripts/skills/agent-walkthrough/test-runner.mjs --delay 0              # no pause (fastest)
-```
+- new route counts
+- new score definitions
+- new helper docs
+- new worker splits
+- new safety rules
+- new test commands
+- new known hazards
 
-Everything prints to one terminal — agent actions, HTTP calls, and ★ pass/fail verdicts are interleaved. Logs also saved to files if you want to review later:
-```bash
-cat /tmp/agent-view.log    # agent's requests and responses
-cat /tmp/test-view.log     # pass/fail scorecard only
-```
+This file is the only human summary that must stay current.
 
-#### 21 Phases
-
-| # | Phase | What it tests |
-|---|-------|---------------|
-| 1 | read-docs | Can it find and read llms.txt? |
-| 2 | register | Can it POST with a JSON body? |
-| 3 | check-profile | Can it use Bearer auth from registration? |
-| 4 | adopt-strategy | Can it PUT to update its profile? |
-| 5 | explore-strategies | Can it find /strategies? |
-| 6 | check-leaderboard | Can it find /leaderboard? |
-| 7 | network-health | Can it find /analysis/network-health? |
-| 8 | analyze-node | Can it call analysis with a real pubkey? |
-| 9 | suggest-peers | Can it call suggest-peers? |
-| 10 | knowledge-base | Can it find /knowledge/? |
-| 11 | check-wallet | Can it auth + check wallet? |
-| 12 | fund-wallet | Can it generate a deposit invoice? |
-| 13 | check-bounties | Can it find /bounties? |
-| 14 | post-bounty | Can it POST a bounty? |
-| 15 | check-tournaments | Can it find /tournaments? |
-| 16 | message-agent | Can it find another agent and POST a message? |
-| 17 | market-overview | Can it find the channel market? |
-| 18 | open-channel | Can it preview/open a channel? |
-| 19 | channel-performance | Can it check channel stats? |
-| 20 | close-channel | Can it attempt a cooperative close? |
-| 21 | check-revenue | Can it check routing fees? |
-
-The test checks "did it find the endpoint and try" — not "did the on-chain operation complete." Agent has 0 sats, so later phases will get "insufficient funds." That's fine. The test is: can a dumb model navigate the docs to every endpoint?
-
----
-
-## Platform Fix Patterns
-
-- **Don't teach through errors.** If an agent has to hit a 400 to learn the right format, the docs failed. Show the exact working request upfront.
-- **Never fix the agent harness.** The tool description, system prompt, and harness code are off-limits. They simulate what a real outside agent has.
-- **Don't add query param fallbacks blindly.** Think about edge cases — an agent might send garbage as a query param and accidentally create something. Fix the docs first, not the endpoint.
-- **Use curl examples for POST endpoints.** Agents trained on curl can decompose it into tool parameters reliably. Prose descriptions of POST bodies fail for mini models.
-- **Use relative URLs.** Agent already knows the base URL from the request it just made. Absolute URLs break local testing.
-
----
-
-## When You Change the Platform
-
-Every time you modify agent-facing behavior (endpoints, responses, scoring, error messages), do both:
-1. **Restart the server** — `launchctl unload/load` the Express plist. Changes don't take effect until restarted.
-2. **Update the docs agents see** — `site/llms.txt` is the first thing agents read. If the API changed, the docs must match. Also check `site/llms-full.txt` for the full reference.
-
-If you skip either, the agent and the platform disagree — and the agent loses.
-
----
-
-## Files in This Skill
-
-| File | What it is |
-|------|-----------|
-| `shared.mjs` | The engine — HTTP client, AI provider factory (OpenAI/Anthropic/OpenRouter), tool constants |
-| `agent.mjs` | Interactive mode — you type instructions, agent acts via API calls. For manual testing. |
-| `test-runner.mjs` | Automated mode — runs 21-phase lifecycle test, scores how well agents navigate the platform |
-| `run.sh` | Entry point (skills require this). Just runs `agent.mjs`. |
-| `knowledge-base-audit-prompt.md` | Reusable recipe for auditing and condensing knowledge base files |
-| `SKILL.md` | This file — philosophy, findings, how to run |
-
-## Key Platform Files This Skill Tests
-
-| File | Purpose |
-|------|---------|
-| `site/llms.txt` | What agents read first — the complete API reference |
-| `ln_knowledge/*.md` | Knowledge base files agents can read on demand (strategy, protocol, rebalancing, onboarding, operator-wisdom) |
-| `ai_panel/server/identity/agent-friendly-errors.js` | Error responses that teach agents what went wrong |
+Do **not** turn this file into a dated diary.

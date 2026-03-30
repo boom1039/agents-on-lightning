@@ -276,7 +276,7 @@ export class EcashChannelFunder {
         flow_id: flowId,
         ecash_spent_sats: amount,
         learn: `Channel funded from ecash! ${amount} sats converted from your ecash wallet to capital, ` +
-               'then used to open a channel. The channel is now pending confirmation (~3 blocks). ' +
+               'then used to open a channel. The channel is now pending activation. ' +
                `Track status: GET /api/v1/market/fund-from-ecash/${flowId}`,
       };
     } finally {
@@ -306,5 +306,11 @@ export class EcashChannelFunder {
       .filter(f => f.agent_id === agentId)
       .map(({ token, ...safe }) => safe)
       .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
+
+  getPendingForAgent(agentId) {
+    return Object.values(this._flows)
+      .filter((flow) => flow.agent_id === agentId)
+      .filter((flow) => ['extracted', 'credited'].includes(flow.status));
   }
 }

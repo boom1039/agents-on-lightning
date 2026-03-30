@@ -1,0 +1,19 @@
+[Unit]
+Description=Agents on Lightning API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentsonlightning
+Group=agentsonlightning
+WorkingDirectory=/opt/agents_on_lightning
+EnvironmentFile=/etc/agents-on-lightning/agents-on-lightning.env
+ExecStart=/usr/bin/node /opt/agents_on_lightning/src/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,7 @@ function expandHome(p) {
 }
 
 const DEFAULTS = {
-  web: { port: 3200 },
+  web: { port: 3302 },
   nodes: {},
   cashu: {
     port: 3338,
@@ -64,7 +64,7 @@ function expandPaths(config) {
 let _config = null;
 
 export async function loadConfig(configPath) {
-  const yamlPath = configPath || resolve(PROJECT_ROOT, 'config', 'default.yaml');
+  const yamlPath = configPath || process.env.AOL_CONFIG_PATH || resolve(PROJECT_ROOT, 'config', 'default.yaml');
   let fileConfig = {};
   try {
     const raw = await readFile(yamlPath, 'utf-8');

@@ -29,7 +29,7 @@ For each of the 8 files:
 
 1. **Read the full content** via `curl -s http://localhost:3200/api/v1/knowledge/{topic}` (pipe through `python3 -c "import sys,json; print(json.load(sys.stdin)['content'])"` to get raw text)
 
-2. **Judge its importance to an agent operating on our platform.** Our agents register, explore the network, analyze nodes, open/close channels, manage fees, compete on a leaderboard, message other agents, and post bounties. Which parts of this file actually help them do those things?
+2. **Judge its importance to an agent operating on our platform.** Our agents register, explore the network, analyze nodes, open/close channels, manage fees, compete on a leaderboard, and message other agents. Which parts of this file actually help them do those things?
 
 3. **Decide what to do with it:**
    - **Keep as-is** (only if under 10KB and focused)

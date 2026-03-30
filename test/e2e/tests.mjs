@@ -325,63 +325,6 @@ export const tests = [
     },
   },
 
-  // ─── ADVISORY + BOUNTIES (8 endpoints) ─────────────────────────
-
-  {
-    name: 'Advisory + bounty lifecycle',
-    paid: false,
-    endpoints: 8,
-    fn: async ({ api, agents, key }) => {
-      // Advisory: agent 0 suggests to agent 1
-      let r = await api('POST', '/api/v1/advisory/suggest', {
-        content: 'Consider routing through high-capacity peers for better flow',
-      }, key(0));
-      is(r, 201, 'advisory/suggest');
-      const sugId = r.json.id || r.json.suggestion_id;
-
-      // Agent 1 checks inbox
-      r = await api('GET', '/api/v1/advisory/inbox', null, key(1));
-      is(r, 200, 'advisory/inbox');
-
-      // Agent 1 accepts
-      if (sugId) {
-        r = await api('POST', `/api/v1/advisory/suggestions/${sugId}/accept`, {}, key(1));
-        safe(r, 'advisory/accept');
-      }
-
-      // Bounty lifecycle: agent 0 posts bounty
-      r = await api('POST', '/api/v1/bounties/post', {
-        title: 'E2E Test Bounty',
-        description: 'Find the best routing path',
-        reward_sats: 100,
-      }, key(0));
-      is(r, 201, 'bounties/post');
-      const bountyId = r.json.id || r.json.bounty_id;
-
-      // List bounties (public)
-      r = await api('GET', '/api/v1/bounties');
-      is(r, 200, 'bounties list');
-
-      // Agent 1 claims
-      if (bountyId) {
-        r = await api('POST', `/api/v1/bounties/${bountyId}/claim`, {}, key(1));
-        safe(r, 'bounties/claim');
-
-        // Agent 1 submits work
-        r = await api('POST', `/api/v1/bounties/${bountyId}/submit`, {
-          content: 'Route through node XYZ for 30% better throughput',
-        }, key(1));
-        safe(r, 'bounties/submit');
-
-        // Agent 0 judges
-        r = await api('POST', `/api/v1/bounties/${bountyId}/judge`, {
-          verdict: 'accept',
-        }, key(0));
-        safe(r, 'bounties/judge');
-      }
-    },
-  },
-
   // ─── SOCIAL (14 endpoints) ─────────────────────────────────────
 
   {
@@ -492,12 +435,14 @@ export const tests = [
 
       r = await api('POST', '/api/v1/capital/withdraw', {
         amount_sats: 1000,
-        address: 'bc1qtest',
+        destination_address: 'bc1qtest',
       }, key(0));
-      safe(r, 'capital/withdraw');
+      is(r, 503, 'capital/withdraw');
 
       r = await api('POST', '/api/v1/capital/deposit', {}, key(0));
       safe(r, 'capital/deposit');
+      ok(r.json?.watch_url, 'capital/deposit should include watch_url');
+      ok(r.json.watch_url.includes(r.json.address), 'capital/deposit watch_url should include address');
 
       r = await api('GET', '/api/v1/capital/deposits', null, key(0));
       is(r, 200, 'capital/deposits');
@@ -1203,6 +1148,8 @@ export const tests = [
       safe(r, 'capital/deposit');
       const address = r.json?.address;
       ok(address, 'no deposit address returned');
+      ok(r.json?.watch_url, 'no watch_url returned');
+      ok(r.json.watch_url.includes(address), 'watch_url should include address');
       ok(address.startsWith('bc1') || address.startsWith('tb1'),
         `unexpected address format: ${address}`);
 

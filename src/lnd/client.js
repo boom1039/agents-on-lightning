@@ -436,6 +436,8 @@ export class NodeClient {
    * @param {number} [opts.satPerVbyte] - Fee rate in sat/vbyte
    * @param {boolean} [opts.private] - Whether the channel should be private
    * @param {number} [opts.minHtlcMsat] - Minimum HTLC size in msat
+   * @param {number} [opts.baseFeeMsat] - Initial base fee in millisatoshis
+   * @param {number} [opts.feeRatePpm] - Initial fee rate in ppm
    * @param {number} [opts.remoteCsvDelay] - CSV delay for remote party
    * @param {number} [opts.minConfs] - Minimum confirmations for funding UTXO
    * @param {boolean} [opts.spendUnconfirmed] - Allow spending unconfirmed outputs
@@ -450,6 +452,14 @@ export class NodeClient {
     if (opts.satPerVbyte != null) body.sat_per_vbyte = String(opts.satPerVbyte);
     if (opts.private != null) body.private = opts.private;
     if (opts.minHtlcMsat != null) body.min_htlc_msat = String(opts.minHtlcMsat);
+    if (opts.baseFeeMsat != null) {
+      body.base_fee = String(opts.baseFeeMsat);
+      body.use_base_fee = true;
+    }
+    if (opts.feeRatePpm != null) {
+      body.fee_rate = String(opts.feeRatePpm);
+      body.use_fee_rate = true;
+    }
     if (opts.remoteCsvDelay != null) body.remote_csv_delay = opts.remoteCsvDelay;
     if (opts.minConfs != null) body.min_confs = opts.minConfs;
     if (opts.spendUnconfirmed != null) body.spend_unconfirmed = opts.spendUnconfirmed;

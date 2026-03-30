@@ -73,7 +73,7 @@ function makeExecutor(overrides = {}) {
   const dataLayer = overrides.dataLayer || mockDataLayer();
   const auditLog = overrides.auditLog || mockAuditLog();
   const agentRegistry = overrides.agentRegistry || mockAgentRegistry({
-    'agent-01': { id: 'agent-01', pubkey: 'a'.repeat(64) },
+    'agent-01': { id: 'agent-01', pubkey: `02${'a'.repeat(64)}` },
   });
   const assignmentRegistry = overrides.assignmentRegistry || mockAssignmentRegistry([
     { chan_id: '12345', channel_point: 'abc:0', agent_id: 'agent-01', capacity: 1_000_000 },
@@ -93,7 +93,7 @@ function makeExecutor(overrides = {}) {
 }
 
 /**
- * Patches the executor's validate method to bypass Ed25519 verification
+ * Patches the executor's validate method to bypass secp256k1 verification
  * (which requires real crypto). Returns validated params directly.
  */
 function patchValidation(executor) {
@@ -467,6 +467,57 @@ describe('RebalanceExecutor — fee estimation', () => {
     const result = await executor.estimateRebalanceFee('agent-01', {});
     assert.equal(result.success, false);
     assert.equal(result.status, 400);
+  });
+
+  it('rejects estimate when outbound channel is assigned to a different agent before touching LND', async () => {
+    let lndLookups = 0;
+    const nodeManager = {
+      getDefaultNodeOrNull: () => {
+        lndLookups++;
+        throw new Error('should not hit LND for unowned estimate');
+      },
+    };
+    const { executor } = makeExecutor({
+      nodeManager,
+      assignmentRegistry: mockAssignmentRegistry([
+        { chan_id: '12345', channel_point: 'abc:0', agent_id: 'agent-02', capacity: 1_000_000 },
+      ]),
+    });
+
+    const result = await executor.estimateRebalanceFee('agent-01', {
+      outbound_chan_id: '12345',
+      amount_sats: 100_000,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.status, 404);
+    assert.match(result.error, /Outbound channel not found/);
+    assert.match(result.learn, /assigned to you/);
+    assert.equal(lndLookups, 0);
+  });
+
+  it('rejects estimate when outbound channel is not assigned before touching LND', async () => {
+    let lndLookups = 0;
+    const nodeManager = {
+      getDefaultNodeOrNull: () => {
+        lndLookups++;
+        throw new Error('should not hit LND for missing assignment');
+      },
+    };
+    const { executor } = makeExecutor({
+      nodeManager,
+      assignmentRegistry: mockAssignmentRegistry([]),
+    });
+
+    const result = await executor.estimateRebalanceFee('agent-01', {
+      outbound_chan_id: 'missing-chan',
+      amount_sats: 100_000,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.status, 404);
+    assert.match(result.learn, /assigned to you/);
+    assert.equal(lndLookups, 0);
   });
 });
 

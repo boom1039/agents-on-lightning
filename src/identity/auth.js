@@ -1,13 +1,16 @@
 /**
  * Authentication middleware for external agent API.
  * Bearer token format: lb-agent-{32-byte-hex}
- * Optional Ed25519 signature verification for cross-model identity.
+ * Optional secp256k1 signature verification for signed agent actions.
  */
 
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import {
+  createHash, createPublicKey, createVerify, ECDH,
+} from 'node:crypto';
 import { err401NoAuth, err401BadFormat, err401BadKey } from './agent-friendly-errors.js';
+import { logAuthFailure } from './audit-log.js';
+import { getSocketAddress } from './request-security.js';
 
 // In-memory rate limit tracking: IP → { count, windowStart }
 const _rateLimits = new Map();
@@ -20,6 +23,10 @@ const RATE_LIMIT_MAX = 10; // 10 registrations per IP per hour
  */
 export function generateApiKey() {
   return `lb-agent-${randomBytes(32).toString('hex')}`;
+}
+
+export function hashApiKey(apiKey) {
+  return createHash('sha256').update(String(apiKey)).digest('hex');
 }
 
 /**
@@ -50,18 +57,22 @@ export function checkRateLimit(ip) {
  */
 export function requireAuth(registry) {
   return async (req, res, next) => {
+    const socketIp = getSocketAddress(req) || null;
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logAuthFailure(socketIp, false);
       return err401NoAuth(res);
     }
 
     const apiKey = authHeader.slice(7).trim();
     if (!apiKey.startsWith('lb-agent-')) {
+      logAuthFailure(socketIp, true);
       return err401BadFormat(res);
     }
 
     const agent = registry.getByApiKey(apiKey);
     if (!agent) {
+      logAuthFailure(socketIp, true);
       return err401BadKey(res);
     }
 
@@ -78,6 +89,7 @@ export function requireAuth(registry) {
  */
 export function optionalAuth(registry) {
   return async (req, res, next) => {
+    const socketIp = getSocketAddress(req) || null;
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       req.agentId = null;
@@ -92,6 +104,7 @@ export function optionalAuth(registry) {
       req.agentApiKey = apiKey;
       req.agentProfile = agent;
     } else {
+      logAuthFailure(socketIp, true);
       req.agentId = null;
       req.agentProfile = null;
     }
@@ -99,24 +112,39 @@ export function optionalAuth(registry) {
   };
 }
 
+export function sha256MessageBytes(message) {
+  return createHash('sha256').update(String(message), 'utf8').digest();
+}
+
+function secp256k1CompressedHexToPublicKey(publicKeyHex) {
+  const uncompressed = ECDH.convertKey(
+    String(publicKeyHex || ''),
+    'secp256k1',
+    'hex',
+    'hex',
+    'uncompressed',
+  );
+  const bytes = Buffer.from(uncompressed, 'hex');
+  const x = bytes.subarray(1, 33).toString('base64url');
+  const y = bytes.subarray(33, 65).toString('base64url');
+  return createPublicKey({
+    key: { kty: 'EC', crv: 'secp256k1', x, y },
+    format: 'jwk',
+  });
+}
+
 /**
- * Verify Ed25519 signature for cross-model identity verification.
- * Uses Node.js built-in crypto.
+ * Verify a secp256k1 ECDSA signature over SHA256(message).
+ * Public key must be compressed hex (33 bytes, 66 hex chars).
+ * Signature must be DER-encoded hex.
  */
-export async function verifyEd25519Signature(publicKeyHex, message, signatureHex) {
+export async function verifySecp256k1Signature(publicKeyHex, message, signatureHex) {
   try {
-    const { verify, createPublicKey } = await import('node:crypto');
-    const pubKeyBuffer = Buffer.from(publicKeyHex, 'hex');
-    const key = createPublicKey({
-      key: Buffer.concat([
-        // Ed25519 DER prefix
-        Buffer.from('302a300506032b6570032100', 'hex'),
-        pubKeyBuffer,
-      ]),
-      format: 'der',
-      type: 'spki',
-    });
-    return verify(null, Buffer.from(message), key, Buffer.from(signatureHex, 'hex'));
+    const pubkey = secp256k1CompressedHexToPublicKey(publicKeyHex);
+    const verifier = createVerify('SHA256');
+    verifier.update(String(message), 'utf8');
+    verifier.end();
+    return verifier.verify(pubkey, Buffer.from(String(signatureHex || ''), 'hex'));
   } catch {
     return false;
   }

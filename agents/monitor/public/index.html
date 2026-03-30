@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Platform — Spreadsheet</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#071018;color:#c8d6e0;font:8px/1 "SF Mono","Fira Code","Cascadia Code",monospace}
+a{color:inherit;text-decoration:none}
+
+/* Sticky stats header */
+.stats{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;background:#09141d;border-bottom:1px solid #1a3348;padding:2px 4px;gap:0}
+.stat{display:flex;align-items:center;border-right:1px solid #163042;padding:2px 6px;white-space:nowrap}
+.stat:last-child{border-right:none}
+.stat-k{color:#6f8899;margin-right:4px;text-transform:uppercase;font-size:7px;letter-spacing:.03em}
+.stat-v{color:#e8eff5;font-weight:700;font-size:9px}
+.stat-v.ok{color:#5fd89a}
+.stat-v.warn{color:#f4b350}
+.stat-v.bad{color:#f36d6d}
+.stat-sep{border-right:2px solid #f4b350;margin:0}
+.live{display:flex;align-items:center;margin-left:auto;padding:2px 6px;gap:4px;color:#6f8899;font-size:7px}
+.dot{width:6px;height:6px;border-radius:50%;background:#35d07f;flex-shrink:0}
+.dot.off{background:#f36d6d}
+
+/* Main grid: endpoints | docs+agents */
+.grid{display:grid;grid-template-columns:1fr 1fr;width:100%}
+.col{min-width:0}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th,td{padding:1px 4px;border-bottom:1px solid #0e1e2c;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:13px;line-height:13px}
+th{position:sticky;top:19px;z-index:10;background:#0b1520;color:#7a94a8;font-size:7px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;border-bottom:1px solid #1a3348}
+.r{text-align:right}
+.sep-row td{background:#0a1219;color:#f4b350;font-weight:700;font-size:7px;text-transform:uppercase;letter-spacing:.06em;border-top:1px solid #1a3348;padding:2px 4px}
+.m{font-weight:700;font-size:7px}
+.m-g{color:#5fd89a}
+.m-p{color:#6fb8ff}
+.m-u{color:#ffd36e}
+.m-d{color:#ff8e98}
+.ok td{background:rgba(28,71,46,.08)}
+.wn td{background:rgba(94,77,26,.08)}
+.bd td{background:rgba(92,29,36,.10)}
+.cd td{color:#4a6373}
+.sub-hdr td{color:#9eb4c4;font-size:7px;font-weight:600;border-top:1px solid #132638}
+.type{font-size:7px;font-weight:600;padding:0 3px;border-radius:2px}
+.t-root{background:#412a14;color:#f4b350}
+.t-sapi{background:#17351d;color:#7ce0a4}
+.t-sstat{background:#1d2845;color:#8cb8ff}
+.t-know{background:#2e2148;color:#c5a3ff}
+
+/* Feed ticker */
+.ticker{position:sticky;bottom:0;z-index:20;background:#09141d;border-top:1px solid #1a3348;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:7px;color:#7a94a8;height:16px;line-height:12px}
+.ticker b{color:#c8d6e0;font-weight:600}
+.ticker .st2{color:#5fd89a}
+.ticker .st4{color:#f4b350}
+.ticker .st5{color:#f36d6d}
+</style>
+</head>
+<body>
+
+<div class="stats" id="stats">
+  <div class="stat"><span class="stat-k">loading</span><span class="stat-v">...</span></div>
+</div>
+
+<div class="grid">
+  <div class="col">
+    <table>
+      <thead><tr>
+        <th style="width:28px">Mth</th>
+        <th>Path</th>
+        <th style="width:30px" class="r">24h</th>
+        <th style="width:30px" class="r">All</th>
+        <th style="width:32px" class="r">Err%</th>
+        <th style="width:30px" class="r">P95</th>
+      </tr></thead>
+      <tbody id="ep"></tbody>
+    </table>
+  </div>
+  <div class="col">
+    <table>
+      <thead><tr>
+        <th>Doc / Agent</th>
+        <th style="width:34px">Type</th>
+        <th style="width:30px" class="r">24h</th>
+        <th style="width:30px" class="r">All</th>
+        <th style="width:30px" class="r">1h</th>
+        <th style="width:30px" class="r">Err</th>
+      </tr></thead>
+      <tbody id="right"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="ticker" id="ticker">waiting for data...</div>
+
+<script>
+const API='/dashboard/api',POLL=5000;
+let tick=POLL/1000;
+
+const F=v=>Number(v||0).toLocaleString();
+const P=v=>(v===null||v===undefined||Number.isNaN(v))?'-':(v*100).toFixed(1)+'%';
+const M=v=>(v===null||v===undefined||Number.isNaN(v))?'-':Math.round(v)+'ms';
+const T=v=>v?new Date(v).toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}):'-';
+function E(t){if(t==null)return'';const d=document.createElement('div');d.textContent=String(t);return d.innerHTML}
+
+function rc(e){
+  if(!e.hits_24h)return'cd';
+  if(!e.status_known_24h)return'';
+  if(e.error_rate_24h>.05)return'bd';
+  if(e.error_rate_24h>0)return'wn';
+  return'ok';
+}
+
+function mc(m){
+  const l=m.toLowerCase();
+  if(l==='get')return'm-g';
+  if(l==='post')return'm-p';
+  if(l==='put')return'm-u';
+  if(l==='delete')return'm-d';
+  return'';
+}
+
+function renderStats(s){
+  const a=s.agents,t=s.traffic,e=s.errors,p=s.platform||{};
+  const top=a.most_active?`${a.most_active.name||a.most_active.id} (${a.most_active.requests_1h})`:'none';
+  const topFail=e.top_failing&&e.top_failing[0]?`${e.top_failing[0].method} ${e.top_failing[0].path} ${P(e.top_failing[0].error_rate_24h)}`:'none';
+  const cells=[
+    ['Reg',F(a.total),''],
+    ['Act 1h',F(a.active_1h),''],
+    ['Act 24h',F(a.active_24h),''],
+    ['New 24h',F(a.new_24h),''],
+    ['Anon IP',F(a.anonymous_1h),''],
+    ['Idle',F(a.idle_24h),a.idle_24h>a.total*.8?'warn':''],
+    ['Top Agent',top,''],
+    ['|','','sep'],
+    ['Req/m',F(t.requests_per_min),''],
+    ['Tot 24h',F(t.total_24h),''],
+    ['Success',P(t.success_rate_24h),t.success_rate_24h!==null&&t.success_rate_24h<.95?'bad':t.success_rate_24h!==null&&t.success_rate_24h<.99?'warn':'ok'],
+    ['P50',M(t.p50_ms),''],
+    ['P95',M(t.p95_ms),t.p95_ms!==null&&t.p95_ms>500?'bad':t.p95_ms!==null&&t.p95_ms>200?'warn':''],
+    ['|','','sep'],
+    ['4xx',F(t.status_4xx_24h),t.status_4xx_24h>0?'warn':''],
+    ['5xx',F(t.status_5xx_24h),t.status_5xx_24h>0?'bad':''],
+    ['AuthF',F(e.auth_failures_24h),e.auth_failures_24h>0?'bad':''],
+    ['ValErr',F(e.validation_failures_24h),e.validation_failures_24h>0?'warn':''],
+    ['RateL',F((e.rate_limit_categories_24h||[]).reduce((s,c)=>s+c.count,0)),''],
+    ['Rep 4xx',F(e.repeated_failure_pairs_24h),e.repeated_failure_pairs_24h>0?'bad':''],
+    ['Recov',P(e.recovery_rate_24h),''],
+    ['TopFail',topFail,''],
+    ['|','','sep'],
+    ['Nodes',F(p.nodes),''],
+    ['Txns',F(p.total_transactions),''],
+    ['Routes',F(s.inventory.endpoints_total),''],
+    ['Docs',F(s.inventory.docs_total),''],
+  ];
+  let html='';
+  for(const[k,v,cls]of cells){
+    if(cls==='sep'){html+='<div class="stat stat-sep"></div>';continue;}
+    html+=`<div class="stat"><span class="stat-k">${E(k)}</span><span class="stat-v${cls?' '+cls:''}">${E(v)}</span></div>`;
+  }
+  html+=`<div class="live"><span class="dot" id="liveDot"></span><span id="liveText">live</span> <span id="refreshTimer">${tick}s</span></div>`;
+  document.getElementById('stats').innerHTML=html;
+}
+
+function renderEndpoints(payload){
+  let html='';
+  for(const domain of payload.domains){
+    html+=`<tr class="sep-row"><td colspan="6">${E(domain.name)} (${domain.count})</td></tr>`;
+    for(const ep of payload.endpoints.filter(e=>e.domain===domain.name)){
+      html+=`<tr class="${rc(ep)}"><td><span class="m ${mc(ep.method)}">${E(ep.method.slice(0,3))}</span></td><td title="${E(ep.path)}">${E(ep.path)}</td><td class="r">${F(ep.hits_24h)}</td><td class="r">${F(ep.total)}</td><td class="r">${P(ep.error_rate_24h)}</td><td class="r">${M(ep.p95_ms)}</td></tr>`;
+    }
+  }
+  document.getElementById('ep').innerHTML=html;
+}
+
+function renderRight(docs,agents){
+  let html='';
+  // Docs section
+  html+=`<tr class="sub-hdr"><td colspan="6">DOCS (${docs.docs.length})</td></tr>`;
+  for(const d of docs.docs){
+    const tc=d.type==='root'?'t-root':d.type==='skill-api'?'t-sapi':d.type==='skill-static'?'t-sstat':'t-know';
+    html+=`<tr class="${d.hits_24h?'':'cd'}"><td title="${E(d.path)}">${E(d.label)}</td><td><span class="type ${tc}">${E(d.type)}</span></td><td class="r">${F(d.hits_24h)}</td><td class="r">${F(d.total)}</td><td></td><td></td></tr>`;
+  }
+  // Agents section
+  html+=`<tr class="sub-hdr"><td colspan="6">AGENTS (${agents.count})</td></tr>`;
+  for(const a of agents.agents){
+    html+=`<tr class="${a.active_24h?'':'cd'}"><td title="${E(a.id)}">${E(a.name||a.id)}</td><td class="r" style="font-size:7px;color:#6f8899">${E(a.tier||'')}</td><td class="r">${F(a.requests_24h)}</td><td class="r">${F(a.wallet_balance_sats||0)}</td><td class="r">${F(a.requests_1h)}</td><td class="r">${F(a.errors_24h)}</td></tr>`;
+  }
+  document.getElementById('right').innerHTML=html;
+}
+
+function renderTicker(payload){
+  const evts=payload.events.slice(0,10);
+  if(!evts.length){document.getElementById('ticker').textContent='no recent events';return;}
+  document.getElementById('ticker').innerHTML='FEED '+evts.map(e=>{
+    if(e.event==='api_request'){
+      const sc=e.status>=500?'st5':e.status>=400?'st4':'st2';
+      return`<b>${T(e._ts)}</b> ${E(e.method)} ${E(e.path)} <span class="${sc}">${e.status||'-'}</span> ${M(e.duration_ms)}`;
+    }
+    return`<b>${T(e._ts)}</b> ${E(e.event)}`;
+  }).join(' | ');
+}
+
+async function refresh(){
+  try{
+    const[summary,endpoints,docs,agents,activity]=await Promise.all([
+      fetch(API+'/summary').then(r=>r.json()),
+      fetch(API+'/endpoints').then(r=>r.json()),
+      fetch(API+'/docs').then(r=>r.json()),
+      fetch(API+'/agents').then(r=>r.json()),
+      fetch(API+'/activity?limit=80').then(r=>r.json()),
+    ]);
+    renderStats(summary);
+    renderEndpoints(endpoints);
+    renderRight(docs,agents);
+    renderTicker(activity);
+  }catch(err){
+    const dot=document.getElementById('liveDot');
+    const txt=document.getElementById('liveText');
+    if(dot)dot.className='dot off';
+    if(txt)txt.textContent='offline';
+  }
+  tick=POLL/1000;
+}
+
+setInterval(()=>{tick=Math.max(0,tick-1);const el=document.getElementById('refreshTimer');if(el)el.textContent=tick+'s';},1000);
+refresh();
+setInterval(refresh,POLL);
+</script>
+</body>
+</html>
