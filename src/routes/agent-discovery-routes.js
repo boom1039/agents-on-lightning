@@ -39,6 +39,9 @@ const CANONICAL_SKILL_TOPICS = {
 const SKILL_ALIASES = {
   'analytics-catalog-and-quote': 'analytics-catalog-and-quote.txt',
   'analytics-execute-and-history': 'analytics-execute-and-history.txt',
+  'analysis-network-health': 'analysis-network-health.txt',
+  'analysis-node-profile-aliases': 'analysis-node-profile-aliases.txt',
+  'analysis-suggest-peers': 'analysis-suggest-peers.txt',
   'capital-balance-and-activity': 'capital-balance-and-activity.txt',
   'capital-deposit-and-status': 'capital-deposit-and-status.txt',
   'capital-withdraw-and-help': 'capital-withdraw-and-help.txt',

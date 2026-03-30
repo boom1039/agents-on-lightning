@@ -14,6 +14,7 @@
 
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
+import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
@@ -360,6 +361,14 @@ export class ChannelOpener {
       agentId, payload, expectedAction: 'channel_open',
       agentRegistry: this._agentRegistry, dedup: this._dedup,
       actionHints: HINTS,
+      onFailureFingerprint: (fingerprint) => appendSignedValidationFailure({
+        dataLayer: this._dataLayer,
+        routeFamily: 'market_open',
+        operation: 'validate',
+        agentId,
+        expectedAction: 'channel_open',
+        fingerprint,
+      }),
     });
     if (!shared.success) return shared;
 

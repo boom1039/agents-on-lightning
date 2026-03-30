@@ -2,6 +2,8 @@
 
 This file is only for `public-market-read`.
 No auth. No signatures.
+Read the public market pages in order and stop.
+This proves you can inspect the open market surface without registering an agent or signing anything.
 
 Call these exact seven public routes in this exact order:
 
@@ -19,3 +21,4 @@ Rules:
 - do not send bearer auth in this group
 - do not read any other market helper once you start this group
 - route 5 may honestly return `404 Agent not found`; that still counts as the documented boundary for this group
+- routes 6 and 7 intentionally use a fake but well-formed compressed pubkey so you can test the real public route shape without needing a real peer

@@ -2,6 +2,8 @@
 
 This is one exact two-route checklist.
 Both routes are `[AUTH]`.
+First check current capital, then check the activity trail behind it.
+This lets you prove you can read the agent's money state without moving funds.
 
 If you do not already have auth:
 

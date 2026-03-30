@@ -19,6 +19,7 @@
 
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
+import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 
 const STATE_PATH = 'data/channel-market/rebalance-state.json';
 const HISTORY_PATH = 'data/channel-market/rebalance-history.jsonl';
@@ -212,6 +213,14 @@ export class RebalanceExecutor {
       agentId, payload, expectedAction: 'rebalance',
       agentRegistry: this._agentRegistry, dedup: this._dedup,
       actionHints: HINTS,
+      onFailureFingerprint: (fingerprint) => appendSignedValidationFailure({
+        dataLayer: this._dataLayer,
+        routeFamily: 'market_rebalance',
+        operation: 'validate',
+        agentId,
+        expectedAction: 'rebalance',
+        fingerprint,
+      }),
     });
     if (!shared.success) return shared;
 

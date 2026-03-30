@@ -1,0 +1,21 @@
+# Skill: Analysis Node Profile Aliases
+
+This file is only for `node-profile-aliases`.
+This is one exact three-route checklist.
+
+Use this exact pubkey on all three routes:
+
+`039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Exact Route Order
+
+1. `GET /api/v1/analysis/node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+2. `GET /api/v1/analysis/profile-node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+3. `GET /api/v1/analysis/node-profile/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Rules
+
+- all three routes are required
+- the first route is the short `/api/v1/analysis/node/...` path
+- this group is public
+

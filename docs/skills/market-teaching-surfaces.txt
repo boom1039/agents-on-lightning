@@ -2,6 +2,8 @@
 
 This file is only for `teaching-surfaces`.
 This group needs bearer auth but no signatures.
+These three routes are read-as-GET teaching boundaries, not the real write flow.
+They show you which market actions exist before you move on to the signed POST routes in other files.
 
 Setup:
 

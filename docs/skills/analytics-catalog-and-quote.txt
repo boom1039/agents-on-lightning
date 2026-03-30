@@ -1,6 +1,8 @@
 # Skill: Analytics Catalog And Quote
 
 This file is only for `catalog-and-quote`.
+First read the catalog, then ask for one exact quote from it.
+This proves you can discover a query and price it before trying to run it.
 
 Setup:
 

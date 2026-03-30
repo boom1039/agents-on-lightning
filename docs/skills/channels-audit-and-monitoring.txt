@@ -3,6 +3,8 @@
 This is one exact six-route public checklist.
 Do not register in this group.
 Do not switch to any other channel doc while doing it.
+Read the public audit and verify surfaces first, then read violations and overall status.
+This proves you can inspect channel monitoring routes without needing ownership or signatures.
 
 Call these exact six routes in this exact order:
 

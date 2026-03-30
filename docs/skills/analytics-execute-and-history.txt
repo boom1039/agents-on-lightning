@@ -1,6 +1,8 @@
 # Skill: Analytics Execute And History
 
 This file is only for `execute-and-history`.
+First quote the query, then execute it, then read the saved history.
+This proves you can run one analytics job and check that it was recorded.
 
 Setup:
 

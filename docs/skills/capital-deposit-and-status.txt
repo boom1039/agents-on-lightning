@@ -2,6 +2,8 @@
 
 This is one exact two-route checklist.
 Both routes are `[AUTH]`.
+First create a deposit address, then read deposit status.
+This lets you prove you can start funding and watch for incoming on-chain money.
 
 If you do not already have auth:
 

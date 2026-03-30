@@ -4,8 +4,9 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { createSign } from 'node:crypto';
 import { validateSignedInstruction, SHARED_VALIDATION_HINTS } from './signed-instruction-validation.js';
-import { sha256 } from './crypto-utils.js';
+import { canonicalJSON, sha256 } from './crypto-utils.js';
 import { generateTestKeypair, signInstruction } from './test-crypto-helpers.js';
 
 /** Minimal dedup cache mock */
@@ -49,6 +50,13 @@ describe('validateSignedInstruction', () => {
     const instruction = makeInstruction(instrOverrides);
     const signature = signInstruction(instruction, keypair.privateKey);
     return { instruction, signature };
+  }
+
+  function signMessage(message) {
+    const signer = createSign('SHA256');
+    signer.update(message, 'utf8');
+    signer.end();
+    return signer.sign(keypair.privateKey).toString('hex');
   }
 
   function agentRegistry(agents = {}) {
@@ -222,6 +230,80 @@ describe('validateSignedInstruction', () => {
     assert.equal(result.success, false);
     assert.equal(result.failed_at, 'signature_valid');
     assert.equal(result.status, 401);
+  });
+
+  it('step 7: gives a bad-hex hint for non-hex signatures', async () => {
+    const result = await validateSignedInstruction({
+      agentId: AGENT_ID,
+      payload: { instruction: makeInstruction(), signature: 'not-hex-at-all' },
+      expectedAction: ACTION,
+      agentRegistry: defaultRegistry(),
+      dedup: mockDedup(),
+      actionHints: ACTION_HINTS,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failed_at, 'signature_valid');
+    assert.match(result.hint, /signature must be hex/i);
+    assert.equal(result.failure_fingerprint.reason, 'signature_bad_hex');
+    assert.ok(!JSON.stringify(result).includes('failure_fingerprint'));
+  });
+
+  it('step 7: hints when the agent signed the outer wrapper', async () => {
+    const instruction = makeInstruction();
+    const signature = signInstruction({ instruction }, keypair.privateKey);
+    const result = await validateSignedInstruction({
+      agentId: AGENT_ID,
+      payload: { instruction, signature },
+      expectedAction: ACTION,
+      agentRegistry: defaultRegistry(),
+      dedup: mockDedup(),
+      actionHints: ACTION_HINTS,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failed_at, 'signature_valid');
+    assert.match(result.hint, /outer wrapper/i);
+    assert.equal(result.failure_fingerprint.reason, 'signed_wrapper_not_instruction');
+  });
+
+  it('step 7: hints when the agent signed non-canonical JSON', async () => {
+    const instruction = makeInstruction({
+      params: {
+        z_key: 'last',
+        a_key: 'first',
+      },
+    });
+    const signature = signMessage(JSON.stringify(instruction));
+    const result = await validateSignedInstruction({
+      agentId: AGENT_ID,
+      payload: { instruction, signature },
+      expectedAction: ACTION,
+      agentRegistry: defaultRegistry(),
+      dedup: mockDedup(),
+      actionHints: ACTION_HINTS,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failed_at, 'signature_valid');
+    assert.match(result.hint, /canonicalJSON/i);
+  });
+
+  it('step 7: hints when the agent signed the digest hex string', async () => {
+    const instruction = makeInstruction();
+    const signature = signMessage(sha256(canonicalJSON(instruction)));
+    const result = await validateSignedInstruction({
+      agentId: AGENT_ID,
+      payload: { instruction, signature },
+      expectedAction: ACTION,
+      agentRegistry: defaultRegistry(),
+      dedup: mockDedup(),
+      actionHints: ACTION_HINTS,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.failed_at, 'signature_valid');
+    assert.match(result.hint, /Do not sign the hex digest string/i);
   });
 
   it('does NOT call dedup.mark()', async () => {

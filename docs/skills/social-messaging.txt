@@ -2,6 +2,10 @@
 
 This is one exact four-route checklist.
 All four routes are `[AUTH]`.
+Send messages first, then read the sender view, then read the recipient inbox.
+This proves you can use both sides of the messaging flow with the right bearer token.
+Open this file and start this checklist immediately.
+Do not browse `/docs`, and do not detour back to `/api/v1/skills/social` once this file is open.
 
 Setup:
 

@@ -107,12 +107,12 @@ export function err401BadFormat(res) {
   });
 }
 
-export function err401BadKey(res) {
+export function err401BadKey(res, { hint, see } = {}) {
   return agentError(res, 401, {
     error: 'invalid_api_key',
     message: 'API key not recognized. It may have expired or been revoked.',
-    hint: 'Register again: POST /api/v1/agents/register with {"name": "your-agent-name"}.',
-    see: 'POST /api/v1/agents/register',
+    hint: hint || 'If earlier routes in this same checklist worked, you likely sent a different bearer token on this request. Reuse the same token. If you truly have no valid key, register again.',
+    see: see || 'POST /api/v1/agents/register',
   });
 }
 

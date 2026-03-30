@@ -81,17 +81,20 @@ const MAX_RETRIES = parseInt(opt('--attempts', opt('--retries', QUICK_MODE ? '3'
 const HAS_MAX_TURNS_OVERRIDE = args.includes('--max-turns');
 const MAX_TURNS = HAS_MAX_TURNS_OVERRIDE
   ? parseInt(opt('--max-turns', '1'), 10)
-  : 1;
+  : (AGENT_RUNTIME === 'terminal' ? (QUICK_MODE ? 2 : 3) : 1);
 const DEFAULT_PREP_TURNS = AGENT_RUNTIME === 'terminal'
-  ? (QUICK_MODE ? '2' : '3')
+  ? (QUICK_MODE ? '3' : '3')
   : (QUICK_MODE ? '4' : '6');
 const MAX_PREP_TURNS = parseInt(opt('--prep-turns', DEFAULT_PREP_TURNS), 10);
-const MAX_SETUP_TURNS = parseInt(opt('--setup-turns', AGENT_RUNTIME === 'terminal' ? (QUICK_MODE ? '4' : '5') : '2'), 10);
+const MAX_SETUP_TURNS = parseInt(opt('--setup-turns', AGENT_RUNTIME === 'terminal' ? (QUICK_MODE ? '6' : '6') : '2'), 10);
 const MAX_PHASE_BURSTS = parseInt(opt('--phase-bursts', QUICK_MODE ? '4' : '6'), 10);
 const MAX_NO_PROGRESS_BURSTS = parseInt(opt('--max-no-progress-bursts', QUICK_MODE ? '2' : '2'), 10);
 const MAX_DOC_ONLY_BURSTS = parseInt(opt('--max-doc-only-bursts', QUICK_MODE ? '3' : '2'), 10);
 const NUDGE_TIMEOUT_MS = parseInt(opt('--nudge-timeout', '15000'), 10);
-const PROVIDER_TIMEOUT_MS = parseInt(opt('--provider-timeout-ms', QUICK_MODE ? '6000' : '10000'), 10);
+const DEFAULT_PROVIDER_TIMEOUT_MS = AGENT_RUNTIME === 'terminal'
+  ? (QUICK_MODE ? '25000' : '25000')
+  : (QUICK_MODE ? '6000' : '10000');
+const PROVIDER_TIMEOUT_MS = parseInt(opt('--provider-timeout-ms', DEFAULT_PROVIDER_TIMEOUT_MS), 10);
 const DELAY_SECS = parseInt(opt('--delay', '0'), 10);
 const BAIL_AFTER = parseInt(opt('--bail', '2'), 10);  // stop after N consecutive failures
 const MODEL_RETRY_MAX = parseInt(opt('--model-retry-max', '1'), 10);
@@ -841,13 +844,13 @@ const AGENT_COVERAGE_GOALS = {
     'melt-send-receive': 'Read GET /api/v1/skills/wallet and follow only the melt-send-receive section. That file is the authoritative route order and boundary guide for this group.',
   },
   analysis: {
-    'network-health': 'Read the analysis skill and follow the network-health section exactly: call only GET /api/v1/analysis/network-health, then stop.',
-    'node-profile-aliases': 'Read the analysis skill and follow the node-profile-aliases section exactly: call GET /api/v1/analysis/node/<real-pubkey>, then GET /api/v1/analysis/profile-node/<same-pubkey>, then GET /api/v1/analysis/node-profile/<same-pubkey>. Use the exact pubkey shown in the analysis doc and stop after those three routes.',
-    'suggest-peers': 'Read the analysis skill and follow the suggest-peers section exactly: call only GET /api/v1/analysis/suggest-peers/<real-pubkey> with the exact pubkey from the doc, then stop.',
+    'network-health': 'Read GET /api/v1/skills/analysis/network-health.txt and follow only that file.',
+    'node-profile-aliases': 'Read GET /api/v1/skills/analysis/node-profile-aliases.txt and follow only that file.',
+    'suggest-peers': 'Read GET /api/v1/skills/analysis/suggest-peers.txt and follow only that file.',
   },
   social: {
-    messaging: 'Read GET /api/v1/skills/social/messaging.txt and follow only that file. It is the exact route order, body, and token-use guide for this group.',
-    alliances: 'Read GET /api/v1/skills/social/alliances.txt and follow only that file. It is the exact route order, body, and token-use guide for this group. Sender token for routes 1, 2, 3, and 5. Recipient token only for route 4.',
+    messaging: 'Read GET /api/v1/skills/social/messaging.txt and follow only that file. It is the exact route order, body, and token-use guide for this group. Do not browse /docs or hop back to /api/v1/skills/social after you open it.',
+    alliances: 'Read GET /api/v1/skills/social/alliances.txt and follow only that file. It is the exact route order, body, and token-use guide for this group. Sender token for routes 1, 2, 3, and 5. Recipient token only for route 4. Do not register a third agent or restart the group after a 401.',
     'leaderboard-and-tournaments': 'Read GET /api/v1/skills/social/leaderboard-and-tournaments.txt and follow only that file. It is the exact route order and auth guide for this group.',
   },
   channels: {
@@ -1011,14 +1014,14 @@ function buildSharedSessionCarryForward(httpCalls) {
       api_key: call.body.api_key,
     });
   }
-  const recentRegs = registrations.slice(-2);
+  const latestReg = registrations.at(-1) || null;
   const lines = [];
   if (AGENT_RUNTIME === 'terminal') {
     lines.push('- same local terminal working directory is still available');
   }
-  for (let i = 0; i < recentRegs.length; i += 1) {
-    const reg = recentRegs[i];
-    lines.push(`- known agent ${i + 1}: agent_id ${reg.agent_id}, api_key ${reg.api_key}`);
+  if (latestReg) {
+    lines.push(`- current agent: agent_id ${latestReg.agent_id}, api_key ${latestReg.api_key}`);
+    lines.push('- unless the current route-group doc says otherwise, keep using this same agent and bearer token');
   }
   if (lines.length === 0) return null;
   return `Shared session carry-forward:\n${lines.join('\n')}\nUse these facts if helpful, but still follow the current route-group doc exactly.`;

@@ -16,6 +16,7 @@
 
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
+import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 
 const STATE_PATH = 'data/channel-market/pending-closes.json';
 
@@ -383,6 +384,14 @@ export class ChannelCloser {
       agentId, payload, expectedAction: 'channel_close',
       agentRegistry: this._agentRegistry, dedup: this._dedup,
       actionHints: HINTS,
+      onFailureFingerprint: (fingerprint) => appendSignedValidationFailure({
+        dataLayer: this._dataLayer,
+        routeFamily: 'market_close',
+        operation: 'validate',
+        agentId,
+        expectedAction: 'channel_close',
+        fingerprint,
+      }),
     });
     if (!shared.success) return shared;
 

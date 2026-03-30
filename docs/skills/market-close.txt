@@ -3,8 +3,9 @@
 This file is only for `close-revenue-performance`.
 It is self-contained.
 This is one literal seven-route checklist after setup.
-Do not stop after the two Node commands.
-After the second Node command, your very next HTTP call must be `POST /api/v1/market/close`.
+After you sign route 1, your very next HTTP call must be `POST /api/v1/market/close`.
+First preview a signed close, then call the real close route, then read the pending and reporting routes.
+This lets you prove both the close request flow and the read-only follow-up surfaces around it.
 
 ## Setup
 
@@ -12,30 +13,18 @@ After the second Node command, your very next HTTP call must be `POST /api/v1/ma
 2. save `agent_id` and `api_key`
 3. send `Authorization: Bearer <api_key>` on every route below
 4. send `Content-Type: application/json` on every `POST` or `PUT`
-5. print one compressed secp256k1 `pubkey`
+5. run the exact pubkey command below once
 6. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
 
-Exact pubkey command:
+## Exact Pubkey Command
 
 ```bash
-node --input-type=module -e '
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
-const keyPath="./agent-secp256k1-private.pem";
-if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
-const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
-const publicKey=createPublicKey(privateKey);
-const jwk=publicKey.export({format:"jwk"});
-const x=Buffer.from(jwk.x,"base64url");
-const y=Buffer.from(jwk.y,"base64url");
-const prefix=(y[y.length-1]&1)?0x03:0x02;
-console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
-'
+node -e 'const fs=require("fs");const{createPrivateKey,createPublicKey,generateKeyPairSync}=require("crypto");const p="./agent-secp256k1-private.pem";if(!fs.existsSync(p)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});fs.writeFileSync(p,privateKey.export({type:"sec1",format:"pem"}));}const pub=createPublicKey(createPrivateKey(fs.readFileSync(p,"utf8")));const jwk=pub.export({format:"jwk"});const x=Buffer.from(jwk.x,"base64url");const y=Buffer.from(jwk.y,"base64url");console.log(Buffer.concat([Buffer.from([(y[y.length-1]&1)?3:2]),x]).toString("hex"));'
 ```
 
 ## Exact Route Order
 
-1. `POST /api/v1/market/close` with the exact printed JSON from the close-body command below
+1. `POST /api/v1/market/close`
 2. `GET /api/v1/market/closes`
 3. `GET /api/v1/market/revenue`
 4. `GET /api/v1/market/revenue/0000000000000000000000000000000000000000000000000000000000000000:0`
@@ -47,50 +36,39 @@ Run route 1 first.
 Then do routes 2 through 7 immediately in order.
 Do not stop after route 6.
 
-## Exact Bodies
+## Route 1 body
 
-- route 1:
-  - `{"instruction":{"action":"channel_close","agent_id":"YOUR_AGENT_ID","timestamp":CURRENT_UNIX_SECONDS,"params":{"channel_point":"0000000000000000000000000000000000000000000000000000000000000000:0"}},"signature":"YOUR_DER_SIGNATURE_HEX"}`
-- route 5:
-  - `{"destination":"capital"}`
-
-Exact signed `channel_close` body command:
+Run this exact sign-and-print command.
+Replace `YOUR_AGENT_ID` before you run it.
 
 ```bash
-node --input-type=module -e '
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { generateKeyPairSync, createPrivateKey, createSign } from "node:crypto";
-function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
-const keyPath="./agent-secp256k1-private.pem";
-if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
-const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
-const instruction={action:"channel_close",agent_id:"YOUR_AGENT_ID",timestamp:Math.floor(Date.now()/1000),params:{channel_point:"0000000000000000000000000000000000000000000000000000000000000000:0"}};
-const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
-console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
-'
+node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction={action:"channel_close",agent_id:"YOUR_AGENT_ID",params:{channel_point:"0000000000000000000000000000000000000000000000000000000000000000:0"},timestamp:Math.floor(Date.now()/1000)};const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
 ```
 
-Take the printed JSON object from that command and POST it as the full body to:
+POST the printed JSON object as the full body to:
 
 `POST /api/v1/market/close`
+
+## Other exact bodies
+
+- route 5:
+
+```json
+{"destination":"capital"}
+```
 
 ## Rules
 
 - the `PUT /api/v1/agents/me` body must be exactly `{"pubkey":"PRINTED_66_HEX"}` with no PEM text and no outer wrapper
 - always do the `PUT /api/v1/agents/me` step in this group after you register
-- after the second Node command, do route 1 immediately
+- after you sign route 1, do route 1 immediately
 - if you do not have a real channel, use exactly `0000000000000000000000000000000000000000000000000000000000000000:0` on routes 1, 4, and 7
-- if you do not have a real channel, keep the placeholder channel point in the exact Node command above
+- if you do not have a real channel, keep the all-zero placeholder channel point in the exact sign-and-print command
 - do not detour into `GET /api/v1/channels/mine` in this group
 - only route 1 needs a signature in this group
 - only route 1 is `POST`
 - only route 5 is `PUT`
 - routes 2, 3, 4, 6, and 7 are `GET`
-- route 4 is `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
-- route 4 should use the same literal placeholder `0000000000000000000000000000000000000000000000000000000000000000:0` unless you truly have a real channel
-- route 5 is `PUT /api/v1/market/revenue-config`
-- route 7 is `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
-- route 7 should use the same literal placeholder `0000000000000000000000000000000000000000000000000000000000000000:0` unless you truly have a real channel
 - route 7 is easy to miss; do not stop after plain `GET /api/v1/market/performance`
 - if route 1 fails, still do routes 2 through 7
 - route 5 is not a fee-policy route; send exactly `{"destination":"capital"}`

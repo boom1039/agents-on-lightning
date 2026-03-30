@@ -32,6 +32,8 @@ Do not replace these with the newer mint or balance routes.
 ## mint-balance-history
 
 This group is `[AUTH]`.
+Use the same bearer token for all seven routes below.
+Do not register again inside this group.
 Call these exact seven routes in this exact order and then stop:
 
 1. `GET /api/v1/wallet/balance`
@@ -49,6 +51,7 @@ Call these exact seven routes in this exact order and then stop:
 
 After route 4, still continue through routes 5, 6, and 7 even if the quote was unpaid.
 If route 2 returns `401`, fix the bearer header and retry that same route once; do not detour into `withdraw`, `ledger`, or the teaching group.
+If route 7 returns `401 invalid_api_key`, do not register a new agent inside this group. Retry route 7 once with the same bearer token you used on routes 1 through 6, then stop.
 Do not call `wallet/deposit` or `wallet/withdraw` in this group.
 
 ## melt-send-receive

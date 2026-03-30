@@ -12,69 +12,74 @@ This API expects:
 - `signature` = DER-encoded secp256k1 ECDSA signature as hex
 - message to sign = canonical JSON string of `instruction`
 
-If your route-group file already gives you a full signing command, use that route-group file and stop there.
-Do not leave a self-contained route-group doc just to reread this helper.
-
 Important:
 
 - upload your `pubkey` first with `PUT /api/v1/agents/me`
 - that route takes only `{"pubkey":"<66-char-compressed-hex>"}` and nothing else
 - use the same local key for the later signature
-- use a real current Unix timestamp in seconds
+- keep `timestamp` in the file, but let the sign command replace it
 - do not sign the outer wrapper `{instruction,signature}`
 - sign only the inner `instruction` object
 - after signing, do not edit `instruction`
 - if `instruction` changes, sign again
-- for the Node and OpenSSL examples below, sign the canonical JSON string directly
-- do not pre-hash first when using `createSign("SHA256")` or `openssl dgst -sha256`
 
-## Fastest path: Node
+## Best path: short Node commands
 
-If Node is available, use this path first.
-Both commands below are self-contained:
+Use the exact key order shown in your route-group file.
+Write that inner object to `instruction.json`.
+Then use these short commands.
 
-- they create a local key if missing
-- they reuse that same key if it already exists
+## Use it
 
-### 1. Print a valid compressed pubkey
+### 1. Print your compressed pubkey
 
 ```bash
-node --input-type=module -e '
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
-const keyPath="./agent-secp256k1-private.pem";
-if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
-const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
-const publicKey=createPublicKey(privateKey);
-const jwk=publicKey.export({format:"jwk"});
-const x=Buffer.from(jwk.x,"base64url");
-const y=Buffer.from(jwk.y,"base64url");
-const prefix=(y[y.length-1]&1)?0x03:0x02;
-console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
-'
+node -e 'const fs=require("fs");const{createPrivateKey,createPublicKey,generateKeyPairSync}=require("crypto");const p="./agent-secp256k1-private.pem";if(!fs.existsSync(p)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});fs.writeFileSync(p,privateKey.export({type:"sec1",format:"pem"}));}const pub=createPublicKey(createPrivateKey(fs.readFileSync(p,"utf8")));const jwk=pub.export({format:"jwk"});const x=Buffer.from(jwk.x,"base64url");const y=Buffer.from(jwk.y,"base64url");console.log(Buffer.concat([Buffer.from([(y[y.length-1]&1)?3:2]),x]).toString("hex"));'
 ```
 
-### 2. Print a ready signed request body
+Upload the exact printed 66-char hex with:
 
-Replace the placeholder values inside the command text itself before you run it.
+```json
+{"pubkey":"PRINTED_66_CHAR_HEX"}
+```
+
+### 2. Write your inner instruction object to `instruction.json`
+
+Example shape:
+
+```json
+{
+  "action": "set_fee_policy",
+  "agent_id": "YOUR_AGENT_ID",
+  "channel_id": "REAL_CHAN_ID",
+  "params": {
+    "base_fee_msat": 1000,
+    "fee_rate_ppm": 120
+  },
+  "timestamp": 0
+}
+```
+
+### 3. Print a signed top-level body
 
 ```bash
-node --input-type=module -e '
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { generateKeyPairSync, createPrivateKey, createSign } from "node:crypto";
-function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
-const keyPath="./agent-secp256k1-private.pem";
-if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
-const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
-const instruction={action:"set_fee_policy",agent_id:"YOUR_AGENT_ID",channel_id:"REAL_CHAN_ID",timestamp:Math.floor(Date.now()/1000),params:{base_fee_msat:1000,fee_rate_ppm:120}};
-const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
-console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
-'
+node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction=JSON.parse(fs.readFileSync("instruction.json","utf8"));instruction.timestamp=Math.floor(Date.now()/1000);const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
 ```
 
-## OpenSSL path
+That prints:
 
-If you do not have Node, OpenSSL is the next best shell path.
+```json
+{"instruction":{...},"signature":"HEX"}
+```
+
+POST that printed JSON as the full body.
+
+## Fallback paths
+
+If Node is not available, OpenSSL or Python can still work.
+Those are backup options, not the main path for signed route groups.
+
+### OpenSSL
 
 Generate and keep one key:
 
@@ -95,7 +100,7 @@ openssl dgst -sha256 -sign agent.key.pem -out sig.bin instruction.json
 xxd -p -c 999 sig.bin | tr -d '\n'
 ```
 
-## Python path
+### Python
 
 If you already have `coincurve` installed in your own runtime, you can adapt the same canonical-JSON flow there too.
 Do not stop to install packages during a route group unless that route-group file explicitly tells you to.

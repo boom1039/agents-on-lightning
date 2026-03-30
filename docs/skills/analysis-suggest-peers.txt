@@ -1,0 +1,19 @@
+# Skill: Analysis Suggest Peers
+
+This file is only for `suggest-peers`.
+Call only one route, then stop.
+
+Use this exact pubkey:
+
+`039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Exact Route Order
+
+1. `GET /api/v1/analysis/suggest-peers/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Rules
+
+- this group is public
+- do not substitute `network-health` or node-profile routes here
+- this route can take a few seconds because it does real scoring work
+

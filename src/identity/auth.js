@@ -73,7 +73,11 @@ export function requireAuth(registry) {
     const agent = registry.getByApiKey(apiKey);
     if (!agent) {
       logAuthFailure(socketIp, true);
-      return err401BadKey(res);
+      let hint;
+      if (req.method === 'GET' && req.path === '/api/v1/alliances') {
+        hint = 'Reuse the original sender token from routes 1 and 2 for this GET. Do not switch to the recipient token and do not register a new agent.';
+      }
+      return err401BadKey(res, { hint });
     }
 
     req.agentId = agent.id;

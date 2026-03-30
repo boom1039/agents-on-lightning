@@ -430,8 +430,12 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const result = await executor.execute(AGENT_ID, { instruction, signature: badSig });
       assert.equal(result.success, false);
       assert.equal(result.failed_at, 'signature_valid');
-      assert.ok(result.hint.includes('canonicalJSON(instruction)'));
-      assert.ok(result.hint.includes('RFC 8785'));
+      assert.match(result.hint, /DER-encoded secp256k1 ECDSA hex/i);
+      assert.equal(result.failure_fingerprint.reason, 'signature_not_der');
+      assert.ok(!JSON.stringify(result).includes('failure_fingerprint'));
+      const failureLog = dataLayer.logs['data/channel-accountability/signed-validation-failures.jsonl'] || [];
+      assert.equal(failureLog.at(-1)?.route_family, 'channels_signed');
+      assert.equal(failureLog.at(-1)?.reason, 'signature_not_der');
     });
 
     it('returns hint for constraint violation — fee_rate_ppm too high', async () => {
@@ -557,7 +561,7 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const result = await executor.preview(AGENT_ID, { instruction, signature: badSig });
       assert.equal(result.valid, false);
       assert.equal(result.failed_at, 'signature_valid');
-      assert.ok(result.hint.includes('canonical'));
+      assert.match(result.hint, /DER-encoded|canonical/i);
       assert.deepEqual(result.checks_passed, [
         'pubkey_registered',
         'action_valid',
@@ -828,6 +832,8 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       const result = await executor.execute(AGENT_ID, { instruction, signature });
       assert.equal(result.success, false);
       assert.equal(result.failed_at, 'signature_valid');
+      assert.match(result.hint, /outer wrapper/i);
+      assert.equal(result.failure_fingerprint.reason, 'signed_wrapper_not_instruction');
     });
 
     it('rejects signature of JSON.stringify instead of canonicalJSON', async () => {
@@ -840,6 +846,7 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       // but in general it won't. We verify it either passes (if same) or fails at signature.
       if (!result.success) {
         assert.equal(result.failed_at, 'signature_valid');
+        assert.match(result.hint, /canonicalJSON/i);
       }
     });
   });

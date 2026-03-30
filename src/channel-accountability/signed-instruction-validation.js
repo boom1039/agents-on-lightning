@@ -16,6 +16,11 @@
 
 import { verifySecp256k1Signature } from '../identity/auth.js';
 import { sha256, canonicalJSON } from './crypto-utils.js';
+import {
+  attachSignedValidationFingerprint,
+  buildSignedValidationFingerprint,
+  classifyInvalidSignature,
+} from './signed-validation-fingerprint.js';
 
 /**
  * Hints shared across all signed-instruction endpoints.
@@ -41,6 +46,7 @@ export const SHARED_VALIDATION_HINTS = {
 
   invalid_signature:
     'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key, then send the DER-encoded signature as hex. ' +
+    'If you are using the public docs, create agent-signing.mjs once, write instruction.json, then run node agent-signing.mjs sign instruction.json. ' +
     'Canonical JSON sorts keys lexicographically with no whitespace (RFC 8785).',
 };
 
@@ -54,82 +60,126 @@ export const SHARED_VALIDATION_HINTS = {
  * @param {{ getById: (id: string) => object|null }} opts.agentRegistry
  * @param {{ has: (hash: string) => boolean }} opts.dedup
  * @param {{ missing_payload: string, wrong_action: string }} opts.actionHints
+ * @param {(fingerprint: object) => Promise<void>|void} [opts.onFailureFingerprint]
  * @returns {Promise<object>} success/failure result with checks_passed and instrHash
  */
 export async function validateSignedInstruction({
-  agentId, payload, expectedAction, agentRegistry, dedup, actionHints,
+  agentId, payload, expectedAction, agentRegistry, dedup, actionHints, onFailureFingerprint = null,
 }) {
   const checks_passed = [];
   const { instruction, signature } = payload || {};
 
+  async function fail({
+    error,
+    hint,
+    status,
+    failedAt,
+    profile = null,
+    classification = failedAt,
+  }) {
+    const fingerprint = buildSignedValidationFingerprint({
+      payload,
+      profile,
+      failedAt,
+      expectedAction,
+      agentId,
+      classification,
+    });
+    if (typeof onFailureFingerprint === 'function') {
+      await onFailureFingerprint(fingerprint);
+    }
+
+    return attachSignedValidationFingerprint({
+      success: false,
+      error,
+      hint,
+      status,
+      failed_at: failedAt,
+      checks_passed,
+    }, fingerprint);
+  }
+
   // Step 1: payload_present
   if (!instruction || !signature) {
-    return {
-      success: false, error: 'Missing instruction or signature',
-      hint: actionHints.missing_payload, status: 400,
-      failed_at: 'payload_present', checks_passed,
-    };
+    return await fail({
+      error: 'Missing instruction or signature',
+      hint: actionHints.missing_payload,
+      status: 400,
+      failedAt: 'payload_present',
+    });
   }
   checks_passed.push('payload_present');
 
   // Step 2: pubkey_registered
   const profile = agentRegistry.getById(agentId);
   if (!profile?.pubkey) {
-    return {
-      success: false, error: 'Agent has no registered secp256k1 public key',
-      hint: SHARED_VALIDATION_HINTS.no_pubkey, status: 400,
-      failed_at: 'pubkey_registered', checks_passed,
-    };
+    return await fail({
+      error: 'Agent has no registered secp256k1 public key',
+      hint: SHARED_VALIDATION_HINTS.no_pubkey,
+      status: 400,
+      failedAt: 'pubkey_registered',
+      profile,
+    });
   }
   checks_passed.push('pubkey_registered');
 
   // Step 3: action_valid
   if (instruction.action !== expectedAction) {
-    return {
-      success: false, error: `Invalid action: "${instruction.action}". Only "${expectedAction}" accepted.`,
-      hint: actionHints.wrong_action, status: 400,
-      failed_at: 'action_valid', checks_passed,
-    };
+    return await fail({
+      error: `Invalid action: "${instruction.action}". Only "${expectedAction}" accepted.`,
+      hint: actionHints.wrong_action,
+      status: 400,
+      failedAt: 'action_valid',
+      profile,
+    });
   }
   checks_passed.push('action_valid');
 
   // Step 4: agent_id_matches
   if (instruction.agent_id !== agentId) {
-    return {
-      success: false, error: 'instruction.agent_id does not match authenticated agent',
-      hint: SHARED_VALIDATION_HINTS.agent_id_mismatch, status: 400,
-      failed_at: 'agent_id_matches', checks_passed,
-    };
+    return await fail({
+      error: 'instruction.agent_id does not match authenticated agent',
+      hint: SHARED_VALIDATION_HINTS.agent_id_mismatch,
+      status: 400,
+      failedAt: 'agent_id_matches',
+      profile,
+    });
   }
   checks_passed.push('agent_id_matches');
 
   // Step 5: timestamp_fresh (epoch seconds, ±300s)
   if (typeof instruction.timestamp !== 'number' || !Number.isFinite(instruction.timestamp)) {
-    return {
-      success: false, error: 'timestamp must be a finite number (epoch seconds)',
+    return await fail({
+      error: 'timestamp must be a finite number (epoch seconds)',
       hint: SHARED_VALIDATION_HINTS.stale_timestamp(Math.floor(Date.now() / 1000), 0, Infinity),
-      status: 400, failed_at: 'timestamp_fresh', checks_passed,
-    };
+      status: 400,
+      failedAt: 'timestamp_fresh',
+      profile,
+    });
   }
   const nowSec = Math.floor(Date.now() / 1000);
   const driftSec = Math.abs(nowSec - instruction.timestamp);
   if (driftSec > 300) {
-    return {
-      success: false, error: 'Timestamp too old or too far in future (must be within 300s of server time)',
+    return await fail({
+      error: 'Timestamp too old or too far in future (must be within 300s of server time)',
       hint: SHARED_VALIDATION_HINTS.stale_timestamp(nowSec, instruction.timestamp, driftSec),
-      status: 400, failed_at: 'timestamp_fresh', checks_passed,
-    };
+      status: 400,
+      failedAt: 'timestamp_fresh',
+      profile,
+    });
   }
   checks_passed.push('timestamp_fresh');
 
   // Step 6: not_duplicate
   const instrHash = sha256(canonicalJSON(instruction));
   if (await dedup.has(instrHash)) {
-    return {
-      success: false, error: 'Duplicate instruction (already submitted)',
-      hint: SHARED_VALIDATION_HINTS.duplicate, status: 409,
-      failed_at: 'not_duplicate', checks_passed,
-    };
+    return await fail({
+      error: 'Duplicate instruction (already submitted)',
+      hint: SHARED_VALIDATION_HINTS.duplicate,
+      status: 409,
+      failedAt: 'not_duplicate',
+      profile,
+    });
   }
   checks_passed.push('not_duplicate');
 
@@ -137,11 +187,17 @@ export async function validateSignedInstruction({
   const message = canonicalJSON(instruction);
   const valid = await verifySecp256k1Signature(profile.pubkey, message, signature);
   if (!valid) {
-    return {
-      success: false, error: 'Invalid secp256k1 signature',
-      hint: SHARED_VALIDATION_HINTS.invalid_signature, status: 401,
-      failed_at: 'signature_valid', checks_passed,
-    };
+    const signatureFailure = await classifyInvalidSignature({ payload, profile });
+    return await fail({
+      error: 'Invalid secp256k1 signature',
+      hint: signatureFailure.hint
+        ? `${signatureFailure.hint} Use the stable helper flow from GET /docs/skills/signing-secp256k1.txt if you need a known-good command path.`
+        : SHARED_VALIDATION_HINTS.invalid_signature,
+      status: 401,
+      failedAt: 'signature_valid',
+      profile,
+      classification: signatureFailure.code,
+    });
   }
   checks_passed.push('signature_valid');
 

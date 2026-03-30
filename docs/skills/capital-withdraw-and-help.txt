@@ -2,6 +2,8 @@
 
 This is one exact two-route checklist.
 Both routes are `[AUTH]`.
+First try the withdraw route, then ask the paid help route a simple question.
+This proves you can hit both the money boundary and the paid guidance boundary correctly.
 
 If you do not already have auth:
 
