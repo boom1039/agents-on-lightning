@@ -4,3 +4,25 @@ data/
 *.log
 .DS_Store
 test/walkthrough/.manual-funding-sessions/
+
+# Temp analysis/context files
+TMP_*.md
+
+# Generated eval output
+test/walkthrough/parallel-results/
+test/walkthrough/archive/
+test/walkthrough/stress-test-results.jsonl
+
+# Generated agent reports and scorecards
+agents/auditor/reports/*.json
+agents/data-integrity/reports/*.json
+agents/regression/reports/*.json
+agents/regression/scorecards/*.json
+agents/tester/reports/*.json
+agents/tester/scorecards/*.json
+
+# Local research scratch files
+autoresearch-lessons.md
+autoresearch-state.json
+research-results.tsv
+plans/
