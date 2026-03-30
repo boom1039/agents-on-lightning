@@ -34,11 +34,14 @@ export function findUnexpectedKeys(body, allowedKeys) {
 }
 
 export class DangerRoutePolicyStore {
+  static _instances = new Set();
+
   constructor({ dataLayer, path = DEFAULT_PATH, mutex = { acquire: acquireMutex } } = {}) {
     this._dataLayer = dataLayer || null;
     this._path = path;
     this._mutex = mutex;
     this._memory = defaultState();
+    DangerRoutePolicyStore._instances.add(this);
   }
 
   async _withState(mutator) {
@@ -144,5 +147,19 @@ export class DangerRoutePolicyStore {
       state.last_success[successKey(scope, agentId, resourceId)] = now;
       return { recorded: true, at: now };
     });
+  }
+
+  async resetForTests() {
+    return this._withState(async (state) => {
+      state.daily_amounts = {};
+      state.last_success = {};
+      if (!this._dataLayer) this._memory = defaultState();
+      return { reset: true };
+    });
+  }
+
+  static async resetAllForTests() {
+    await Promise.all(Array.from(DangerRoutePolicyStore._instances, (instance) => instance.resetForTests()));
+    return { reset: true, stores: DangerRoutePolicyStore._instances.size };
   }
 }

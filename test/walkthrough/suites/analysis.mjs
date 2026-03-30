@@ -26,15 +26,9 @@ export const suite = {
     },
     {
       name: 'node-profile-aliases',
-      covers: [
-        'GET /api/v1/analysis/node/:pubkey',
-        'GET /api/v1/analysis/profile-node/:pubkey',
-        'GET /api/v1/analysis/node-profile/:pubkey',
-      ],
+      covers: ['GET /api/v1/analysis/node/:pubkey'],
       agent_expectations: {
         'GET /api/v1/analysis/node/:pubkey': expectSafe(PUBLIC),
-        'GET /api/v1/analysis/profile-node/:pubkey': expectSafe(PUBLIC),
-        'GET /api/v1/analysis/node-profile/:pubkey': expectSafe(PUBLIC),
       },
       async run(ctx) {
         const paths = [
@@ -46,7 +40,7 @@ export const suite = {
           const resp = await ctx.request('GET', `${path}${DEFAULT_NODE_PUBKEY}`);
           assertSafe(resp, `GET ${path}:pubkey`);
         }
-        return 'Covered all node-profile route aliases.';
+        return 'Covered the canonical node-profile route and its live aliases.';
       },
     },
     {

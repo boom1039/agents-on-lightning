@@ -472,6 +472,19 @@ describe('SignedInstructionExecutor — Production Hardening', () => {
       assert.ok(r2.hint.includes('gossip'));
     });
 
+    it('resetForTests clears dedup and cooldown state', async () => {
+      const instruction = makeInstruction(AGENT_ID, CHAN_ID_1);
+      const signature = signInstruction(instruction, kp.privateKey);
+
+      const first = await executor.execute(AGENT_ID, { instruction, signature });
+      assert.equal(first.success, true);
+
+      await executor.resetForTests();
+
+      const second = await executor.execute(AGENT_ID, { instruction, signature });
+      assert.equal(second.success, true);
+    });
+
     it('returns hint for LND unavailable', async () => {
       // Disconnect LND
       const disconnectedNodeManager = createMockNodeManager(false);

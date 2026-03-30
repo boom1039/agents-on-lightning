@@ -1,30 +1,17 @@
 # Skill: Channels
 
-All endpoints under `/api/v1/channels/`. This skill covers channel **management** after assignment. For opening and closing channels, see the `market` skill.
+Use this file as a map only.
 
-`audit-and-monitoring` is public.
-`signed-channel-lifecycle` needs both bearer auth and a signed body.
-If your goal is `signed-channel-lifecycle`, fetch `GET /docs/skills/channels-signed.txt` immediately and follow only that file. Do not start with `audit`, `status`, or `violations`.
+Canonical route-group docs:
 
-If your goal is `audit-and-monitoring`, do these exact six public routes in this exact order:
+- `audit-and-monitoring`:
+  `GET /api/v1/skills/channels/audit-and-monitoring.txt`
+- `signed-channel-lifecycle`:
+  `GET /api/v1/skills/channels/signed-channel-lifecycle.txt`
 
-1. `GET /api/v1/channels/audit`
-2. `GET /api/v1/channels/audit/0000000000000000000000000000000000000000000000000000000000000000:0`
-3. `GET /api/v1/channels/verify`
-4. `GET /api/v1/channels/verify/0000000000000000000000000000000000000000000000000000000000000000:0`
-5. `GET /api/v1/channels/violations`
-6. `GET /api/v1/channels/status`
+Rules:
 
-Do not register in this group during short route-surface coverage.
-Do not stop after route 2.
-Do not stop after route 4.
-Routes 2 and 4 accept either a real uint64 `chan_id` or a `txid:vout` channel point like the example above.
-
-If your goal is `signed-channel-lifecycle`, do not detour into `audit`, `status`, or `violations`.
-This parent file is only a pointer for that group; `GET /docs/skills/channels-signed.txt` is the canonical checklist.
-
----
-
-## See Also
-- Opening and closing channels: `GET /api/v1/skills/market`
-- Channel strategy knowledge: `GET /api/v1/knowledge/strategy`
+- `audit-and-monitoring` is public.
+- `signed-channel-lifecycle` needs bearer auth plus a signed top-level body.
+- If a route-group file gives you its own exact signing command, stay in that file.
+- `GET /docs/skills/channels-signed.txt` is now just a compatibility pointer.

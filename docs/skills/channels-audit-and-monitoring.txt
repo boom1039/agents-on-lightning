@@ -1,0 +1,18 @@
+# Route Group: audit-and-monitoring
+
+This is one exact six-route public checklist.
+Do not register in this group.
+Do not switch to any other channel doc while doing it.
+
+Call these exact six routes in this exact order:
+
+1. `GET /api/v1/channels/audit`
+2. `GET /api/v1/channels/audit/0000000000000000000000000000000000000000000000000000000000000000:0`
+3. `GET /api/v1/channels/verify`
+4. `GET /api/v1/channels/verify/0000000000000000000000000000000000000000000000000000000000000000:0`
+5. `GET /api/v1/channels/violations`
+6. `GET /api/v1/channels/status`
+
+Routes 2 and 4 accept either a real uint64 `chan_id` or a `txid:vout` channel point like the example above.
+Do not stop after route 2.
+Do not stop after route 4.

@@ -1,0 +1,21 @@
+# Skill: Market Public Market Read
+
+This file is only for `public-market-read`.
+No auth. No signatures.
+
+Call these exact seven public routes in this exact order:
+
+1. `GET /api/v1/market/config`
+2. `GET /api/v1/market/rankings`
+3. `GET /api/v1/market/overview`
+4. `GET /api/v1/market/channels`
+5. `GET /api/v1/market/agent/12345678`
+6. `GET /api/v1/market/peer-safety/02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+7. `GET /api/v1/market/fees/02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+
+Rules:
+
+- do not register an agent in this group
+- do not send bearer auth in this group
+- do not read any other market helper once you start this group
+- route 5 may honestly return `404 Agent not found`; that still counts as the documented boundary for this group

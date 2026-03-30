@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
 
-const ROUTE_FILES = [
+export const ROUTE_FILES = [
   'src/index.js',
   'src/routes/agent-discovery-routes.js',
   'src/routes/agent-identity-routes.js',
@@ -17,13 +17,7 @@ const ROUTE_FILES = [
   'src/routes/channel-market-routes.js',
 ];
 
-const EXCLUDED = new Set([
-  'POST /api/v1/test/reset-rate-limits',
-  'POST /api/v1/channels/assign',
-  'DELETE /api/v1/channels/assign/:chanId',
-]);
-
-const SKILL_NAMES = [
+export const CANONICAL_SKILL_NAMES = [
   'discovery',
   'identity',
   'wallet',
@@ -34,6 +28,22 @@ const SKILL_NAMES = [
   'analytics',
   'capital',
 ];
+
+export const ROUTE_EXCLUDED = new Set([
+  'POST /api/v1/test/reset-rate-limits',
+  'POST /api/v1/channels/assign',
+  'DELETE /api/v1/channels/assign/:chanId',
+]);
+
+export const ROUTE_ALIASES = new Map([
+  ['GET /api/v1/agents/me/referral', 'GET /api/v1/agents/me/referral-code'],
+  ['POST /api/v1/messages/send', 'POST /api/v1/messages'],
+  ['POST /api/v1/alliances/propose', 'POST /api/v1/alliances'],
+  ['GET /api/v1/analysis/profile-node/:pubkey', 'GET /api/v1/analysis/node/:pubkey'],
+  ['GET /api/v1/analysis/node-profile/:pubkey', 'GET /api/v1/analysis/node/:pubkey'],
+]);
+
+const SKILL_NAMES = CANONICAL_SKILL_NAMES;
 
 const KNOWLEDGE_TOPICS = [
   'strategy',
@@ -58,6 +68,15 @@ export const DOMAIN_ORDER = [
 
 function normalizeRoute(method, path) {
   return `${method.toUpperCase()} ${path}`;
+}
+
+function splitRouteKey(route) {
+  const [method, ...pathParts] = route.split(' ');
+  return {
+    key: route,
+    method,
+    path: pathParts.join(' '),
+  };
 }
 
 function extractRoutesFromSource(source) {
@@ -87,9 +106,8 @@ export function collectAgentFacingRoutes() {
   for (const relativePath of ROUTE_FILES) {
     const source = readFileSync(resolve(ROOT, relativePath), 'utf8');
     for (const route of extractRoutesFromSource(source)) {
-      if (!EXCLUDED.has(route) && !route.startsWith('GET /dashboard')) {
-        routes.add(route);
-      }
+      if (ROUTE_EXCLUDED.has(route) || route.startsWith('GET /dashboard')) continue;
+      routes.add(ROUTE_ALIASES.get(route) || route);
     }
   }
   return [...routes].sort();
@@ -136,8 +154,7 @@ function pathPatternToRegex(path) {
 }
 
 export const ROUTE_CATALOG = collectAgentFacingRoutes().map(route => {
-  const [method, ...pathParts] = route.split(' ');
-  const path = pathParts.join(' ');
+  const { method, path } = splitRouteKey(route);
   return {
     key: route,
     method,
@@ -150,6 +167,19 @@ export const ROUTE_CATALOG = collectAgentFacingRoutes().map(route => {
   if (domainDelta !== 0) return domainDelta;
   if (a.path !== b.path) return a.path.localeCompare(b.path);
   return a.method.localeCompare(b.method);
+});
+
+const ROUTE_BY_KEY = new Map(ROUTE_CATALOG.map(route => [route.key, route]));
+
+const ROUTE_ALIAS_CATALOG = [...ROUTE_ALIASES.entries()].map(([aliasKey, canonicalKey]) => {
+  const { method, path } = splitRouteKey(aliasKey);
+  return {
+    key: aliasKey,
+    canonicalKey,
+    method,
+    path,
+    regex: pathPatternToRegex(path),
+  };
 });
 
 export const DOC_CATALOG = [
@@ -172,25 +202,11 @@ export const DOC_CATALOG = [
     type: 'skill-static',
   })),
   {
-    key: 'GET /docs/skills/channels-signed.txt',
+    key: 'GET /docs/skills/signing-secp256k1.txt',
     method: 'GET',
-    path: '/docs/skills/channels-signed.txt',
-    label: '/docs/skills/channels-signed.txt',
-    type: 'skill-static',
-  },
-  {
-    key: 'GET /docs/skills/market-close.txt',
-    method: 'GET',
-    path: '/docs/skills/market-close.txt',
-    label: '/docs/skills/market-close.txt',
-    type: 'skill-static',
-  },
-  {
-    key: 'GET /docs/skills/market-swap.txt',
-    method: 'GET',
-    path: '/docs/skills/market-swap.txt',
-    label: '/docs/skills/market-swap.txt',
-    type: 'skill-static',
+    path: '/docs/skills/signing-secp256k1.txt',
+    label: '/docs/skills/signing-secp256k1.txt',
+    type: 'skill-helper',
   },
   ...KNOWLEDGE_TOPICS.map(topic => ({
     key: `GET /api/v1/knowledge/${topic}`,
@@ -201,15 +217,51 @@ export const DOC_CATALOG = [
   })),
 ];
 
+const DOC_BY_KEY = new Map(DOC_CATALOG.map(doc => [doc.key, doc]));
+
+const DOC_ALIASES = [
+  ['GET /api/v1/skills/channels-signed', 'GET /api/v1/skills/channels'],
+  ['GET /api/v1/skills/market-open-flow', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market-close', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market-swap', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/swap-ecash-and-rebalance', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market-swap-ecash-and-rebalance', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market/open-flow.txt', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market/close.txt', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/market/swap.txt', 'GET /api/v1/skills/market'],
+  ['GET /api/v1/skills/channels/signed.txt', 'GET /api/v1/skills/channels'],
+  ['GET /docs/skills/channels-signed.txt', 'GET /docs/skills/channels.txt'],
+  ['GET /docs/skills/market-open-flow.txt', 'GET /docs/skills/market.txt'],
+  ['GET /docs/skills/market-close.txt', 'GET /docs/skills/market.txt'],
+  ['GET /docs/skills/market-swap.txt', 'GET /docs/skills/market.txt'],
+  ['GET /docs/skills/market-swap-ecash-and-rebalance.txt', 'GET /docs/skills/market.txt'],
+].map(([aliasKey, canonicalKey]) => {
+  const { method, path } = splitRouteKey(aliasKey);
+  return {
+    key: aliasKey,
+    canonicalKey,
+    method,
+    path,
+  };
+});
+
 export function matchAgentFacingRoute(method, path) {
   const upper = method.toUpperCase();
-  return ROUTE_CATALOG.find(route => route.method === upper && route.regex.test(path)) || null;
+  const canonical = ROUTE_CATALOG.find(route => route.method === upper && route.regex.test(path));
+  if (canonical) return canonical;
+  const alias = ROUTE_ALIAS_CATALOG.find(route => route.method === upper && route.regex.test(path));
+  if (!alias) return null;
+  return ROUTE_BY_KEY.get(alias.canonicalKey) || null;
 }
 
 export function matchDocSurface(event) {
-  return DOC_CATALOG.find(doc => {
+  const canonical = DOC_CATALOG.find(doc => {
     if (doc.method !== event.method || doc.path !== event.path) return false;
     if (doc.docKind) return event.doc_kind === doc.docKind;
     return true;
-  }) || null;
+  });
+  if (canonical) return canonical;
+  const alias = DOC_ALIASES.find(doc => doc.method === event.method && doc.path === event.path);
+  if (!alias) return null;
+  return DOC_BY_KEY.get(alias.canonicalKey) || null;
 }

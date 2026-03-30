@@ -217,8 +217,9 @@ Loop:
 1. run agents
 2. inspect misses
 3. reread `docs/llms.txt` and the relevant public skill/helper docs in full before patching
-4. tighten docs
-5. rerun
+4. add one line to `test/walkthrough/agent-doc-fix-log.md` for each public-doc change you make
+5. tighten docs
+6. rerun
 
 Better iteration rule:
 

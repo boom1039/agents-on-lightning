@@ -5,8 +5,8 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
-    "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js",
+    "start": "ENABLE_TEST_ROUTES=1 AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
+    "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 ENABLE_TEST_ROUTES=1 node src/index.js",
     "test": "node --test src/**/*.test.js",
     "test:walkthrough": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-nano",
     "test:walkthrough:agent-coverage": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-mini --mode agent-coverage --suite all",

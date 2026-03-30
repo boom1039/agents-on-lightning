@@ -128,7 +128,11 @@ export const suite = {
       async run(ctx) {
         const skills = await ctx.request('GET', '/api/v1/skills');
         assertStatus(skills, 200, 'GET /api/v1/skills');
-        const first = skills.json?.skills?.[0]?.name;
+        const names = skills.json?.skills?.map(skill => skill.name) || [];
+        assert.ok(names.includes('market'), 'GET /api/v1/skills should list canonical market skill');
+        assert.equal(names.includes('market-open-flow'), false, 'GET /api/v1/skills should not list alias-only helper names');
+        assert.equal(names.includes('channels-signed'), false, 'GET /api/v1/skills should not list alias-only helper names');
+        const first = names[0];
         assert.ok(first, 'GET /api/v1/skills should list at least one skill');
 
         const skill = await ctx.request('GET', `/api/v1/skills/${encodeURIComponent(first)}`);
@@ -138,7 +142,7 @@ export const suite = {
         const helperSkill = await ctx.request('GET', '/api/v1/skills/market/open-flow.txt');
         assertStatus(helperSkill, 200, 'GET /api/v1/skills/:group/:name');
         assert.ok(helperSkill.json?.content?.length > 100, 'nested helper skill should include content');
-        return 'Verified progressive skill docs.';
+        return 'Verified canonical skill docs plus one live compatibility alias.';
       },
     },
   ],

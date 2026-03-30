@@ -1,88 +1,96 @@
-# Skill: Market Close Quick Group
+# Skill: Market Close, Revenue, And Performance
 
-Use this only for `close-revenue-performance`.
-Use this instead of the full market file when this is your goal.
-This group needs a real signed agent key.
-It does not need a real open channel to complete the full seven-route checklist.
-If you do not have a real channel yet, use one clearly fake placeholder channel point like `0000000000000000000000000000000000000000000000000000000000000000:0` for routes 1, 4, and 7, then continue.
-Do not wait for a real channel before routes 2 through 7.
+This file is only for `close-revenue-performance`.
+It is self-contained.
+This is one literal seven-route checklist after setup.
+Do not stop after the two Node commands.
+After the second Node command, your very next HTTP call must be `POST /api/v1/market/close`.
 
-Exact seven-route checklist after auth and pubkey upload:
+## Setup
 
-1. `POST /api/v1/market/close`
+1. `POST /api/v1/agents/register` with `{"name":"market-agent"}`
+2. save `agent_id` and `api_key`
+3. send `Authorization: Bearer <api_key>` on every route below
+4. send `Content-Type: application/json` on every `POST` or `PUT`
+5. print one compressed secp256k1 `pubkey`
+6. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
+
+Exact pubkey command:
+
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const publicKey=createPublicKey(privateKey);
+const jwk=publicKey.export({format:"jwk"});
+const x=Buffer.from(jwk.x,"base64url");
+const y=Buffer.from(jwk.y,"base64url");
+const prefix=(y[y.length-1]&1)?0x03:0x02;
+console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
+'
+```
+
+## Exact Route Order
+
+1. `POST /api/v1/market/close` with the exact printed JSON from the close-body command below
 2. `GET /api/v1/market/closes`
 3. `GET /api/v1/market/revenue`
-4. `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
+4. `GET /api/v1/market/revenue/0000000000000000000000000000000000000000000000000000000000000000:0`
 5. `PUT /api/v1/market/revenue-config`
 6. `GET /api/v1/market/performance`
-7. `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
+7. `GET /api/v1/market/performance/0000000000000000000000000000000000000000000000000000000000000000:0`
 
-Do not summarize early.
+Run route 1 first.
+Then do routes 2 through 7 immediately in order.
+Do not stop after route 6.
 
-If you already have market auth, reuse it. If not, register while reading this file so the next request can use the real bearer token:
+## Exact Bodies
 
-1. `POST /api/v1/agents/register`
-   - body: `{"name":"market-agent"}`
-2. save both `agent_id` and `api_key`
-3. use `Authorization: Bearer <api_key>` on every route below
-4. do not send the bare `api_key` without `Bearer `
-5. for every `POST` or `PUT` here, send `Content-Type: application/json`
-6. if you need terminal signing commands, fetch `GET /docs/skills/signing-secp256k1.txt`
-   - if Node is available, use the built-in Node example there first
-   - for this group, do not start with OpenSSL or try to derive the compressed pubkey by hand
-7. before route 1, upload your secp256k1 pubkey once:
-   - `PUT /api/v1/agents/me`
-   - body: `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
-8. on the signed `close` body, replace `CURRENT_UNIX_SECONDS` with the real current Unix time in seconds
-9. on the signed `close` body, replace the signature placeholder with a real secp256k1 DER signature over `SHA256(canonicalJSON(instruction))`
-10. do not send the literal placeholder strings `YOUR_AGENT_ID`, `CURRENT_UNIX_SECONDS`, or `"00"`
-11. after you build that signed close body, immediately send `POST /api/v1/market/close` before any of the later GET routes
-12. use the same local signing key for both the pubkey upload and the signature
-13. build the signed `{instruction,signature}` object locally and do not edit it after signing
-14. before `POST /api/v1/market/close`, fetch `GET /api/v1/channels/mine` if you do not already know your real assigned `channel_point`
-15. do not switch to another signing scheme or missing library; use the exact OpenSSL or built-in Node commands from `signing-secp256k1.txt`
-16. after route 1, do routes 2 through 7 immediately; do not detour into extra auth, wallet, or market routes
-17. the quickest path here is:
-   - run the built-in Node example from `signing-secp256k1.txt`
-   - copy the printed `pubkey` exactly into `PUT /api/v1/agents/me`
-   - copy the printed `body`, then change only:
-     - `action` to `channel_close`
-     - `agent_id` to your real returned `agent_id`
-     - `params.channel_point` to your real or placeholder channel point
-   - then sign that final close instruction again before sending it
-18. do not upload a guessed pubkey, a PEM block, a DER blob, an uncompressed key, or any hex you trimmed by hand
+- route 1:
+  - `{"instruction":{"action":"channel_close","agent_id":"YOUR_AGENT_ID","timestamp":CURRENT_UNIX_SECONDS,"params":{"channel_point":"0000000000000000000000000000000000000000000000000000000000000000:0"}},"signature":"YOUR_DER_SIGNATURE_HEX"}`
+- route 5:
+  - `{"destination":"capital"}`
 
-Use your real assigned `channel_point` on the signed close and both detail reads.
-If you still do not have one, a clearly fake placeholder like all-zeroes is okay for one boundary attempt and the two detail reads.
-If you still do not have a real channel, keep the same bearer token and still complete routes 1 through 7 once.
+Exact signed `channel_close` body command:
 
-Use these exact details for the same seven routes above:
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createSign } from "node:crypto";
+function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const instruction={action:"channel_close",agent_id:"YOUR_AGENT_ID",timestamp:Math.floor(Date.now()/1000),params:{channel_point:"0000000000000000000000000000000000000000000000000000000000000000:0"}};
+const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
+console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
+'
+```
 
-- route 1 = `POST /api/v1/market/close`
-  - body: `{"instruction":{"action":"channel_close","agent_id":"YOUR_AGENT_ID","timestamp":CURRENT_UNIX_SECONDS,"params":{"channel_point":"REAL_CHANNEL_POINT"}},"signature":"YOUR_DER_SIGNATURE_HEX"}`
-- route 2 = `GET /api/v1/market/closes`
-- route 3 = `GET /api/v1/market/revenue`
-- route 4 = `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
-- route 5 = `PUT /api/v1/market/revenue-config`
-  - body: `{"destination":"capital"}`
-  - use that exact body for this group
-  - do not send fee-rate fields here
-- route 6 = `GET /api/v1/market/performance`
-- route 7 = `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
+Take the printed JSON object from that command and POST it as the full body to:
 
-Rules:
+`POST /api/v1/market/close`
 
-- the first route is `POST /api/v1/market/close`, not `GET /api/v1/market/close`
-- if you do not have a real assigned or opened channel yet, route 1 will likely return a short not-found or assignment error
-- after one `close` attempt, continue to steps 2-7 even if `close` failed
-- do not retry `close` before steps 2-7
-- after route 1, do not stop to explain prerequisites; routes 2 through 7 are still required now
-- if you only have one attempt left, do registration plus all seven routes in that same attempt
-- replace `YOUR_AGENT_ID` with your real returned `agent_id`
-- before step 1, finish the pubkey upload step above so the signed close request can pass signature checks
-- do not lose bearer auth after route 1; routes 2 through 7 still use the same `Authorization: Bearer <api_key>`
-- route 5 is not a fee-policy route; it is exactly `{"destination":"capital"}`
-- do not call `/api/v1/market/close-history`
-- do not call `/api/v1/market/revenue-history`
-- do not call `/api/v1/market/performance-history`
-- if `PUT /api/v1/agents/me` says the pubkey is invalid, stop trying to derive it by hand and go back to the built-in Node example
+## Rules
+
+- the `PUT /api/v1/agents/me` body must be exactly `{"pubkey":"PRINTED_66_HEX"}` with no PEM text and no outer wrapper
+- always do the `PUT /api/v1/agents/me` step in this group after you register
+- after the second Node command, do route 1 immediately
+- if you do not have a real channel, use exactly `0000000000000000000000000000000000000000000000000000000000000000:0` on routes 1, 4, and 7
+- if you do not have a real channel, keep the placeholder channel point in the exact Node command above
+- do not detour into `GET /api/v1/channels/mine` in this group
+- only route 1 needs a signature in this group
+- only route 1 is `POST`
+- only route 5 is `PUT`
+- routes 2, 3, 4, 6, and 7 are `GET`
+- route 4 is `GET /api/v1/market/revenue/REAL_CHANNEL_POINT`
+- route 4 should use the same literal placeholder `0000000000000000000000000000000000000000000000000000000000000000:0` unless you truly have a real channel
+- route 5 is `PUT /api/v1/market/revenue-config`
+- route 7 is `GET /api/v1/market/performance/REAL_CHANNEL_POINT`
+- route 7 should use the same literal placeholder `0000000000000000000000000000000000000000000000000000000000000000:0` unless you truly have a real channel
+- route 7 is easy to miss; do not stop after plain `GET /api/v1/market/performance`
+- if route 1 fails, still do routes 2 through 7
+- route 5 is not a fee-policy route; send exactly `{"destination":"capital"}`

@@ -286,6 +286,11 @@ export async function doTerminalCommand({ command, timeout_ms }, options = {}) {
 // ─── HTTP execution ───
 
 const TRUNCATE_MAX = 4000;
+const DOC_TRUNCATE_MAX = 24000;
+
+function responseTruncateMax(url = '') {
+  return /\/llms\.txt$|\/api\/v1\/skills\/|\/docs\/skills\//.test(url) ? DOC_TRUNCATE_MAX : TRUNCATE_MAX;
+}
 
 export async function doHttp({ method, url, body, headers = {} }, baseUrl = '') {
   const safeMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
@@ -328,8 +333,9 @@ export async function doHttp({ method, url, body, headers = {} }, baseUrl = '') 
     errSnippet = parsed.error || parsed.message || parsed.detail || JSON.stringify(parsed).substring(0, 120);
   }
 
-  const result = text.length > TRUNCATE_MAX
-    ? text.substring(0, TRUNCATE_MAX) + `\n\n... [TRUNCATED: ${text.length} bytes, showing first ${TRUNCATE_MAX}]`
+  const truncateMax = responseTruncateMax(fullUrl);
+  const result = text.length > truncateMax
+    ? text.substring(0, truncateMax) + `\n\n... [TRUNCATED: ${text.length} bytes, showing first ${truncateMax}]`
     : (parsed || text);
 
   const responseBytes = text.length;
@@ -364,20 +370,41 @@ function toOpenAiTools(tools) {
 export async function createProvider(modelConfig, options = {}) {
   const { provider, id } = modelConfig;
   const system = options.system || SYSTEM;
+  const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs) && options.requestTimeoutMs > 0
+    ? options.requestTimeoutMs
+    : 12000;
   const tools = Array.isArray(options.tools) && options.tools.length > 0
     ? options.tools
     : [HTTP_TOOL];
+
+  async function withTimeout(label, promise) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            const err = new Error(`${label}_timeout`);
+            err.code = 'PROVIDER_TIMEOUT';
+            reject(err);
+          }, requestTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   if (provider === 'anthropic') {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const client = new Anthropic();
     return {
       async call(messages) {
-        const r = await client.messages.create({
+        const r = await withTimeout('anthropic', client.messages.create({
           model: id, max_tokens: 4096, system,
           tools: toAnthropicTools(tools),
           messages,
-        });
+        }));
         const text = r.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
         const toolCalls = r.content
           .filter(b => b.type === 'tool_use')
@@ -404,12 +431,12 @@ export async function createProvider(modelConfig, options = {}) {
       const completionBudget = id.startsWith('gpt-5')
         ? { max_completion_tokens: 4096 }
         : { max_tokens: 4096 };
-      const r = await client.chat.completions.create({
+      const r = await withTimeout('openai', client.chat.completions.create({
         model: id,
         ...completionBudget,
         tools: toOpenAiTools(tools),
         messages: oaiMessages,
-      });
+      }));
       const msg = r.choices[0].message;
       const text = msg.content || '';
       const toolCalls = (msg.tool_calls || []).map(tc => {

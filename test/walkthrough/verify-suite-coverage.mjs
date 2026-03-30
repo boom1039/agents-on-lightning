@@ -1,71 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ALL_SUITES } from './suites/index.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..', '..');
-
-const ROUTE_FILES = [
-  'src/index.js',
-  'src/routes/agent-discovery-routes.js',
-  'src/routes/agent-identity-routes.js',
-  'src/routes/agent-wallet-routes.js',
-  'src/routes/agent-analysis-routes.js',
-  'src/routes/agent-social-routes.js',
-  'src/routes/channel-accountability-routes.js',
-  'src/routes/agent-paid-services-routes.js',
-  'src/routes/channel-market-routes.js',
-];
-
-const EXCLUDED = new Set([
-  'POST /api/v1/test/reset-rate-limits',
-  'POST /api/v1/channels/assign',
-  'DELETE /api/v1/channels/assign/:chanId',
-]);
-
-function normalizeRoute(method, path) {
-  return `${method.toUpperCase()} ${path}`;
-}
-
-function extractRoutesFromSource(source) {
-  const routes = [];
-  const routePattern = /\b(?:router|app)\.(get|post|put|delete|patch)\s*\(\s*(\[[\s\S]*?\]|'[^']+'|"[^"]+")/g;
-  let match;
-  while ((match = routePattern.exec(source)) !== null) {
-    const method = match[1].toUpperCase();
-    const raw = match[2].trim();
-    const paths = [];
-    if (raw.startsWith('[')) {
-      for (const item of raw.matchAll(/['"]([^'"]+)['"]/g)) {
-        paths.push(item[1]);
-      }
-    } else {
-      paths.push(raw.slice(1, -1));
-    }
-    for (const path of paths) {
-      if (path.startsWith('/')) {
-        routes.push(normalizeRoute(method, path));
-      }
-    }
-  }
-  return routes;
-}
-
-export function collectAgentFacingRoutes() {
-  const routes = new Set();
-  for (const relativePath of ROUTE_FILES) {
-    const source = readFileSync(resolve(ROOT, relativePath), 'utf8');
-    for (const route of extractRoutesFromSource(source)) {
-      if (!EXCLUDED.has(route) && !route.startsWith('GET /dashboard')) {
-        routes.add(route);
-      }
-    }
-  }
-  return [...routes].sort();
-}
+import { collectAgentFacingRoutes } from '../../src/monitor/agent-surface-inventory.js';
 
 export function collectCoveredRoutes() {
   const routeOwners = new Map();

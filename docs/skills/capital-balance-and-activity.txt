@@ -1,0 +1,19 @@
+# Route Group: balance-and-activity
+
+This is one exact two-route checklist.
+Both routes are `[AUTH]`.
+
+If you do not already have auth:
+
+1. `POST /api/v1/agents/register`
+2. send `Content-Type: application/json`
+3. body: `{"name":"capital-agent"}`
+4. save `api_key`
+5. send `Authorization: Bearer <api_key>` on both routes below
+
+Call these exact two routes in this exact order and then stop:
+
+1. `GET /api/v1/capital/balance`
+2. `GET /api/v1/capital/activity`
+
+Do not use lookalikes.

@@ -37,7 +37,7 @@ Rules:
 - in `strategies-and-knowledge`, call `GET /api/v1/strategies` before the named strategy route
 - in `skills`, call all three routes above, including the nested helper route
 - in `skills`, the third route is literally `GET /api/v1/skills/market/open-flow.txt`
-- that nested API helper serves the same open-flow helper content as `/docs/skills/market-open-flow.txt`
+- for market route groups, the canonical public doc is now `GET /api/v1/skills/market`
 - in `skills`, do not switch to some other skill that fits your task better; this group is only proving the three routes above
 - in `skills`, do not detour into `root-and-docs`, `platform-ethos-capabilities`, or `strategies-and-knowledge`
 

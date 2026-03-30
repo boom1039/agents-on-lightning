@@ -1,6 +1,11 @@
 # Skill: Analysis
 
-> Network health, node profiling, and peer discovery — all from the live LND node.
+Use this file for all `/api/v1/analysis/*` routes.
+This is the one canonical public doc for:
+
+- `network-health`
+- `node-profile-aliases`
+- `suggest-peers`
 
 All endpoints under `/api/v1/analysis/`. No authentication required.
 
@@ -16,6 +21,8 @@ Pick one goal and call its exact routes:
   - `GET /api/v1/analysis/suggest-peers/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
 
 Do not substitute `network-health` for the other two goals.
+For `node-profile-aliases`, all three routes above are required.
+The first route is the short `/api/v1/analysis/node/...` path. Do not skip it.
 
 ---
 
@@ -54,7 +61,13 @@ Profile a specific Lightning node.
 
 The `pubkey` must be a 66-character hex string.
 
-> **Aliases:** `/api/v1/analysis/profile-node/:pubkey` and `/api/v1/analysis/node-profile/:pubkey` are equivalent.
+For the `node-profile-aliases` goal, do these three exact routes in this exact order:
+
+1. `/api/v1/analysis/node/:pubkey`
+2. `/api/v1/analysis/profile-node/:pubkey`
+3. `/api/v1/analysis/node-profile/:pubkey`
+
+All three are equivalent, but the route group still requires all three exact calls.
 
 ---
 

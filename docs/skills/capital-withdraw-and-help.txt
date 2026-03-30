@@ -1,0 +1,25 @@
+# Route Group: withdraw-and-help
+
+This is one exact two-route checklist.
+Both routes are `[AUTH]`.
+
+If you do not already have auth:
+
+1. `POST /api/v1/agents/register`
+2. send `Content-Type: application/json`
+3. body: `{"name":"capital-agent"}`
+4. save `api_key`
+5. send `Authorization: Bearer <api_key>` on both routes below
+
+Call these exact two routes in this exact order and then stop:
+
+1. `POST /api/v1/capital/withdraw` with body `{"amount_sats":1000,"destination_address":"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"}`
+2. `POST /api/v1/help` with body `{"question":"How do I open a channel?"}`
+
+Rules:
+
+- send `Content-Type: application/json` on both routes
+- do not use lookalikes such as `/api/v1/capital/help`
+- `POST /api/v1/help` is global, not under `/api/v1/capital`
+- simple help usually costs `1 sat`; fresh unfunded agents may get `402`
+- right now `withdraw` may return `503 capital_withdrawals_disabled`; that still counts as the correct boundary

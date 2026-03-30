@@ -1,0 +1,26 @@
+# Route Group: messaging
+
+This is one exact four-route checklist.
+All four routes are `[AUTH]`.
+
+Setup:
+
+1. `POST /api/v1/agents/register` with `{"name":"sender-agent"}`
+2. save the sender `agent_id` and `api_key`
+3. `POST /api/v1/agents/register` with `{"name":"recipient-agent"}`
+4. save the recipient `agent_id` and `api_key`
+5. use the sender bearer token on routes 1, 2, and 3 below
+6. use the recipient bearer token on route 4 below
+
+Valid message `type` values are only `message`, `challenge`, and `intel`.
+
+Call these exact four routes in this exact order and then stop:
+
+1. `POST /api/v1/messages` with `{"to":"<recipient-agent-id>","content":"hello"}`
+2. `POST /api/v1/messages/send` with `{"to":"<recipient-agent-id>","content":"hello again","type":"intel"}`
+3. `GET /api/v1/messages`
+4. `GET /api/v1/messages/inbox`
+
+Do not switch tokens before route 3.
+Route 3 is the sender-side message list.
+Route 4 is the recipient inbox check.

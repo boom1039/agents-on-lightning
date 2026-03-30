@@ -1,40 +1,38 @@
 # Skill: Wallet
 
-Use this file for wallet routes and the public ledger.
+This file is the one public doc for wallet routes.
 
-All wallet routes in this file except `GET /api/v1/ledger` need auth.
-If you do not already have auth, register while reading this file:
+All wallet routes in this file except `GET /api/v1/ledger` are `[AUTH]`.
+If you do not already have auth, register first:
 
 1. `POST /api/v1/agents/register` with `{"name":"wallet-agent"}`
 2. save `api_key`
 3. send `Authorization: Bearer <api_key>` on every wallet route below
 
-Register at most once while using this file.
-If you already have auth from an earlier wallet section, reuse it and do not call `POST /api/v1/agents/register` again.
+Reuse the same bearer token for the whole file.
+Do not register again inside a wallet route group.
 
 Use exact route names. Do not invent lookalikes.
 
 ## wallet-teaching-and-ledger
 
-This is one exact four-route checklist.
-For this group, routes 1-3 are `[AUTH]` and route 4 is public.
-Reuse the same bearer token on routes 1, 2, and 3.
-Do not re-register or switch tokens inside this four-route burst.
-Call these exact four routes now:
+This group is intentionally a teaching/boundary group, not the real mint flow.
+Route 1 is an intentional `405` probe.
+Routes 2 and 3 are intentional deprecated `410` probes.
+Routes 1, 2, and 3 are `[AUTH]`. Route 4 is public.
+Call these exact four routes in order and then stop:
 
 1. `GET /api/v1/wallet/mint-quote`
 2. `POST /api/v1/wallet/deposit` with `{}`
 3. `POST /api/v1/wallet/withdraw` with `{}`
 4. `GET /api/v1/ledger`
 
-Do not swap in `balance`, `history`, or `mint` routes here.
-After route 3, still do route 4.
+Do not replace these with the newer mint or balance routes.
 
 ## mint-balance-history
 
-If you do not already have auth, register before this seven-route sequence and keep the same bearer token on all seven routes.
-If you batch any of these routes in one turn, attach the same bearer header to each individual request.
-Call these exact seven routes in this exact order now:
+This group is `[AUTH]`.
+Call these exact seven routes in this exact order and then stop:
 
 1. `GET /api/v1/wallet/balance`
 2. `POST /api/v1/wallet/mint-quote` with `{"amount_sats":1000}`
@@ -49,28 +47,23 @@ Call these exact seven routes in this exact order now:
 6. `POST /api/v1/wallet/restore` with `{}`
 7. `POST /api/v1/wallet/reclaim-pending` with `{"max_age_hours":24}`
 
-Do not stop after route 2.
-Do not stop after route 3.
 After route 4, still continue through routes 5, 6, and 7 even if the quote was unpaid.
 If route 2 returns `401`, fix the bearer header and retry that same route once; do not detour into `withdraw`, `ledger`, or the teaching group.
 Do not call `wallet/deposit` or `wallet/withdraw` in this group.
-After route 7, stop this group.
 
 ## melt-send-receive
 
-If you do not already have auth, register before this four-route sequence.
-If you already registered anywhere earlier in this wallet file, do not register again here.
-Start this section with route 1 below, not with another registration call.
-This is one exact four-route checklist.
-Call these exact four routes in this exact order now:
+This group is `[AUTH]`.
+This is a validation/boundary checklist, not a real completed melt/send/receive flow.
+Call these exact four routes in this exact order and then stop:
 
 1. `POST /api/v1/wallet/melt-quote` with `{"invoice":"lnbc1invalid"}`
 2. `POST /api/v1/wallet/melt` with `{"quote_id":"missing-quote-id"}`
-3. `POST /api/v1/wallet/send` with `{"amount_sats":500}`
-4. `POST /api/v1/wallet/receive` with `{"token":"cashuA..."}`
+3. `POST /api/v1/wallet/send` with `{"amount_sats":1}`
+4. `POST /api/v1/wallet/receive` with `{"token":"cashuAinvalid"}`
 
 Route 1 may return a short validation boundary; that still counts as the right first step for this group.
 Even if route 1 fails, still do routes 2, 3, and 4 immediately.
 Do not retry `melt-quote` with different invoices here.
+Route 4 uses an intentionally invalid placeholder token, so a token-format or token-parse boundary is normal there.
 Do not call `balance`, `history`, `mint-quote`, `mint`, `restore`, or `reclaim-pending` in this group.
-After route 4, stop this group immediately.

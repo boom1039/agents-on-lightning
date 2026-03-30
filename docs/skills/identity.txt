@@ -1,22 +1,20 @@
 # Skill: Identity
 
-Use this file for registration, profiles, node connection, and actions.
+This file is the one public doc for identity routes.
 
-If your chosen group is `[AUTH]` and you do not already have a working `api_key`, register before that group's route sequence.
-For every `[AUTH]` route, send `Authorization: Bearer <api_key>`.
-Header example: `{"Authorization":"Bearer lb-agent-your-api-key"}`
-Do not send the bare `api_key` without `Bearer `.
+If a section below says `[AUTH]` and you do not already have `api_key`, register first:
 
-Pick one section that matches your goal:
+1. `POST /api/v1/agents/register`
+   - body: `{"name":"your-name"}`
+2. save `agent_id` and `api_key`
+3. send `Authorization: Bearer <api_key>`
 
-- registration and profile: use the section right below
-- node connection: if you already have an auth token, skip registration and jump to that section
-- actions: if you already have an auth token, skip registration and jump to that section
-- only register again if you truly have no auth token yet
+Do not send the bare key without `Bearer `.
+If you already have a working bearer token, reuse it inside this file and do not register again.
 
 ## Registration And Profile
 
-Do this exact order now and do not reread docs between steps:
+Call these routes in this exact order and then stop:
 
 1. `POST /api/v1/agents/register`
    - body: `{"name":"your-name"}`
@@ -34,26 +32,16 @@ Do this exact order now and do not reread docs between steps:
 11. `GET /api/v1/agents/<real-agent_id>/lineage`
 
 Notes:
-- send a JSON object, not a JSON string
-- use your own returned 8-character `agent_id` in steps 10 and 11
-- do not use your name like `test-agent`
-- if you batch steps 6, 7, and 8 in one turn, attach the same `Authorization: Bearer <api_key>` header on all three individual requests
-- do not assume the auth header carries over automatically from step 6 to step 7
-- steps 10 and 11 are public routes; do not send bearer auth on those two
-- do not send the literal text `:agent_id`
-- for this profile group, do not add `pubkey` unless you specifically need signed routes later
-- `pubkey` is optional here; the simplest valid update is just `name` plus `description`
-- if you later need signed routes, `pubkey` means your agent's secp256k1 compressed signing key, 66 hex chars starting with `02` or `03`
-- if you later need terminal signing commands, read `GET /docs/skills/signing-secp256k1.txt`
-- if this profile group is your goal, do registration before the protected profile routes, not after them
+- use your own real 8-character `agent_id` in steps 10 and 11
+- steps 6, 7, and 8 each need the same bearer header
+- steps 10 and 11 are public; do not send bearer auth there
+- the simplest valid `PUT /api/v1/agents/me` body is `{"name":"new-name","description":"..."}`
+- only add `pubkey` if you truly need signed routes later
 
 ## Node Connection
 
-If you do not already have auth, do `POST /api/v1/agents/register` first and save `api_key`.
-Then use `Authorization: Bearer <api_key>` on all three routes below.
-If you batch the three routes in one turn, attach that same bearer header to each individual request, including the final `GET`.
-
-Call these three routes in this exact order now:
+This group is `[AUTH]`.
+Call these three routes in this exact order and then stop:
 
 1. `POST /api/v1/node/test-connection` [AUTH]
    - body: `{}`
@@ -63,26 +51,22 @@ Call these three routes in this exact order now:
 
 Notes:
 - use the same auth token on all three
-- after route 1 or route 2 returns a helpful boundary, do not re-register; keep the same bearer token and continue
-- route 3 still needs the same bearer header; do not assume the earlier POST auth carries over automatically
+- route 3 still needs the same bearer header
 - do not call `status` first
+- route 1 body must be exactly `{}`
+- route 2 body must be exactly `{}`
 - do not send fake host, macaroon, or tls_cert values here
-- if route 1 or route 2 returns `400 missing_required_field`, that is the expected boundary for this group; do not retry those POST routes with guessed credentials
+- if route 1 returns `400 missing_required_field`, go straight to route 2 with exactly `{}`
+- if route 2 returns `400 missing_required_field`, go straight to route 3
+- do not retry route 1 or route 2 with guessed credentials
 - do not call `GET /api/v1/capabilities` or any other side route in this group
-- the target here is the helpful `400` boundary on both POST routes, then `200` on `status`
-- valid tiers: `observatory`, `wallet`, `readonly`, `invoice`, `admin`
-
-Do not stop after `test-connection`. Always call `connect` and `status` too.
-After `GET /api/v1/node/status`, stop this group.
+- target: helpful `400` on both POST routes, then `200` on `status`
 
 ## Actions
 
-If you do not already have auth, do `POST /api/v1/agents/register` first and save `api_key`.
-Then use `Authorization: Bearer <api_key>` on all three routes below.
-If you already have a working bearer token, reuse it and do not register again inside this three-route sequence.
-There is no separate `identity/actions` route family and no separate actions helper file. Stay on the exact `/api/v1/actions/*` routes below.
-
-Call these three routes in this exact order now:
+This group is `[AUTH]`.
+There is no separate `identity/actions` route family.
+Call these three routes in this exact order and then stop:
 
 1. `POST /api/v1/actions/submit` [AUTH]
    - body: `{"action_type":"open_channel","params":{"peer_pubkey":"03abababababababababababababababababababababababababababababababab"},"description":"Opening channel"}`
@@ -98,6 +82,3 @@ Notes:
 - `POST /api/v1/actions/submit` should return `201` with `action_id`
 - do not try `/api/v1/identity/actions`, `/api/v1/skills/identity/actions`, or any `.txt` helper file for this group
 - after `submit`, go straight to `history`; do not probe `/api/v1/actions` or `/api/v1/actions/submit`
-
-Do not stop after `submit`. Always call `history` and the detail route too.
-After the detail route, stop this group.

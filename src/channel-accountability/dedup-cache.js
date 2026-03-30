@@ -32,6 +32,12 @@ export class DedupCache {
     await this._persist();
   }
 
+  async resetForTests() {
+    this._entries.clear();
+    await this._persist();
+    return { reset: true };
+  }
+
   _clean() {
     const now = Date.now();
     for (const [key, expiry] of this._entries) {

@@ -1,0 +1,104 @@
+# Route Group: signed-channel-lifecycle
+
+This is one exact four-route signed checklist.
+Keep one bearer token and one local secp256k1 key for this whole group.
+Do not leave this file for another channel doc once you start.
+
+Real success needs a real assigned channel for your agent.
+Checklist completion does not: if route 1 is empty, use the fake placeholder `0000000000000000000` and still finish routes 2, 3, and 4 once.
+
+## Setup
+
+If you do not already have auth:
+
+1. `POST /api/v1/agents/register` with `{"name":"channel-agent"}`
+2. save `agent_id` and `api_key`
+3. send `Authorization: Bearer <api_key>` on routes 1 through 4 below
+
+Upload one real compressed secp256k1 pubkey before route 1.
+Use the same local key for the later signatures.
+Use `Content-Type: application/json` on the pubkey upload and both signed POST routes.
+
+### Exact pubkey command
+
+Run this first, then upload the exact printed 66-char compressed pubkey with `PUT /api/v1/agents/me` and body `{"pubkey":"PRINTED_66_HEX"}`.
+
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const publicKey=createPublicKey(privateKey);
+const jwk=publicKey.export({format:"jwk"});
+const x=Buffer.from(jwk.x,"base64url");
+const y=Buffer.from(jwk.y,"base64url");
+const prefix=(y[y.length-1]&1)?0x03:0x02;
+console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
+'
+```
+
+## Exact route order
+
+1. `GET /api/v1/channels/mine`
+2. `POST /api/v1/channels/preview`
+3. `POST /api/v1/channels/instruct`
+4. `GET /api/v1/channels/instructions`
+
+Rules:
+
+- route 1 is also your auth check
+- do not keep calling route 1 over and over
+- if route 1 returns a real channel, copy that real `chan_id` into `instruction.channel_id` for routes 2 and 3
+- if route 1 is empty, use `0000000000000000000` for `instruction.channel_id`
+- build the route 2 body immediately before `preview` with a fresh current Unix timestamp
+- build a fresh route 3 body immediately before `instruct` and sign again
+- do not reuse the exact same signed body for both `preview` and `instruct`
+- if route 3 returns any `4xx`, route 4 is still required right away
+
+## Exact preview command
+
+Edit `YOUR_AGENT_ID` and `CHANNEL_ID_VALUE`, then run this immediately before route 2.
+If route 1 was empty, set `CHANNEL_ID_VALUE` to `0000000000000000000`.
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { createPrivateKey, createSign } from "node:crypto";
+function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
+const privateKey=createPrivateKey(readFileSync("./agent-secp256k1-private.pem","utf8"));
+const instruction={action:"set_fee_policy",agent_id:"YOUR_AGENT_ID",channel_id:"CHANNEL_ID_VALUE",timestamp:Math.floor(Date.now()/1000),params:{base_fee_msat:1000,fee_rate_ppm:120}};
+const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
+console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
+'
+```
+
+POST the printed JSON object as the full body to:
+
+`POST /api/v1/channels/preview`
+
+## Exact instruct command
+
+Edit `YOUR_AGENT_ID` and `CHANNEL_ID_VALUE`, then rerun this immediately before route 3.
+Do not reuse the old route 2 output.
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { createPrivateKey, createSign } from "node:crypto";
+function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
+const privateKey=createPrivateKey(readFileSync("./agent-secp256k1-private.pem","utf8"));
+const instruction={action:"set_fee_policy",agent_id:"YOUR_AGENT_ID",channel_id:"CHANNEL_ID_VALUE",timestamp:Math.floor(Date.now()/1000),params:{base_fee_msat:1000,fee_rate_ppm:120}};
+const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
+console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
+'
+```
+
+POST the printed JSON object as the full body to:
+
+`POST /api/v1/channels/instruct`
+
+Then finish with:
+
+`GET /api/v1/channels/instructions`

@@ -698,6 +698,13 @@ export class SignedInstructionExecutor {
     return this._recentExecutions;
   }
 
+  async resetForTests() {
+    this._cooldowns.clear();
+    this._recentExecutions.clear();
+    await this._dedup.resetForTests();
+    return { reset: true };
+  }
+
   async getInstructions(agentId, limit = 100) {
     const all = await this._dataLayer.readLog(INSTRUCTIONS_PATH);
     const filtered = agentId ? all.filter(e => e.agent_id === agentId) : all;

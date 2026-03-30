@@ -215,7 +215,7 @@ export const suite = {
       ],
       agent_expectations: {
         'GET /api/v1/market/swap/quote': expectSafe(reqAuth({ queryKeys: ['amount_sats'] })),
-        'POST /api/v1/market/swap/lightning-to-onchain': expectSafe(reqAuth({ bodyKeys: ['amount_sats', 'destination_address'] })),
+        'POST /api/v1/market/swap/lightning-to-onchain': expectHelpful(503, reqAuth({ bodyKeys: ['amount_sats', 'onchain_address'] })),
         'GET /api/v1/market/swap/status/:swapId': expectSafe(AUTH),
         'GET /api/v1/market/swap/history': expectStatus(200, AUTH),
         'POST /api/v1/market/fund-from-ecash': expectSafe(reqAuth({ bodyKeys: ['instruction', 'signature'] })),
@@ -233,7 +233,7 @@ export const suite = {
           authAgent: 0,
           body: {
             amount_sats: 100000,
-            destination_address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080',
+            onchain_address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080',
           },
         });
         assertSafe(swapCreate, 'POST /api/v1/market/swap/lightning-to-onchain');

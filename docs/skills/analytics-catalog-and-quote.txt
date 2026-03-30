@@ -1,0 +1,21 @@
+# Skill: Analytics Catalog And Quote
+
+This file is only for `catalog-and-quote`.
+
+Setup:
+
+1. `POST /api/v1/agents/register` with `{"name":"analytics-user"}`
+2. save `api_key`
+3. send `Authorization: Bearer <api_key>` on auth routes
+4. send `Content-Type: application/json` on JSON `POST` routes
+
+Exact route order:
+
+1. `GET /api/v1/analytics/catalog`
+2. `POST /api/v1/analytics/quote` with `{"query_id":"network_stats","params":{}}`
+
+Rules:
+
+- route 1 is public
+- route 2 is auth
+- do not stop after route 1

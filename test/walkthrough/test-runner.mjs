@@ -83,18 +83,20 @@ const MAX_TURNS = HAS_MAX_TURNS_OVERRIDE
   ? parseInt(opt('--max-turns', '1'), 10)
   : 1;
 const DEFAULT_PREP_TURNS = AGENT_RUNTIME === 'terminal'
-  ? (QUICK_MODE ? '8' : '10')
+  ? (QUICK_MODE ? '2' : '3')
   : (QUICK_MODE ? '4' : '6');
 const MAX_PREP_TURNS = parseInt(opt('--prep-turns', DEFAULT_PREP_TURNS), 10);
-const MAX_PHASE_BURSTS = parseInt(opt('--phase-bursts', QUICK_MODE ? '6' : '12'), 10);
+const MAX_SETUP_TURNS = parseInt(opt('--setup-turns', AGENT_RUNTIME === 'terminal' ? (QUICK_MODE ? '4' : '5') : '2'), 10);
+const MAX_PHASE_BURSTS = parseInt(opt('--phase-bursts', QUICK_MODE ? '4' : '6'), 10);
 const MAX_NO_PROGRESS_BURSTS = parseInt(opt('--max-no-progress-bursts', QUICK_MODE ? '2' : '2'), 10);
 const MAX_DOC_ONLY_BURSTS = parseInt(opt('--max-doc-only-bursts', QUICK_MODE ? '3' : '2'), 10);
-const NUDGE_TIMEOUT_MS = parseInt(opt('--nudge-timeout', '60000'), 10);
+const NUDGE_TIMEOUT_MS = parseInt(opt('--nudge-timeout', '15000'), 10);
+const PROVIDER_TIMEOUT_MS = parseInt(opt('--provider-timeout-ms', QUICK_MODE ? '6000' : '10000'), 10);
 const DELAY_SECS = parseInt(opt('--delay', '0'), 10);
 const BAIL_AFTER = parseInt(opt('--bail', '2'), 10);  // stop after N consecutive failures
-const MODEL_RETRY_MAX = parseInt(opt('--model-retry-max', '6'), 10);
-const MODEL_RETRY_BASE_MS = parseInt(opt('--model-retry-base-ms', '5000'), 10);
-const MODEL_RETRY_MAX_MS = parseInt(opt('--model-retry-max-ms', '60000'), 10);
+const MODEL_RETRY_MAX = parseInt(opt('--model-retry-max', '1'), 10);
+const MODEL_RETRY_BASE_MS = parseInt(opt('--model-retry-base-ms', '0'), 10);
+const MODEL_RETRY_MAX_MS = parseInt(opt('--model-retry-max-ms', '0'), 10);
 const BASE_URL = opt('--base-url', 'http://localhost:3302');
 const REPORT_FILE = opt('--report-file', null);
 const TAG = opt('--tag', null);
@@ -105,10 +107,20 @@ const MODEL = opt('--model',
   PROVIDER === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-4.1-mini');
 const EFFECTIVE_MAX_RETRIES = FAIL_FAST ? 1 : MAX_RETRIES;
 const EFFECTIVE_BAIL_AFTER = FAIL_FAST ? 1 : QUICK_MODE ? 1 : BAIL_AFTER;
-const QUICK_NUDGE_TIMEOUT_MS = AGENT_RUNTIME === 'terminal' ? 40000 : 20000;
+const QUICK_NUDGE_TIMEOUT_MS = AGENT_RUNTIME === 'terminal' ? 12000 : 8000;
 const EFFECTIVE_NUDGE_TIMEOUT_MS = QUICK_MODE ? Math.min(NUDGE_TIMEOUT_MS, QUICK_NUDGE_TIMEOUT_MS) : NUDGE_TIMEOUT_MS;
+const TOOL_FOLLOW_UP_EXTENSION_MS = AGENT_RUNTIME === 'terminal' ? 2000 : 0;
+const MAX_TOOL_FOLLOW_UP_EXTENSIONS = AGENT_RUNTIME === 'terminal' ? 1 : 0;
 const SKIP_FAILURE_INTERVIEWS = FAIL_FAST || QUICK_MODE;
 const SHOULD_VERIFY_COVERAGE = !SKIP_COVERAGE_VERIFY && !QUICK_MODE;
+
+function isSetupProgressRequest(input = {}) {
+  const method = String(input.method || 'GET').toUpperCase();
+  const url = input.url || '';
+  if (method === 'POST' && /\/api\/v1\/agents\/register(?:\?|$)/.test(url)) return true;
+  if (method === 'PUT' && /\/api\/v1\/agents\/me(?:\?|$)/.test(url)) return true;
+  return false;
+}
 
 function createTerminalRuntime(label = 'agent-coverage') {
   const runtimeDir = mkdtempSync(join(tmpdir(), `agents-on-lightning-${label.replace(/[^a-z0-9_-]/gi, '-').toLowerCase()}-`));
@@ -167,8 +179,32 @@ function estimateModelCostUsd(modelId, inputTokens, outputTokens) {
   return ((inputTokens / 1_000_000) * pricing.input) + ((outputTokens / 1_000_000) * pricing.output);
 }
 
+function formatTimingBreakdown({ thinkMs = 0, httpMs = 0, toolMs = 0, waitMs = 0, wallMs = 0 }) {
+  const otherMs = Math.max(0, wallMs - thinkMs - httpMs - toolMs - waitMs);
+  return `time think ${formatTime(thinkMs)}, http ${formatTime(httpMs)}, tool ${formatTime(toolMs)}, wait ${formatTime(waitMs)}, other ${formatTime(otherMs)}`;
+}
+
 function shortUrl(url = '') {
   return String(url).replace(BASE_URL, '') || url;
+}
+
+function burstIncludesSetupProgress(task, httpLog) {
+  if (!Array.isArray(task?.setup) || task.setup.length === 0) return false;
+  return httpLog.some((call) => {
+    const path = shortUrl(call.url || '');
+    if (task.setup.includes('auth') || task.setup.includes('second_agent')) {
+      if (call.method === 'POST' && path === '/api/v1/agents/register' && call.status === 201) return true;
+    }
+    if (task.setup.includes('registered_pubkey')) {
+      if (call.method === 'PUT' && path === '/api/v1/agents/me' && call.status === 200) return true;
+    }
+    return false;
+  });
+}
+
+function phaseBurstBudget(task) {
+  const routeCount = Array.isArray(task?.covers) ? task.covers.length : 0;
+  return Math.max(MAX_PHASE_BURSTS, routeCount + 1);
 }
 
 function redactHeaders(headers) {
@@ -321,6 +357,8 @@ function parseRetryDelayMs(err, attempt) {
   const isRateLimit = status === 429 || /429|rate limit/i.test(message);
   if (!isRateLimit) return null;
 
+  if (MODEL_RETRY_MAX_MS <= 0) return 0;
+
   const retryAfterMs = Number(headerValue(err?.headers, 'retry-after-ms'));
   if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
     return Math.min(retryAfterMs, MODEL_RETRY_MAX_MS);
@@ -337,6 +375,22 @@ function parseRetryDelayMs(err, attempt) {
   }
 
   return Math.min(MODEL_RETRY_BASE_MS * (2 ** (attempt - 1)), MODEL_RETRY_MAX_MS);
+}
+
+async function resetTestRateLimits() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/test/reset-rate-limits`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: '{}',
+    });
+    if (!res.ok) {
+      agentLog(`  test reset route returned ${res.status}`);
+    }
+  } catch {}
 }
 
 // ─── Send a nudge and let the agent work ───
@@ -359,13 +413,18 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
   const turnTraces = [];
   const pendingDocTraces = [];
   const requestTimeline = [];
+  let retryWaitMsTotal = 0;
+  let toolMsTotal = 0;
   let stopReason = null;
   let actionTurnsUsed = 0;
   let prepTurnsUsed = 0;
+  let setupTurnsUsed = 0;
+  let nudgeBudgetMs = EFFECTIVE_NUDGE_TIMEOUT_MS;
+  let toolFollowUpExtensionsUsed = 0;
 
   for (let turn = 0; turn < MAX_TURNS + MAX_PREP_TURNS; turn++) {
-    if (Date.now() - nudgeStart > EFFECTIVE_NUDGE_TIMEOUT_MS) {
-      agentLog(`${pre}${att}  TIMEOUT ${formatTime(EFFECTIVE_NUDGE_TIMEOUT_MS)}`);
+    if (Date.now() - nudgeStart > nudgeBudgetMs) {
+      agentLog(`${pre}${att}  TIMEOUT ${formatTime(nudgeBudgetMs)}`);
       break;
     }
 
@@ -377,12 +436,17 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
         break;
       } catch (err) {
         const retryDelayMs = parseRetryDelayMs(err, modelAttempt);
-        if (!retryDelayMs || modelAttempt >= MODEL_RETRY_MAX) {
+        if (retryDelayMs == null || modelAttempt >= MODEL_RETRY_MAX) {
           agentLog(`${pre}${att}  ERROR ${String(err.message || err).substring(0, 100)}`);
           break;
         }
-        agentLog(`${pre}${att}  RATE LIMIT wait ${formatTime(retryDelayMs)} then retry ${modelAttempt}/${MODEL_RETRY_MAX}`);
-        await sleepMs(retryDelayMs);
+        if (retryDelayMs > 0) {
+          retryWaitMsTotal += retryDelayMs;
+          agentLog(`${pre}${att}  RATE LIMIT wait ${formatTime(retryDelayMs)} then retry ${modelAttempt}/${MODEL_RETRY_MAX}`);
+          await sleepMs(retryDelayMs);
+        } else {
+          agentLog(`${pre}${att}  RATE LIMIT immediate retry ${modelAttempt}/${MODEL_RETRY_MAX}`);
+        }
       }
     }
     if (!response) break;
@@ -412,11 +476,15 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     let stopThisNudge = false;
     let hitPhaseRouteThisTurn = false;
     let usedAnyToolThisTurn = false;
+    let madeSetupProgressThisTurn = false;
     for (const tc of response.toolCalls) {
       const toolName = tc.name || HTTP_TOOL.name;
       usedAnyToolThisTurn = true;
       if (toolName !== HTTP_TOOL.name) {
+        madeSetupProgressThisTurn = true;
+        const toolStart = Date.now();
         const toolResult = await ctx.executeLocalTool?.(toolName, tc.input || {});
+        toolMsTotal += Date.now() - toolStart;
         const preview = JSON.stringify(toolResult || {});
         agentLog(`${pre}${att}  TOOL ${toolName} → ${preview.substring(0, 120)}`);
         results.push({ id: tc.id, content: JSON.stringify(toolResult || { ok: false, error: `No handler for ${toolName}` }) });
@@ -426,6 +494,9 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       const requestSummary = summarizeRequest(tc.input);
       if (matchesPhaseCover(tc.input, ctx.phaseCovers)) {
         hitPhaseRouteThisTurn = true;
+      }
+      if (isSetupProgressRequest(tc.input)) {
+        madeSetupProgressThisTurn = true;
       }
       const requestTimelineIndex = requestTimeline.length;
       requestTimeline.push({
@@ -499,7 +570,18 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     if (hitPhaseRouteThisTurn) {
       actionTurnsUsed += 1;
       if (actionTurnsUsed >= MAX_TURNS) break;
+    } else if (madeSetupProgressThisTurn) {
+      if (toolFollowUpExtensionsUsed < MAX_TOOL_FOLLOW_UP_EXTENSIONS && TOOL_FOLLOW_UP_EXTENSION_MS > 0) {
+        toolFollowUpExtensionsUsed += 1;
+        nudgeBudgetMs += TOOL_FOLLOW_UP_EXTENSION_MS;
+      }
+      setupTurnsUsed += 1;
+      if (setupTurnsUsed >= MAX_SETUP_TURNS) break;
     } else if (usedAnyToolThisTurn) {
+      if (toolFollowUpExtensionsUsed < MAX_TOOL_FOLLOW_UP_EXTENSIONS && TOOL_FOLLOW_UP_EXTENSION_MS > 0) {
+        toolFollowUpExtensionsUsed += 1;
+        nudgeBudgetMs += TOOL_FOLLOW_UP_EXTENSION_MS;
+      }
       prepTurnsUsed += 1;
       if (prepTurnsUsed >= MAX_PREP_TURNS) break;
     }
@@ -524,6 +606,8 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
     docTraces,
     turnTraces,
     requestTimeline,
+    retryWaitMsTotal,
+    toolMsTotal,
     stopReason,
   };
 }
@@ -743,48 +827,48 @@ const AGENT_COVERAGE_GOALS = {
   discovery: {
     'root-and-docs': 'You just arrived at the site. Figure out what it is, where the docs are, and whether the service is healthy.',
     'platform-ethos-capabilities': 'Understand what this platform does, what kind of access it offers, and any general platform helpers it exposes.',
-    'strategies-and-knowledge': 'Learn about one routing strategy and read one relevant knowledge page.',
-    skills: 'Call exactly these three discovery routes in order and stop there: GET /api/v1/skills, GET /api/v1/skills/discovery, and GET /api/v1/skills/market/open-flow.txt. Do not detour into any other discovery group.',
+    'strategies-and-knowledge': 'Read GET /api/v1/skills/discovery and follow only the strategies-and-knowledge section. Call exactly these three routes in order: GET /api/v1/strategies, GET /api/v1/strategies/geographic-arbitrage, GET /api/v1/knowledge/strategy. Then stop.',
+    skills: 'Read the discovery skill and follow the skills section exactly: call GET /api/v1/skills, then GET /api/v1/skills/discovery, then GET /api/v1/skills/market/open-flow.txt, then stop. Do not detour into any other discovery group.',
   },
   identity: {
-    'registration-and-profile': 'Register exactly one agent, inspect your own profile and referral info, then inspect your public profile and lineage. Keep the profile update simple: name and description are enough; do not add pubkey unless the docs for your current goal require it.',
-    'node-connection': 'Call exactly these three routes in order and stop there: POST /api/v1/node/test-connection with {}, POST /api/v1/node/connect with {}, and GET /api/v1/node/status. Use the same bearer token on all three individual requests, including the final GET. If the two POST routes return 400 missing_required_field, treat that as the expected boundary and continue straight to status; do not re-register, do not invent host credentials, and do not detour into capabilities.',
-    actions: 'Call exactly these three routes in order and stop there: POST /api/v1/actions/submit with {"action_type":"open_channel","params":{"peer_pubkey":"03abababababababababababababababababababababababababababababababab"},"description":"Opening channel"}, then GET /api/v1/actions/history, then GET /api/v1/actions/<real-action_id>. Stay on the /api/v1/actions/* family only; do not invent /api/v1/identity/actions routes, do not probe /api/v1/actions or /api/v1/actions/submit with GET, and do not detour into skill-file variants for this group.',
+    'registration-and-profile': 'Read GET /api/v1/skills/identity and follow only the registration-and-profile section. That file is the authoritative route order and body guide for this group.',
+    'node-connection': 'Read GET /api/v1/skills/identity and follow only the node-connection section. Call exactly three routes in order: POST /api/v1/node/test-connection with body {}, POST /api/v1/node/connect with body {}, then GET /api/v1/node/status. Do not guess host, macaroon, or tls_cert values.',
+    actions: 'Read GET /api/v1/skills/identity and follow only the actions section. That file is the authoritative route order and body guide for this group.',
   },
   wallet: {
-    'wallet-teaching-and-ledger': 'Follow the exact four-route wallet-teaching-and-ledger checklist in wallet.txt: GET /api/v1/wallet/mint-quote, POST /api/v1/wallet/deposit with {}, POST /api/v1/wallet/withdraw with {}, then GET /api/v1/ledger. Reuse one bearer token on routes 1-3, then stop after route 4.',
-    'mint-balance-history': 'Call exactly these seven routes in order and stop there: GET /api/v1/wallet/balance, POST /api/v1/wallet/mint-quote with {"amount_sats":1000}, POST /api/v1/wallet/check-mint-quote with the real quote_id, POST /api/v1/wallet/mint with the same quote_id, GET /api/v1/wallet/history, POST /api/v1/wallet/restore with {}, and POST /api/v1/wallet/reclaim-pending with {"max_age_hours":24}. Use the same bearer token on every individual request. Do not detour into deposit, withdraw, or ledger routes in this task.',
-    'melt-send-receive': 'Call exactly these four wallet routes in order and stop there: POST /api/v1/wallet/melt-quote with {"invoice":"lnbc1invalid"}, POST /api/v1/wallet/melt, POST /api/v1/wallet/send, and POST /api/v1/wallet/receive. Even if route 1 returns a validation boundary, still do routes 2, 3, and 4 immediately.',
+    'wallet-teaching-and-ledger': 'Read GET /api/v1/skills/wallet and follow only the wallet-teaching-and-ledger section. That file is the authoritative route order and boundary guide for this group.',
+    'mint-balance-history': 'Read GET /api/v1/skills/wallet and follow only the mint-balance-history section. That file is the authoritative route order and body guide for this group.',
+    'melt-send-receive': 'Read GET /api/v1/skills/wallet and follow only the melt-send-receive section. That file is the authoritative route order and boundary guide for this group.',
   },
   analysis: {
-    'network-health': 'Inspect overall live network health from the platform node.',
-    'node-profile-aliases': 'Profile a real Lightning node and figure out which equivalent profile paths the platform supports.',
-    'suggest-peers': 'Find suggested peers for a real node.',
+    'network-health': 'Read the analysis skill and follow the network-health section exactly: call only GET /api/v1/analysis/network-health, then stop.',
+    'node-profile-aliases': 'Read the analysis skill and follow the node-profile-aliases section exactly: call GET /api/v1/analysis/node/<real-pubkey>, then GET /api/v1/analysis/profile-node/<same-pubkey>, then GET /api/v1/analysis/node-profile/<same-pubkey>. Use the exact pubkey shown in the analysis doc and stop after those three routes.',
+    'suggest-peers': 'Read the analysis skill and follow the suggest-peers section exactly: call only GET /api/v1/analysis/suggest-peers/<real-pubkey> with the exact pubkey from the doc, then stop.',
   },
   social: {
-    messaging: 'Send a message from one agent to another, then inspect the relevant message and inbox views.',
-    alliances: 'Create an alliance proposal, inspect alliance listings, and try the accept and breakup actions.',
-    'leaderboard-and-tournaments': 'Follow the exact eight-route leaderboard-and-tournaments checklist in social.txt. Do bracket before enter, then stop.',
+    messaging: 'Read GET /api/v1/skills/social/messaging.txt and follow only that file. It is the exact route order, body, and token-use guide for this group.',
+    alliances: 'Read GET /api/v1/skills/social/alliances.txt and follow only that file. It is the exact route order, body, and token-use guide for this group. Sender token for routes 1, 2, 3, and 5. Recipient token only for route 4.',
+    'leaderboard-and-tournaments': 'Read GET /api/v1/skills/social/leaderboard-and-tournaments.txt and follow only that file. It is the exact route order and auth guide for this group.',
   },
   channels: {
-    'audit-and-monitoring': 'Inspect the public channel accountability views: audit, verify, violations, and status.',
-    'signed-channel-lifecycle': 'Fetch the channels-signed helper and follow its exact four-route burst. If route 1 is empty, still finish routes 2, 3, and 4 once with the documented fake placeholder. If Node is available, prefer the built-in Node signing path and sign preview and instruct separately with fresh timestamps.',
+    'audit-and-monitoring': 'Read GET /api/v1/skills/channels/audit-and-monitoring.txt and follow only that file. Call the six documented public routes in order, including the example channel-id routes, then stop.',
+    'signed-channel-lifecycle': 'Read GET /api/v1/skills/channels/signed-channel-lifecycle.txt and follow only that file. Run its exact pubkey command, upload that exact printed compressed pubkey with PUT /api/v1/agents/me, then do routes 1 through 4 in order. If route 1 is empty, still finish routes 2, 3, and 4 once with the documented fake placeholder. Use the exact preview and instruct Node commands from that file, with fresh current Unix timestamps.',
   },
   market: {
-    'public-market-read': 'Inspect the public market information: config, rankings, overview, channel listings, peer safety, and fee information.',
-    'teaching-surfaces': 'Follow the docs for the market write routes and see what the platform teaches you before a real write.',
-    'open-flow': 'Try to open a channel as far as the docs and your current balance honestly allow, then inspect pending-open status.',
-    'close-revenue-performance': 'Follow the exact seven-route close checklist. If Node is available, use the built-in Node signing path first, upload the printed compressed pubkey exactly with PUT /api/v1/agents/me, then sign the close instruction and continue through closes, revenue, revenue-config, and performance without detours. For route 5, send exactly {"destination":"capital"} and nothing else.',
-    'swap-ecash-and-rebalance': 'Fetch the canonical helper at /api/v1/skills/market-swap-ecash-and-rebalance, then follow its exact nine-route checklist in order. Do not open other swap docs, do not invent lookalike routes, and do not detour into wallet or extra market routes once that checklist starts.',
+    'public-market-read': 'Read GET /api/v1/skills/market/public-market-read.txt and follow only that file. It is the authoritative route order for this group.',
+    'teaching-surfaces': 'Read GET /api/v1/skills/market/teaching-surfaces.txt and follow only that file. Register first with JSON plus Content-Type: application/json, then do the three documented GET routes and stop.',
+    'open-flow': 'Read GET /api/v1/skills/market/open-flow.txt and follow only that file. Use the exact channel_open Node command from that file. If preview or open says insufficient balance, route 3 is still required. Do not stop after route 2.',
+    'close-revenue-performance': 'Read GET /api/v1/skills/market/close.txt and follow only that file. Always do the documented PUT /api/v1/agents/me step in this group after you register. Use the exact channel_close Node command from that file, and after that second Node command your very next HTTP call must be POST /api/v1/market/close with that exact printed JSON body. Then do routes 2 through 7 immediately. If you do not have a real channel, keep the documented placeholder channel point and still finish the full seven-route checklist. Do not stop after GET /api/v1/market/performance; the final GET /api/v1/market/performance/REAL_CHANNEL_POINT route is still required.',
+    'swap-ecash-and-rebalance': 'Read GET /api/v1/skills/market/swap-ecash-and-rebalance.txt and follow only that file. Keep one bearer token, one signing key, and one exact nine-route sequence. Use the exact route 8 rebalance Node command from that file. If route 5 says insufficient ecash balance, continue directly to routes 6 through 9. If route 7 says the outbound channel is missing or unassigned, still do route 8 and route 9. If route 8 fails, still do route 9.',
   },
   analytics: {
-    'catalog-and-quote': 'Inspect the analytics catalog and get a quote for one analytics query.',
-    'execute-and-history': 'Try to run one analytics query and then inspect analytics history.',
+    'catalog-and-quote': 'Read GET /api/v1/skills/analytics/catalog-and-quote.txt and follow only that file. Call the two documented routes in order, then stop.',
+    'execute-and-history': 'Read GET /api/v1/skills/analytics/execute-and-history.txt and follow only that file. Call the three documented routes in order, then stop.',
   },
   capital: {
-    'balance-and-activity': 'Inspect on-chain capital balances and capital activity history.',
-    'deposit-and-status': 'Follow the exact two-route capital deposit checklist: POST /api/v1/capital/deposit with {}, then GET /api/v1/capital/deposits.',
-    'withdraw-and-help': 'Follow the exact two-route capital checklist: attempt POST /api/v1/capital/withdraw, then immediately call POST /api/v1/help in the same auth burst.',
+    'balance-and-activity': 'Read GET /api/v1/skills/capital/balance-and-activity.txt and follow only that file. Register with JSON plus Content-Type: application/json if you need auth, then do the two documented GET routes and stop.',
+    'deposit-and-status': 'Read GET /api/v1/skills/capital/deposit-and-status.txt and follow only that file. Register with JSON plus Content-Type: application/json if you need auth, then do the two documented routes and stop.',
+    'withdraw-and-help': 'Read GET /api/v1/skills/capital/withdraw-and-help.txt and follow only that file. Register with JSON plus Content-Type: application/json if you need auth, then do the two documented routes and stop.',
   },
 };
 
@@ -917,6 +1001,29 @@ function createAgentCoverageMessages() {
   return [{ role: 'user', content: AGENT_COVERAGE_PRIMER }];
 }
 
+function buildSharedSessionCarryForward(httpCalls) {
+  const registrations = [];
+  for (const call of httpCalls) {
+    if (!call.url?.includes('/api/v1/agents/register')) continue;
+    if (call.status !== 201 || !call.body?.agent_id || !call.body?.api_key) continue;
+    registrations.push({
+      agent_id: call.body.agent_id,
+      api_key: call.body.api_key,
+    });
+  }
+  const recentRegs = registrations.slice(-2);
+  const lines = [];
+  if (AGENT_RUNTIME === 'terminal') {
+    lines.push('- same local terminal working directory is still available');
+  }
+  for (let i = 0; i < recentRegs.length; i += 1) {
+    const reg = recentRegs[i];
+    lines.push(`- known agent ${i + 1}: agent_id ${reg.agent_id}, api_key ${reg.api_key}`);
+  }
+  if (lines.length === 0) return null;
+  return `Shared session carry-forward:\n${lines.join('\n')}\nUse these facts if helpful, but still follow the current route-group doc exactly.`;
+}
+
 // ─── Feedback Extraction ───
 
 function extractFeedback(text) {
@@ -1004,11 +1111,13 @@ async function runNavigation(provider, modelConfig) {
     let phaseDocTraces = [];
     let phaseTurnTraces = [];
     let phaseRequestTimeline = [];
+    let phaseRetryWaitMs = 0;
+    let phaseToolMs = 0;
     let errorRecovery = null;  // "helped" | "not_helped" | null
 
     for (let attempt = 1; attempt <= EFFECTIVE_MAX_RETRIES; attempt++) {
       const nudge = attempt === 1 ? phase.nudge : `Let's try that again. ${phase.nudge}`;
-      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces, requestTimeline } = await runNudge(messages, nudge, provider, {
+      const { httpLog, totalTokens: tok, docReads, thinkTimes, responseSizes, docTraces, turnTraces, requestTimeline, retryWaitMsTotal, toolMsTotal } = await runNudge(messages, nudge, provider, {
         phaseNum, totalPhases: WALKTHROUGH_PHASES.length, phaseName: phase.name, attempt,
       });
 
@@ -1032,6 +1141,8 @@ async function runNavigation(provider, modelConfig) {
           : null,
       })));
       phaseTurnTraces.push(...turnTraces);
+      phaseRetryWaitMs += retryWaitMsTotal || 0;
+      phaseToolMs += toolMsTotal || 0;
 
       const result = phase.check(httpLog, state);
       if (result.pass) {
@@ -1049,11 +1160,14 @@ async function runNavigation(provider, modelConfig) {
 
     if (passed) { passCount++; consecutiveFails = 0; } else { consecutiveFails++; }
     const phaseDur = Date.now() - phaseStart;
+    const phaseHttpMs = phaseHttpLog.reduce((sum, call) => sum + Number(call.latency || 0), 0);
+    const phaseThinkMs = phaseThinkTimes.reduce((sum, ms) => sum + Number(ms || 0), 0);
     totalTokens += phaseTokens;
     totalDocReads += phaseDocReads;
 
     const score = `(${passCount}/${i + 1})`;
     agentLog(`${String(phaseNum).padStart(2)}/${WALKTHROUGH_PHASES.length} ${phase.name.padEnd(20)} ${passed ? '✓ PASS' : '✗ FAIL'} ${score} [${(phaseDur / 1000).toFixed(1)}s] ${phaseHttpLog.length} calls, ${phaseTokens} phase-tok  ${reason}`);
+    agentLog(`${String(phaseNum).padStart(2)}/${WALKTHROUGH_PHASES.length} ${phase.name.padEnd(20)} ${formatTimingBreakdown({ thinkMs: phaseThinkMs, httpMs: phaseHttpMs, toolMs: phaseToolMs, waitMs: phaseRetryWaitMs, wallMs: phaseDur })}`);
     if (errorRecovery) {
       const firstErr = phaseHttpLog.find(h => h.status >= 400);
       const lastCall = phaseHttpLog[phaseHttpLog.length - 1];
@@ -1224,6 +1338,8 @@ async function runAgentCoverage(provider, modelConfig) {
     let phaseDocTraces = [];
     let phaseTurnTraces = [];
     let phaseRequestTimeline = [];
+    let phaseRetryWaitMs = 0;
+    let phaseToolMs = 0;
     let phaseEvaluation = evaluatePhaseCoverage(phaseHttpLog, task.covers, task.agentExpectations, { baseUrl: BASE_URL });
     let passed = false;
     let stopReason = null;
@@ -1238,12 +1354,13 @@ async function runAgentCoverage(provider, modelConfig) {
           : null
       );
       let burst = 1;
+      const maxPhaseBursts = phaseBurstBudget(task);
       let noProgressBursts = 0;
       let docOnlyBursts = 0;
       let lastStallReason = null;
       let previousProgress = summarizePhaseProgress(phaseEvaluation);
 
-      while (burst <= MAX_PHASE_BURSTS) {
+      while (burst <= maxPhaseBursts) {
         const nudge = burst === 1
           ? buildAgentCoveragePrompt(task)
           : buildAgentCoverageRetryPrompt(task);
@@ -1258,13 +1375,16 @@ async function runAgentCoverage(provider, modelConfig) {
           docTraces,
           turnTraces,
           requestTimeline,
+          retryWaitMsTotal,
+          toolMsTotal,
           stopReason: nudgeStopReason,
         } = await runNudge(messages, nudge, provider, {
           phaseNum: i + 1,
           totalPhases: tasks.length,
           phaseName: AGENT_COVERAGE_SESSIONS > 1 ? `${phaseLabel}#${sessionIndex}` : phaseLabel,
+          phaseCovers: task.covers,
           attempt: burst,
-          attemptMax: MAX_PHASE_BURSTS,
+          attemptMax: maxPhaseBursts,
           executeLocalTool: terminalRuntime ? (toolName, input) => terminalRuntime.execute(toolName, input) : undefined,
         });
 
@@ -1290,6 +1410,8 @@ async function runAgentCoverage(provider, modelConfig) {
             : null,
         })));
         phaseTurnTraces.push(...turnTraces);
+        phaseRetryWaitMs += retryWaitMsTotal || 0;
+        phaseToolMs += toolMsTotal || 0;
 
         phaseEvaluation = evaluatePhaseCoverage(phaseHttpLog, task.covers, task.agentExpectations, { baseUrl: BASE_URL });
         const routeCallsThisBurst = httpLog.filter(call => !isDocRoute({
@@ -1297,8 +1419,9 @@ async function runAgentCoverage(provider, modelConfig) {
           url: call.url,
           headers: call.requestHeaders,
         }));
+        const setupProgressThisBurst = burstIncludesSetupProgress(task, httpLog);
         const nextProgress = summarizePhaseProgress(phaseEvaluation);
-        const madeProgress = phaseProgressAdvanced(previousProgress, nextProgress);
+        const madeProgress = phaseProgressAdvanced(previousProgress, nextProgress) || setupProgressThisBurst;
         previousProgress = nextProgress;
 
         if (phaseEvaluation.passed) {
@@ -1337,8 +1460,8 @@ async function runAgentCoverage(provider, modelConfig) {
         burst += 1;
       }
 
-      if (!passed && !stopReason && burst > MAX_PHASE_BURSTS) {
-        stopReason = `Burst cap reached (${MAX_PHASE_BURSTS}) before remaining routes moved`;
+      if (!passed && !stopReason && burst > maxPhaseBursts) {
+        stopReason = `Burst cap reached (${maxPhaseBursts}) before remaining routes moved`;
       }
       if (passed) break;
       stopReason = null;
@@ -1359,6 +1482,8 @@ async function runAgentCoverage(provider, modelConfig) {
     if (passed) passCount++;
 
     const phaseDur = Date.now() - phaseStart;
+    const phaseHttpMs = phaseHttpLog.reduce((sum, call) => sum + Number(call.latency || 0), 0);
+    const phaseThinkMs = phaseThinkTimes.reduce((sum, ms) => sum + Number(ms || 0), 0);
     totalTokens += phaseTokens;
     totalInputTokens += phaseInputTokens;
     totalOutputTokens += phaseOutputTokens;
@@ -1378,6 +1503,7 @@ async function runAgentCoverage(provider, modelConfig) {
       + `(contract ${phaseEvaluation.contractScore}/${task.covers.length}, reach ${phaseEvaluation.reachScore}/${task.covers.length}) [${(phaseDur / 1000).toFixed(1)}s] `
       + `${phaseHttpLog.length} calls, ${phaseTokens} tok, est ${formatUsd(estimatedPhaseCostUsd)}  ${reason}`,
     );
+    agentLog(`   ${formatTimingBreakdown({ thinkMs: phaseThinkMs, httpMs: phaseHttpMs, toolMs: phaseToolMs, waitMs: phaseRetryWaitMs, wallMs: phaseDur })}`);
     if (!passed) {
       if (phaseEvaluation.failureGroups.cannot_find_endpoint.length > 0) {
         agentLog(`   cannot find: ${phaseEvaluation.failureGroups.cannot_find_endpoint.join(' | ')}`);
@@ -1485,6 +1611,16 @@ async function runAgentCoverage(provider, modelConfig) {
       request_timeline: phaseRequestTimeline,
       stop_reason: stopReason,
     });
+
+    await resetTestRateLimits();
+
+    if (SHARED_AGENT_COVERAGE_SESSION) {
+      messages = createAgentCoverageMessages();
+      const carryForward = buildSharedSessionCarryForward(allHttpCalls);
+      if (carryForward) {
+        messages.push({ role: 'user', content: carryForward });
+      }
+    }
 
     if (FAIL_FAST && !passed) {
       agentLog(`   fail-fast: stopping broad run after first failed phase (${task.suite}:${task.phase})`);
@@ -1928,7 +2064,7 @@ async function main() {
   }
 
   // Reset rate limits before test run
-  try { await fetch(`${BASE_URL}/api/v1/test/reset-rate-limits`, { method: 'POST' }); } catch {}
+  await resetTestRateLimits();
 
   const allScores = [];
 
@@ -1946,12 +2082,12 @@ async function main() {
 
       // Reset rate limits between models
       if (mi > 0) {
-        try { await fetch(`${BASE_URL}/api/v1/test/reset-rate-limits`, { method: 'POST' }); } catch {}
+        await resetTestRateLimits();
       }
 
       let provider;
       try {
-        provider = await createProvider(mc);
+        provider = await createProvider(mc, { requestTimeoutMs: PROVIDER_TIMEOUT_MS });
       } catch (err) {
         testLog(`  SKIP: Failed to create provider — ${err.message}`);
         continue;
@@ -2003,6 +2139,7 @@ async function main() {
       if (wantsAgentCoverage) {
         const agentCoverageProvider = await createProvider(mc, {
           tools: AGENT_RUNTIME === 'terminal' ? [HTTP_TOOL, TERMINAL_TOOL] : [HTTP_TOOL],
+          requestTimeoutMs: PROVIDER_TIMEOUT_MS,
         });
         const agentCoverage = await runAgentCoverage(agentCoverageProvider, mc);
         const phases = {};

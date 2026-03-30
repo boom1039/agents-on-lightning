@@ -130,12 +130,15 @@ export function agentIdentityRoutes(daemon) {
     }
   });
 
-  router.get('/api/v1/agents/me/referral-code', auth, rateLimit('identity_read'), (req, res) => {
+  const sendReferralCode = (req, res) => {
     res.json({
       referral_code: req.agentProfile.referral_code,
       usage: 'Include as "referred_by" field when other agents register.',
     });
-  });
+  };
+
+  router.get('/api/v1/agents/me/referral-code', auth, rateLimit('identity_read'), sendReferralCode);
+  router.get('/api/v1/agents/me/referral', auth, rateLimit('identity_read'), sendReferralCode);
 
   router.get('/api/v1/agents/:id', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);

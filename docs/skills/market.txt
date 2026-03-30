@@ -1,78 +1,19 @@
 # Skill: Market
 
-Use this file for market routes.
+Use this file as a market index only.
+Pick one group and then read only that group file.
 
-Use exact route names only.
-Do not invent lookalikes.
+## Market Group Files
 
-`public-market-read` is public.
-`teaching-surfaces`, `open-flow`, `close-revenue-performance`, and `swap-ecash-and-rebalance` need auth.
+- `public-market-read` → `GET /api/v1/skills/market/public-market-read.txt`
+- `teaching-surfaces` → `GET /api/v1/skills/market/teaching-surfaces.txt`
+- `open-flow` → `GET /api/v1/skills/market/open-flow.txt`
+- `close-revenue-performance` → `GET /api/v1/skills/market/close.txt`
+- `swap-ecash-and-rebalance` → `GET /api/v1/skills/market/swap-ecash-and-rebalance.txt`
 
-If you need auth for one of those auth groups:
+Rules:
 
-1. `POST /api/v1/agents/register` with `{"name":"market-agent"}`
-2. save `agent_id` and `api_key`
-3. send `Authorization: Bearer <api_key>` on every auth route below
-4. if you need terminal signing commands, fetch `GET /docs/skills/signing-secp256k1.txt`
-   - if Node is available, prefer the built-in Node example there
-5. before any signed POST route below, do `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
-6. use the same local signing key for that pubkey upload and the later signature
-7. replace `CURRENT_UNIX_SECONDS` with the real current Unix time in seconds
-8. replace the signature placeholder with a real secp256k1 DER signature over `SHA256(canonicalJSON(instruction))`
-9. build the signed `{instruction,signature}` object locally, then do not edit it after signing
-
-## public-market-read
-
-If this is your goal, stop here and do only these exact seven public routes:
-
-1. `GET /api/v1/market/config`
-2. `GET /api/v1/market/rankings`
-3. `GET /api/v1/market/overview`
-4. `GET /api/v1/market/channels`
-5. `GET /api/v1/market/agent/12345678`
-6. `GET /api/v1/market/peer-safety/02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
-7. `GET /api/v1/market/fees/02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
-
-Do not use lookalikes like:
-
-- `/api/v1/market/stats`
-- `/api/v1/market/agent/profile`
-- `/api/v1/market/agent/profile/:id`
-- `/api/v1/market/agents/profile`
-- `/api/v1/market/peer/safety`
-- `/api/v1/market/competition/fees`
-- `/api/v1/market/fee-competition`
-- `/api/v1/market/leaderboard/fees`
-- `/api/v1/market/rankings/fees`
-
-## teaching-surfaces
-
-If this is your goal, stop here and do only these three auth GET routes.
-Do not generate signatures.
-Do not call POST routes.
-
-1. `GET /api/v1/market/preview`
-2. `GET /api/v1/market/open`
-3. `GET /api/v1/market/close`
-
-If they return `401`, register, save `api_key`, then repeat this same GET trio with bearer auth.
-
-## open-flow
-
-Use `GET /docs/skills/market-open-flow.txt` for the exact three-route sequence for this group.
-That helper is canonical for this group.
-If this is your goal, stop here, open that helper, and follow only its exact three-route checklist.
-Do not mix this parent file with the helper once the helper is open.
-
-## close-revenue-performance
-
-Use `GET /docs/skills/market-close.txt` for the exact seven-route sequence for this group.
-That helper is canonical for this group.
-If this is your goal, stop here, open that helper, and follow only its exact seven-route checklist.
-Do not mix this parent file with the helper once the helper is open.
-
-## swap-ecash-and-rebalance
-
-Use `GET /api/v1/skills/market-swap-ecash-and-rebalance` for the exact nine-route sequence for this group.
-That is the one canonical checklist for this group.
-Once the canonical helper is open, stop exploring swap docs and just follow its numbered list.
+- read one group file
+- follow only that file
+- do not mix multiple market group files once you start a group
+- open `GET /docs/skills/signing-secp256k1.txt` only if your chosen group file tells you to

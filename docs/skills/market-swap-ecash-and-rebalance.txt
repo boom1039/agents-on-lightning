@@ -1,35 +1,60 @@
-# Market Swap Ecash And Rebalance
+# Skill: Market Swap, Ecash, And Rebalance
 
-Use only this file for `swap-ecash-and-rebalance`, except `GET /docs/skills/signing-secp256k1.txt` if you need local signing commands.
-This is one exact nine-route checklist. Keep one bearer token, follow the numbered order, and do not improvise extra route names or extra docs once you start.
+This file is only for `swap-ecash-and-rebalance`.
+It is self-contained.
 
 ## Setup
 
 1. `POST /api/v1/agents/register` with `{"name":"market-agent"}`
 2. save `agent_id` and `api_key`
-3. fetch `GET /docs/skills/signing-secp256k1.txt` if you need local signing commands
-4. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_REAL_66_HEX_COMPRESSED_SECP256K1_PUBKEY"}`
-5. use the same bearer token on all 9 routes below
-6. for every `POST` or `PUT` here, send `Content-Type: application/json`
+3. send `Authorization: Bearer <api_key>` on every route below
+4. send `Content-Type: application/json` on every `POST` or `PUT`
+5. print one compressed secp256k1 `pubkey`
+6. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
 
-## Exact 9 Routes
+Do not start route 1 until setup is finished.
+If a valid pubkey upload already succeeded earlier in this same session, reuse it and skip step 6.
+
+Exact pubkey command:
+
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const publicKey=createPublicKey(privateKey);
+const jwk=publicKey.export({format:"jwk"});
+const x=Buffer.from(jwk.x,"base64url");
+const y=Buffer.from(jwk.y,"base64url");
+const prefix=(y[y.length-1]&1)?0x03:0x02;
+console.log(Buffer.concat([Buffer.from([prefix]),x]).toString("hex"));
+'
+```
+
+## Exact Route Order
 
 1. `GET /api/v1/market/swap/quote?amount_sats=100000`
-2. `POST /api/v1/market/swap/lightning-to-onchain` with JSON body `{"amount_sats":100000,"destination_address":"bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"}`
+2. `POST /api/v1/market/swap/lightning-to-onchain`
 3. `GET /api/v1/market/swap/status/missing-swap-id`
 4. `GET /api/v1/market/swap/history`
-5. `POST /api/v1/market/fund-from-ecash` with a signed top-level body containing exactly `instruction` and `signature`, where `instruction.action` is exactly `"channel_open"`
+5. `POST /api/v1/market/fund-from-ecash`
 6. `GET /api/v1/market/fund-from-ecash/missing-flow-id`
-7. `POST /api/v1/market/rebalance/estimate` with `{"outbound_chan_id":"missing-outbound-chan","amount_sats":10000}`
-8. `POST /api/v1/market/rebalance` with a signed top-level body containing exactly `instruction` and `signature`, where `instruction.action` is exactly `"rebalance"`
+7. `POST /api/v1/market/rebalance/estimate`
+8. `POST /api/v1/market/rebalance`
 9. `GET /api/v1/market/rebalances`
 
-## Route 5 Exact Shape
+## Exact Route 2 Body
 
-- Route 5 uses `instruction.action:"channel_open"`
-- Route 5 uses `params.local_funding_amount_sats`
-- Route 5 should include a placeholder `peer_pubkey`
-- The simplest stable route-5 body only needs those required params.
+```json
+{
+  "amount_sats": 100000,
+  "onchain_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
+}
+```
+
+## Exact Route 5 Body
 
 ```json
 {
@@ -46,13 +71,16 @@ This is one exact nine-route checklist. Keep one bearer token, follow the number
 }
 ```
 
-## Route 8 Exact Shape
+## Exact Route 7 Body
 
-- Route 8 uses `instruction.action:"rebalance"`
-- Route 8 uses `params.outbound_chan_id`, `params.amount_sats`, and `params.max_fee_sats`
-- Route 8 should use `outbound_chan_id:"missing-outbound-chan"` if you have no real outbound channel
-- Safest path: use the literal rebalance command from `GET /docs/skills/signing-secp256k1.txt`, paste your real `agent_id` into that command text, then send the emitted JSON unchanged
-- Route 8 is still required even if route 7 failed or returned a boundary response.
+```json
+{
+  "outbound_chan_id": "missing-outbound-chan",
+  "amount_sats": 10000
+}
+```
+
+## Exact Route 8 Body
 
 ```json
 {
@@ -70,21 +98,37 @@ This is one exact nine-route checklist. Keep one bearer token, follow the number
 }
 ```
 
-## Hard Rules
+Exact Node command for route 8:
 
-- Even if route 2 fails, still do route 3 and route 4.
-- Even if route 5 fails, still do route 6 and route 7.
-- Even if route 8 fails, still do route 9.
-- Route 2 must not use an empty body or `{}`.
-- Route 2 must use exactly `destination_address`. Do not retry it with `address`, `onchain_address`, or renamed keys.
-- Route 2 should use the exact valid example address shown above unless you have a different real Bitcoin address.
-- Route 5 must not use a bare `{"amount_sats":100000}` body.
-- Route 5 must not use `instruction.action:"fund_from_ecash"`.
-- Routes 4 and 7 are required even if the earlier write route failed.
-- Route 8 needs `outbound_chan_id`, `amount_sats`, and `max_fee_sats`.
-- Sign route 5 and route 8 separately with a fresh timestamp each time.
-- There is no `POST /api/v1/market/swap/preview`.
-- There is no `POST /api/v1/market/swap/ecash/preview`.
-- There is no `GET /api/v1/market/swap/flow/missing-swap-id`.
-- There is no `GET /api/v1/market/swap/missing-swap-id`.
-- If you use Node or OpenSSL from the signing helper, sign the canonical JSON string directly. Do not pre-hash first.
+```bash
+node --input-type=module -e '
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, createPrivateKey, createSign } from "node:crypto";
+function c(o){if(o===null||o===undefined)return"null";if(typeof o==="boolean")return o?"true":"false";if(typeof o==="number")return Number.isFinite(o)?JSON.stringify(o):"null";if(typeof o==="string")return JSON.stringify(o);if(Array.isArray(o))return"["+o.map(c).join(",")+"]";const ks=Object.keys(o).filter(k=>o[k]!==undefined).sort();return"{"+ks.map(k=>JSON.stringify(k)+":"+c(o[k])).join(",")+"}";}
+const keyPath="./agent-secp256k1-private.pem";
+if(!existsSync(keyPath)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});writeFileSync(keyPath,privateKey.export({type:"sec1",format:"pem"}));}
+const privateKey=createPrivateKey(readFileSync(keyPath,"utf8"));
+const instruction={action:"rebalance",agent_id:"YOUR_AGENT_ID",timestamp:Math.floor(Date.now()/1000),params:{outbound_chan_id:"missing-outbound-chan",amount_sats:10000,max_fee_sats:10}};
+const signer=createSign("SHA256"); signer.update(c(instruction),"utf8"); signer.end();
+console.log(JSON.stringify({instruction,signature:signer.sign(privateKey).toString("hex")}));
+'
+```
+
+## Rules
+
+- the `PUT /api/v1/agents/me` body must be exactly `{"pubkey":"PRINTED_66_HEX"}` with no PEM text and no outer wrapper
+- route 2 may honestly return `503 submarine_swaps_disabled`
+- route 2 must use exactly `onchain_address`
+- even if route 2 fails, still do routes 3 and 4
+- route 5 is a signed top-level body with exactly `instruction` and `signature`
+- route 5 must use action exactly `channel_open`
+- if route 5 says `Insufficient ecash balance`, that is the expected boundary here
+- if route 5 fails, still do routes 6, 7, 8, and 9
+- route 7 is plain JSON, not signed
+- if route 7 says the outbound channel is missing or unassigned, route 8 and route 9 are still required
+- route 8 is signed and must use action exactly `rebalance`
+- sign route 5 and route 8 separately with a fresh real Unix timestamp each time
+- use the exact route 8 Node command above instead of adapting the generic signing helper by hand
+- if route 8 fails, still do route 9
+- do not send the example JSON unchanged; replace `YOUR_AGENT_ID` and use a real current timestamp before signing
+- there is no `POST /api/v1/market/swap/preview`

@@ -60,7 +60,9 @@ export function channelAccountabilityRoutes(daemon) {
     const rejection = rejectUnauthorizedTestRoute(req, res);
     if (rejection) return rejection;
     await resetCounters();
-    res.json({ status: 'ok', message: 'Rate limit counters cleared' });
+    await DangerRoutePolicyStore.resetAllForTests();
+    await daemon.channelExecutor?.resetForTests?.();
+    res.json({ status: 'ok', message: 'Local test rate limits, danger-route cooldowns, and signed-channel cooldowns cleared' });
   });
 
   // --- Operator-only: assign channel ---

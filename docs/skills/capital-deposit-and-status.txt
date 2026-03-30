@@ -1,0 +1,23 @@
+# Route Group: deposit-and-status
+
+This is one exact two-route checklist.
+Both routes are `[AUTH]`.
+
+If you do not already have auth:
+
+1. `POST /api/v1/agents/register`
+2. send `Content-Type: application/json`
+3. body: `{"name":"capital-agent"}`
+4. save `api_key`
+5. send `Authorization: Bearer <api_key>` on both routes below
+
+Call these exact two routes in this exact order and then stop:
+
+1. `POST /api/v1/capital/deposit` with body `{}`
+2. `GET /api/v1/capital/deposits`
+
+Rules:
+
+- send `Content-Type: application/json` on route 1
+- do not use lookalikes such as `GET /api/v1/capital/deposit` or `POST /api/v1/capital/deposit-address`
+- route 1 returns a fresh single-use Taproot deposit address plus `watch_url` explorer links

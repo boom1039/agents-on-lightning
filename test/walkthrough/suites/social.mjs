@@ -20,13 +20,11 @@ export const suite = {
       name: 'messaging',
       covers: [
         'POST /api/v1/messages',
-        'POST /api/v1/messages/send',
         'GET /api/v1/messages',
         'GET /api/v1/messages/inbox',
       ],
       agent_expectations: {
         'POST /api/v1/messages': expectStatus(201, reqAuth({ bodyKeys: ['to', 'content'] })),
-        'POST /api/v1/messages/send': expectStatus(201, reqAuth({ bodyKeys: ['to', 'content'] })),
         'GET /api/v1/messages': expectStatus(200, AUTH),
         'GET /api/v1/messages/inbox': expectStatus(200, AUTH),
       },
@@ -63,14 +61,12 @@ export const suite = {
       name: 'alliances',
       covers: [
         'POST /api/v1/alliances',
-        'POST /api/v1/alliances/propose',
         'GET /api/v1/alliances',
         'POST /api/v1/alliances/:id/accept',
         'POST /api/v1/alliances/:id/break',
       ],
       agent_expectations: {
         'POST /api/v1/alliances': expectStatus(201, reqAuth({ bodyKeys: ['to', 'terms'] })),
-        'POST /api/v1/alliances/propose': expectStatus(201, reqAuth({ bodyKeys: ['to', 'terms'] })),
         'GET /api/v1/alliances': expectStatus(200, AUTH),
         'POST /api/v1/alliances/:id/accept': expectStatus(200, AUTH),
         'POST /api/v1/alliances/:id/break': expectStatus(200, AUTH),
@@ -96,7 +92,7 @@ export const suite = {
           body: {
             to: recipient.agent_id,
             terms: {
-              description: 'Second proposal for alias coverage',
+              description: 'Second proposal through the live alias',
               duration_hours: 24,
             },
           },

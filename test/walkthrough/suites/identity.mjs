@@ -7,11 +7,13 @@ import {
   expectHelpful,
   expectStatus,
   reqAuth,
+  reqOptional,
   reqPublic,
 } from '../agent-coverage-scoring.mjs';
 
 const AUTH = reqAuth();
 const PUBLIC = reqPublic();
+const PUBLIC_OR_AUTH = reqOptional();
 
 export const suite = {
   name: 'identity',
@@ -35,8 +37,8 @@ export const suite = {
         }),
         'PUT /api/v1/agents/me': expectStatus(200, reqAuth({ bodyAnyKeys: ['name', 'description', 'pubkey'] })),
         'GET /api/v1/agents/me/referral-code': expectStatus(200, AUTH),
-        'GET /api/v1/agents/:id': expectStatus(200, PUBLIC),
-        'GET /api/v1/agents/:id/lineage': expectStatus(200, PUBLIC),
+        'GET /api/v1/agents/:id': expectStatus(200, PUBLIC_OR_AUTH),
+        'GET /api/v1/agents/:id/lineage': expectStatus(200, PUBLIC_OR_AUTH),
       },
       setup: ['auth'],
       async run(ctx) {

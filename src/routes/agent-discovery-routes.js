@@ -22,25 +22,72 @@ const KNOWLEDGE_TOPICS = {
   'onboarding': 'agent_onboarding_guide.md',
 };
 
-// Skill file → docs/skills/ mapping
-const SKILL_TOPICS = {
+// Canonical public skill files
+const CANONICAL_SKILL_TOPICS = {
+  'discovery': 'discovery.txt',
   'identity': 'identity.txt',
   'wallet': 'wallet.txt',
   'analysis': 'analysis.txt',
   'social': 'social.txt',
   'channels': 'channels.txt',
-  'channels-signed': 'channels-signed.txt',
   'market': 'market.txt',
+  'capital': 'capital.txt',
+  'analytics': 'analytics.txt',
+};
+
+// Compatibility aliases that should stay reachable without becoming new primary docs
+const SKILL_ALIASES = {
+  'analytics-catalog-and-quote': 'analytics-catalog-and-quote.txt',
+  'analytics-execute-and-history': 'analytics-execute-and-history.txt',
+  'capital-balance-and-activity': 'capital-balance-and-activity.txt',
+  'capital-deposit-and-status': 'capital-deposit-and-status.txt',
+  'capital-withdraw-and-help': 'capital-withdraw-and-help.txt',
+  'channels-audit-and-monitoring': 'channels-audit-and-monitoring.txt',
+  'channels-signed-channel-lifecycle': 'channels-signed-channel-lifecycle.txt',
+  'channels-signed': 'channels-signed.txt',
+  'social-messaging': 'social-messaging.txt',
+  'social-alliances': 'social-alliances.txt',
+  'social-leaderboard-and-tournaments': 'social-leaderboard-and-tournaments.txt',
+  'market-public-market-read': 'market-public-market-read.txt',
+  'market-teaching-surfaces': 'market-teaching-surfaces.txt',
   'market-open-flow': 'market-open-flow.txt',
   'market-close': 'market-close.txt',
+  'market-close-revenue-performance': 'market-close.txt',
   'market-swap': 'market-swap-ecash-and-rebalance.txt',
   'swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
   'market-swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
-  'capital': 'capital.txt',
-  'analytics': 'analytics.txt',
-  'discovery': 'discovery.txt',
   'signing-secp256k1': 'signing-secp256k1.txt',
 };
+
+const SKILL_SECTION_ALIASES = {};
+
+const SKILL_TOPICS = {
+  ...CANONICAL_SKILL_TOPICS,
+  ...SKILL_ALIASES,
+};
+
+function extractMarkdownSection(content, sectionName) {
+  const heading = `## ${sectionName}`;
+  const start = content.indexOf(heading);
+  if (start < 0) return content;
+  const rest = content.slice(start);
+  const next = rest.indexOf('\n## ', heading.length);
+  return next < 0 ? rest.trim() : rest.slice(0, next).trim();
+}
+
+async function loadSkillContent(name) {
+  const aliasSection = SKILL_SECTION_ALIASES[name];
+  const filename = aliasSection?.canonical || SKILL_TOPICS[name];
+  const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
+  const fileStat = await fsStat(skillPath);
+  const content = await readFile(skillPath, 'utf-8');
+  return {
+    filename,
+    fileStat,
+    content: aliasSection ? extractMarkdownSection(content, aliasSection.section) : content,
+    section: aliasSection?.section || null,
+  };
+}
 
 // Strategy archetypes
 const STRATEGIES = [
@@ -362,12 +409,12 @@ export function agentDiscoveryRoutes(daemon) {
 
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     res.json({
-      skills: Object.keys(SKILL_TOPICS).map(name => ({
+      skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({
         name,
         url: `/api/v1/skills/${name}`,
-        file: `/docs/skills/${SKILL_TOPICS[name]}`,
+        file: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
       })),
-      count: Object.keys(SKILL_TOPICS).length,
+      count: Object.keys(CANONICAL_SKILL_TOPICS).length,
       note: 'Each skill file is self-contained. Read the one relevant to what you are about to do.',
     });
   });
@@ -383,18 +430,17 @@ export function agentDiscoveryRoutes(daemon) {
     if (!filename) return next();
 
     try {
-      const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
-      const fileStat = await fsStat(skillPath);
-      const etag = `"${fileStat.mtimeMs}"`;
+      const loaded = await loadSkillContent(name);
+      const etag = `"${loaded.fileStat.mtimeMs}"`;
       res.set('ETag', etag);
       if (req.get('If-None-Match') === etag) return res.status(304).end();
 
-      const content = await readFile(skillPath, 'utf-8');
       res.json({
         skill: name,
-        filename,
-        size_bytes: Buffer.byteLength(content),
-        content,
+        filename: loaded.filename,
+        section: loaded.section,
+        size_bytes: Buffer.byteLength(loaded.content),
+        content: loaded.content,
       });
     } catch (err) {
       return err500Internal(res, 'loading skill file');
@@ -411,20 +457,17 @@ export function agentDiscoveryRoutes(daemon) {
     }
 
     try {
-      const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
-
-      // ETag caching based on file modification time
-      const fileStat = await fsStat(skillPath);
-      const etag = `"${fileStat.mtimeMs}"`;
+      const loaded = await loadSkillContent(name);
+      const etag = `"${loaded.fileStat.mtimeMs}"`;
       res.set('ETag', etag);
       if (req.get('If-None-Match') === etag) return res.status(304).end();
 
-      const content = await readFile(skillPath, 'utf-8');
       res.json({
         skill: name,
-        filename,
-        size_bytes: Buffer.byteLength(content),
-        content,
+        filename: loaded.filename,
+        section: loaded.section,
+        size_bytes: Buffer.byteLength(loaded.content),
+        content: loaded.content,
       });
     } catch (err) {
       return err500Internal(res, 'loading skill file');
