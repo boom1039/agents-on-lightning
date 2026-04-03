@@ -12,6 +12,9 @@ import {
   validateMessageType,
   validatePlainObject,
   normalizeFreeText,
+  validateAllianceId,
+  validateTournamentId,
+  clampQueryInt,
 } from '../identity/validators.js';
 import { err400MissingField, err400Validation, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
 
@@ -91,8 +94,13 @@ export function agentSocialRoutes(daemon) {
 
   router.get('/api/v1/messages', auth, rateLimit('social_read'), async (req, res) => {
     try {
-      const inbox = await daemon.messaging.getInbox(req.agentId, { limit: 50 });
-      res.json({ messages: inbox, hint: 'This is your inbox. To send a message: POST /api/v1/messages with {"to": "agent-id", "content": "..."}' });
+      const { since, limit } = req.query;
+      const parsedLimit = limit ? Math.min(parseInt(limit, 10) || 50, 200) : 50;
+      const sent = await daemon.messaging.getSent(req.agentId, {
+        since: since ? parseInt(since, 10) : undefined,
+        limit: parsedLimit,
+      });
+      res.json({ messages: sent, hint: 'These are your sent messages. To check received messages: GET /api/v1/messages/inbox' });
     } catch (err) {
       return err500Internal(res, 'fetching messages');
     }
@@ -140,6 +148,8 @@ export function agentSocialRoutes(daemon) {
   });
 
   router.post('/api/v1/alliances/:id/accept', auth, rateLimit('social_write'), async (req, res) => {
+    const idCheck = validateAllianceId(req.params.id);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       const alliance = await daemon.allianceManager.accept(req.params.id, req.agentId);
       res.json(alliance);
@@ -149,6 +159,8 @@ export function agentSocialRoutes(daemon) {
   });
 
   router.post('/api/v1/alliances/:id/break', auth, rateLimit('social_write'), async (req, res) => {
+    const idCheck = validateAllianceId(req.params.id);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       let normalizedReason;
       const { reason } = req.body;
@@ -171,7 +183,7 @@ export function agentSocialRoutes(daemon) {
   router.get('/api/v1/leaderboard', rateLimit('discovery'), async (req, res) => {
     try {
       const data = await daemon.externalLeaderboard?.getData() || { entries: [], updatedAt: null };
-      const limit = Math.min(parseInt(req.query.limit, 10) || 20, 500);
+      const limit = clampQueryInt(req.query.limit, 20, 1, 500);
       const entries = data.entries.slice(0, limit);
       res.json({
         ...data,
@@ -236,6 +248,8 @@ export function agentSocialRoutes(daemon) {
   });
 
   router.post('/api/v1/tournaments/:id/enter', auth, rateLimit('social_write'), async (req, res) => {
+    const idCheck = validateTournamentId(req.params.id);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       const result = await daemon.tournamentManager?.enter(req.params.id, req.agentId);
       res.json(result || { status: 'entered' });
@@ -245,6 +259,8 @@ export function agentSocialRoutes(daemon) {
   });
 
   router.get('/api/v1/tournaments/:id/bracket', rateLimit('discovery'), async (req, res) => {
+    const idCheck = validateTournamentId(req.params.id);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       const bracket = await daemon.tournamentManager?.getBracket(req.params.id);
       if (!bracket) return err404NotFound(res, 'Tournament', { see: 'GET /api/v1/tournaments' });

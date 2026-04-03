@@ -346,13 +346,13 @@ test('market owner-only resources return 404 to non-owners', async () => {
     },
     channelAssignments: {
       getAssignment(chanId) {
-        if (chanId === '123') return { agent_id: 'owner-agent' };
+        if (chanId === '1234567890') return { agent_id: 'owner-agent' };
         return null;
       },
     },
     revenueTracker: {
       getChannelRevenue() {
-        return { chan_id: '123', total_fees_sats: 42 };
+        return { chan_id: '1234567890', total_fees_sats: 42 };
       },
     },
     swapProvider: {
@@ -362,16 +362,16 @@ test('market owner-only resources return 404 to non-owners', async () => {
     },
     ecashChannelFunder: {
       getFlowStatus() {
-        return { flow_id: 'flow-1', agent_id: 'owner-agent', status: 'complete' };
+        return { flow_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', agent_id: 'owner-agent', status: 'complete' };
       },
     },
   }));
 
   await withServer(app, async (baseUrl) => {
     const cases = [
-      '/api/v1/market/revenue/123',
+      '/api/v1/market/revenue/1234567890',
       '/api/v1/market/swap/status/swap-1',
-      '/api/v1/market/fund-from-ecash/flow-1',
+      '/api/v1/market/fund-from-ecash/a1b2c3d4-e5f6-7890-abcd-ef1234567890',
     ];
 
     for (const path of cases) {
@@ -381,7 +381,7 @@ test('market owner-only resources return 404 to non-owners', async () => {
       assert.equal(denied.status, 404, path);
     }
 
-    const allowed = await fetch(`${baseUrl}/api/v1/market/swap/status/swap-1`, {
+    const allowed = await fetch(`${baseUrl}/api/v1/market/revenue/1234567890`, {
       headers: { Authorization: 'Bearer lb-agent-owner' },
     });
     assert.equal(allowed.status, 200);
@@ -2012,9 +2012,8 @@ test('channels instruct enforces an agent-wide cap across different channel ids'
   });
 });
 
-test('fund-from-ecash enforces the same cooldown guardrails as channel open', async () => {
+test('fund-from-ecash returns 503 while endpoint is disabled', async () => {
   await withCleanRateLimits(async () => {
-    let fundCalls = 0;
     const app = baseApp();
     app.use(channelMarketRoutes({
       agentRegistry: {
@@ -2024,73 +2023,9 @@ test('fund-from-ecash enforces the same cooldown guardrails as channel open', as
         },
       },
       ecashChannelFunder: {
-        getPendingForAgent() {
-          return [];
-        },
+        getPendingForAgent() { return []; },
         async fundChannelFromEcash() {
-          fundCalls++;
           return { success: true, status: 'pending_open', flow_id: 'flow-1' };
-        },
-      },
-    }));
-
-    await withServer(app, async (baseUrl) => {
-      const headers = {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer lb-agent-owner',
-        'Idempotency-Key': 'fund-1',
-      };
-      const body = JSON.stringify({
-        instruction: {
-          params: {
-            local_funding_amount_sats: 50_000,
-          },
-        },
-        signature: 'sig',
-      });
-
-      const first = await fetch(`${baseUrl}/api/v1/market/fund-from-ecash`, { method: 'POST', headers, body });
-      assert.equal(first.status, 200);
-
-      const second = await fetch(`${baseUrl}/api/v1/market/fund-from-ecash`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer lb-agent-owner',
-          'Idempotency-Key': 'fund-2',
-        },
-        body,
-      });
-      const json = await second.json();
-
-      assert.equal(second.status, 429);
-      assertCompactHelpfulError(json, {
-        error: 'cooldown_active',
-        hintIncludes: /funding another channel from ecash/i,
-        messageIncludes: /still cooling down/i,
-      });
-    });
-
-    assert.equal(fundCalls, 1);
-  });
-});
-
-test('fund-from-ecash does not auto-review larger agent-funded amounts', async () => {
-  await withCleanRateLimits(async () => {
-    const app = baseApp();
-    app.use(channelMarketRoutes({
-      agentRegistry: {
-        getByApiKey(apiKey) {
-          if (apiKey === 'lb-agent-owner') return { id: 'owner-agent' };
-          return null;
-        },
-      },
-      ecashChannelFunder: {
-        getPendingForAgent() {
-          return [];
-        },
-        async fundChannelFromEcash() {
-          return { success: true, status: 'pending_open', flow_id: 'flow-large' };
         },
       },
     }));
@@ -2103,18 +2038,13 @@ test('fund-from-ecash does not auto-review larger agent-funded amounts', async (
           Authorization: 'Bearer lb-agent-owner',
         },
         body: JSON.stringify({
-          instruction: {
-            params: {
-              local_funding_amount_sats: 120_000,
-            },
-          },
+          instruction: { params: { local_funding_amount_sats: 50_000 } },
           signature: 'sig',
         }),
       });
       const json = await response.json();
-
-      assert.equal(response.status, 200);
-      assert.equal(json.flow_id, 'flow-large');
+      assert.equal(response.status, 503);
+      assert.equal(json.error, 'ecash_funding_disabled');
     });
   });
 });

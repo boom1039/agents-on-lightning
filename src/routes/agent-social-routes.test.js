@@ -170,7 +170,7 @@ test('alliance proposal route whitelists term fields and normalizes free text', 
 test('alliance break route normalizes reason before passing downstream', async () => {
   const harness = await createHarness();
   try {
-    const response = await harness.request('POST', '/api/v1/alliances/alliance-1/break', {
+    const response = await harness.request('POST', '/api/v1/alliances/alliance-00000001/break', {
       reason: 'Done\tfor now\u0007\r\nSee you later',
     });
 

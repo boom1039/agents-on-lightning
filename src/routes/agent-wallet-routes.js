@@ -85,6 +85,9 @@ export function agentWalletRoutes(daemon) {
       if (invoice.length > 2000) {
         return err400Validation(res, 'Invoice too long (max 2000 chars).');
       }
+      if (!/^ln(bc|tb|tbs|bcrt)1[a-z0-9]+$/i.test(invoice)) {
+        return err400Validation(res, 'Invalid BOLT11 invoice format.');
+      }
 
       const result = await daemon.agentCashuWallet.meltQuote(req.agentId, invoice);
       res.json(result);
@@ -131,6 +134,9 @@ export function agentWalletRoutes(daemon) {
         return err400MissingField(res, 'token', {
           hint: 'Provide a Cashu ecash token string (from POST /api/v1/wallet/send).',
         });
+      }
+      if (typeof token !== 'string' || token.length > 10_000) {
+        return err400Validation(res, 'Token must be a string under 10,000 characters.');
       }
 
       const result = await daemon.agentCashuWallet.receiveEcash(req.agentId, token);

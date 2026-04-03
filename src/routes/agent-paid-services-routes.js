@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
-import { validateBitcoinAddress } from '../identity/validators.js';
+import { validateBitcoinAddress, clampQueryInt } from '../identity/validators.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
 import { runIdempotentRoute } from '../identity/idempotency-route.js';
 import { err503Service, err400MissingField, err400Validation, err500Internal, agentError } from '../identity/agent-friendly-errors.js';
@@ -82,6 +82,9 @@ export function agentPaidServicesRoutes(daemon) {
           see: 'GET /api/v1/analytics/catalog',
         });
       }
+      if (!daemon.analyticsGateway.isKnownQuery(query_id)) {
+        return err400Validation(res, `Unknown query_id: ${query_id}`, { hint: 'GET /api/v1/analytics/catalog' });
+      }
       const quote = daemon.analyticsGateway.getQuote(query_id, params || {});
       res.json(quote);
     } catch (err) {
@@ -118,6 +121,16 @@ export function agentPaidServicesRoutes(daemon) {
               message: 'Missing required field: query_id',
               hint: 'Get available query IDs from GET /api/v1/analytics/catalog.',
               see: 'GET /api/v1/analytics/catalog',
+            },
+          };
+        }
+        if (!daemon.analyticsGateway.isKnownQuery(query_id)) {
+          return {
+            statusCode: 400,
+            body: {
+              error: 'validation_error',
+              message: `Unknown query_id: ${query_id}`,
+              hint: 'GET /api/v1/analytics/catalog',
             },
           };
         }
@@ -204,8 +217,8 @@ export function agentPaidServicesRoutes(daemon) {
       if (!daemon.capitalLedger) {
         return err503Service(res, 'Capital ledger');
       }
-      const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 50), 500);
-      const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+      const limit = clampQueryInt(req.query.limit, 50, 1, 500);
+      const offset = clampQueryInt(req.query.offset, 0, 0, 100_000);
       const { entries, total } = await daemon.capitalLedger.readActivity({
         agentId: req.agentId,
         limit,

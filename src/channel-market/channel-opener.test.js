@@ -16,6 +16,22 @@ const PEER_PUBKEY = '02' + 'a'.repeat(64);
 const ORIGINAL_ALLOWLIST = process.env.CHANNEL_OPEN_PEER_ALLOWLIST;
 const ORIGINAL_REQUIRE_ALLOWLIST = process.env.CHANNEL_OPEN_REQUIRE_PEER_ALLOWLIST;
 
+// Helper: build a getNodeInfo response with peer quality fields for tests that
+// need to pass the peer quality checks (num_channels >= 3, recent last_update).
+function healthyPeerNode(overrides = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    num_channels: 10,
+    node: {
+      alias: 'test-peer',
+      addresses: [{ addr: '34.117.59.81:9735' }],
+      last_update: now - 600, // 10 minutes ago
+      num_channels: 10,
+      ...overrides,
+    },
+  };
+}
+
 function makeSignedPayload(privateKey, params = {}) {
   const instruction = {
     action: 'channel_open',
@@ -85,12 +101,7 @@ test('ChannelOpener rejects peers above the force-close safety limit', async () 
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'force-close-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'force-close-peer' }),
       closedChannels: async () => ({
         channels: [
           { remote_pubkey: PEER_PUBKEY, close_type: 'REMOTE_FORCE_CLOSE' },
@@ -112,12 +123,7 @@ test('ChannelOpener fails closed when peer force-close history cannot be checked
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'history-unavailable-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'history-unavailable-peer' }),
       closedChannels: async () => {
         throw new Error('lnd unavailable');
       },
@@ -138,12 +144,7 @@ test('ChannelOpener requires an approved peer allowlist for otherwise-valid open
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'public-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'public-peer' }),
     }),
   });
 
@@ -162,12 +163,7 @@ test('ChannelOpener allows an approved peer when the allowlist contains the peer
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'approved-public-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'approved-public-peer' }),
     }),
   });
 
@@ -182,12 +178,7 @@ test('ChannelOpener preview includes requested startup policy', async () => {
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'approved-public-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'approved-public-peer' }),
     }),
   });
 
@@ -216,12 +207,7 @@ test('ChannelOpener passes open-time startup policy fields into LND openChannel'
   const opener = makeOpener({
     pubHex,
     nodeManager: mockNodeManager({
-      getNodeInfo: async () => ({
-        node: {
-          alias: 'approved-public-peer',
-          addresses: [{ addr: '34.117.59.81:9735' }],
-        },
-      }),
+      getNodeInfo: async () => healthyPeerNode({ alias: 'approved-public-peer' }),
       openChannel: async (_pubKey, _amount, _pushSat, opts) => {
         openCalls.push(opts);
         return { funding_txid_str: 'f'.repeat(64), output_index: 0 };
@@ -252,12 +238,7 @@ test('ChannelOpener applies activation-time startup policy after the channel bec
   const { privateKey, pubHex } = generateTestKeypair();
   const updateCalls = [];
   const nodeManager = mockNodeManager({
-    getNodeInfo: async () => ({
-      node: {
-        alias: 'approved-public-peer',
-        addresses: [{ addr: '34.117.59.81:9735' }],
-      },
-    }),
+    getNodeInfo: async () => healthyPeerNode({ alias: 'approved-public-peer' }),
     openChannel: async () => ({ funding_txid_str: 'e'.repeat(64), output_index: 1 }),
     connectPeer: async () => ({}),
     listChannels: async () => ({
@@ -307,4 +288,80 @@ test('ChannelOpener applies activation-time startup policy after the channel bec
     90000000,
     3000,
   ]);
+});
+
+test('ChannelOpener rejects peers with too few channels', async () => {
+  process.env.CHANNEL_OPEN_PEER_ALLOWLIST = PEER_PUBKEY;
+  const { privateKey, pubHex } = generateTestKeypair();
+  const now = Math.floor(Date.now() / 1000);
+  const opener = makeOpener({
+    pubHex,
+    nodeManager: mockNodeManager({
+      getNodeInfo: async () => ({
+        num_channels: 1,
+        node: {
+          alias: 'tiny-peer',
+          addresses: [{ addr: '34.117.59.81:9735' }],
+          last_update: now - 300,
+          num_channels: 1,
+        },
+      }),
+    }),
+  });
+
+  const result = await opener._validate('agent-01', makeSignedPayload(privateKey));
+  assert.equal(result.success, false);
+  assert.equal(result.failed_at, 'peer_safe_for_open');
+  assert.equal(result.status, 400);
+  assert.match(result.error, /1 channel\(s\).*minimum required is 3/i);
+});
+
+test('ChannelOpener rejects peers with stale graph updates', async () => {
+  process.env.CHANNEL_OPEN_PEER_ALLOWLIST = PEER_PUBKEY;
+  const { privateKey, pubHex } = generateTestKeypair();
+  const now = Math.floor(Date.now() / 1000);
+  const opener = makeOpener({
+    pubHex,
+    nodeManager: mockNodeManager({
+      getNodeInfo: async () => ({
+        num_channels: 10,
+        node: {
+          alias: 'stale-peer',
+          addresses: [{ addr: '34.117.59.81:9735' }],
+          last_update: now - 100_000, // ~27.8 hours ago
+          num_channels: 10,
+        },
+      }),
+    }),
+  });
+
+  const result = await opener._validate('agent-01', makeSignedPayload(privateKey));
+  assert.equal(result.success, false);
+  assert.equal(result.failed_at, 'peer_safe_for_open');
+  assert.equal(result.status, 400);
+  assert.match(result.error, /last seen.*hours ago/i);
+});
+
+test('ChannelOpener allows configuring minPeerChannels to 0 to disable channel count check', async () => {
+  process.env.CHANNEL_OPEN_PEER_ALLOWLIST = PEER_PUBKEY;
+  const { privateKey, pubHex } = generateTestKeypair();
+  const now = Math.floor(Date.now() / 1000);
+  const opener = makeOpener({
+    pubHex,
+    nodeManager: mockNodeManager({
+      getNodeInfo: async () => ({
+        num_channels: 0,
+        node: {
+          alias: 'new-peer',
+          addresses: [{ addr: '34.117.59.81:9735' }],
+          last_update: now - 300,
+          num_channels: 0,
+        },
+      }),
+    }),
+  });
+  opener.config.minPeerChannels = 0;
+
+  const result = await opener._validate('agent-01', makeSignedPayload(privateKey));
+  assert.equal(result.success, true);
 });

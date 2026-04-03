@@ -169,7 +169,7 @@ describe('CapitalLedger — unit tests', () => {
   it('creditRevenue increases available and total_revenue_credited', async () => {
     await env.ledger.recordDeposit('agent-01', 500_000, 'tx:dep1');
     await env.ledger.confirmDeposit('agent-01', 500_000, 'tx:dep1');
-    const bal = await env.ledger.creditRevenue('agent-01', 15_000, 'fee-rev:2026-03');
+    const bal = await env.ledger.creditRevenue('agent-01', 15_000, 'forward:1711929600:123456');
     assert.equal(bal.available, 515_000);
     assert.equal(bal.total_revenue_credited, 15_000);
     assertInvariantHolds(bal);
@@ -234,7 +234,7 @@ describe('CapitalLedger — invariant after complex sequences', () => {
   it('revenue credit + operations maintain invariant', async () => {
     await env.ledger.recordDeposit('agent-01', 500_000, 'tx:dep1');
     await env.ledger.confirmDeposit('agent-01', 500_000, 'tx:dep1');
-    let bal = await env.ledger.creditRevenue('agent-01', 5_000, 'rev:1');
+    let bal = await env.ledger.creditRevenue('agent-01', 5_000, 'forward:1711929600:111111');
     assertInvariantHolds(bal);
     assert.equal(bal.total_revenue_credited, 5_000);
     assert.equal(bal.available, 505_000);
@@ -631,7 +631,7 @@ describe('CapitalLedger — corruption detection', () => {
 
     // Any write operation should detect the broken invariant
     await assert.rejects(
-      () => env.ledger.creditRevenue('agent-broken', 1, 'ref:test'),
+      () => env.ledger.creditRevenue('agent-broken', 1, 'forward:1711929600:999999'),
       /INVARIANT VIOLATION/,
     );
   });
@@ -652,7 +652,7 @@ describe('CapitalLedger — activity log completeness', () => {
     await env.ledger.lockForChannel('agent-01', 200_000, 'chan:a:0');    // 3
     await env.ledger.initiateClose('agent-01', 150_000, 200_000, 'chan:a:0'); // 4 + 5 (routing_pnl)
     await env.ledger.settleClose('agent-01', 150_000, 'tx:settle');      // 6
-    await env.ledger.creditRevenue('agent-01', 10_000, 'rev:1');         // 7
+    await env.ledger.creditRevenue('agent-01', 10_000, 'forward:1711929600:222222'); // 7
     await env.ledger.withdraw('agent-01', 100_000, 'bc1qwd');            // 8
 
     const { entries, total } = await env.ledger.readActivity({ agentId: 'agent-01' });
@@ -674,7 +674,7 @@ describe('CapitalLedger — activity log completeness', () => {
     await env.ledger.recordDeposit('agent-01', 1_000_000, 'tx:dep1');
     await env.ledger.confirmDeposit('agent-01', 1_000_000, 'tx:dep1');
     await env.ledger.lockForChannel('agent-01', 400_000, 'chan:a:0');
-    await env.ledger.creditRevenue('agent-01', 5_000, 'rev:1');
+    await env.ledger.creditRevenue('agent-01', 5_000, 'forward:1711929600:333333');
     await env.ledger.withdraw('agent-01', 100_000, 'bc1qwd');
 
     // Read balance from ledger
@@ -956,9 +956,9 @@ describe('CapitalLedger — idempotency', () => {
   it('creditRevenue same reference twice → second call throws', async () => {
     await env.ledger.recordDeposit('agent-01', 100_000, 'tx:dep1');
     await env.ledger.confirmDeposit('agent-01', 100_000, 'tx:dep1');
-    await env.ledger.creditRevenue('agent-01', 5_000, 'rev:dup1');
+    await env.ledger.creditRevenue('agent-01', 5_000, 'forward:1711929600:444444');
     await assert.rejects(
-      () => env.ledger.creditRevenue('agent-01', 5_000, 'rev:dup1'),
+      () => env.ledger.creditRevenue('agent-01', 5_000, 'forward:1711929600:444444'),
       /Duplicate operation/,
     );
     const bal = await env.ledger.getBalance('agent-01');

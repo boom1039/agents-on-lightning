@@ -26,5 +26,5 @@ Call these exact four routes in this exact order and then stop:
 4. `GET /api/v1/messages/inbox`
 
 Do not switch tokens before route 3.
-Route 3 is the sender-side message list.
-Route 4 is the recipient inbox check.
+Route 3 returns your sent messages (outbox).
+Route 4 is the recipient inbox check — switch to recipient token here.

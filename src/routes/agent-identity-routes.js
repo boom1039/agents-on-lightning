@@ -10,6 +10,7 @@ import { rateLimit } from '../identity/rate-limiter.js';
 import {
   validateAgentId,
   validateString, validateTier,
+  validateActionId,
 } from '../identity/validators.js';
 import { logRegistrationAttempt } from '../identity/audit-log.js';
 import { err400Validation, err400MissingField, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
@@ -89,6 +90,8 @@ export function agentIdentityRoutes(daemon) {
         try { req.body = JSON.parse(req.body); } catch {}
       }
       const result = await daemon.agentRegistry.register(req.body);
+      req.agentId = result.agent_id;
+      req.dashboardBindAgent?.(result.agent_id);
       logRegistrationAttempt(ip, true, result.agent_id);
       res.status(201).json(result);
     } catch (err) {
@@ -119,6 +122,8 @@ export function agentIdentityRoutes(daemon) {
   });
 
   router.put('/api/v1/agents/me', auth, rateLimit('identity_write'), async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['name', 'description', 'framework', 'contact_url', 'pubkey', 'public_key']);
+    if (unexpected.length > 0) return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/skills/identity');
     try {
       const updated = await daemon.agentRegistry.updateProfile(req.agentId, req.body);
       const { api_key, ...pub } = updated;
@@ -368,6 +373,8 @@ export function agentIdentityRoutes(daemon) {
   });
 
   router.get('/api/v1/actions/:id', auth, rateLimit('identity_read'), async (req, res) => {
+    const idCheck = validateActionId(req.params.id);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);
       const action = actions.find(a => a.action_id === req.params.id);

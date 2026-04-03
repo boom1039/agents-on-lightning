@@ -19,9 +19,100 @@ import {
   CashuMint,
   CashuWallet,
   getEncodedToken,
+  getDecodedToken,
 } from '@cashu/cashu-ts';
 import { acquire } from '../identity/mutex.js';
 import { logWalletOperation } from '../identity/audit-log.js';
+
+// ---------------------------------------------------------------------------
+// Lightweight BOLT11 invoice validation
+// ---------------------------------------------------------------------------
+
+const BECH32_ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_LOOKUP = new Map(BECH32_ALPHABET.split('').map((c, i) => [c, i]));
+
+/**
+ * Validate a BOLT11 invoice format and check expiry.
+ * Protects against the LNbits payment-hash-reuse exploit by rejecting
+ * expired invoices before they reach the Cashu mint.
+ *
+ * @param {string} invoice - BOLT11-encoded payment request
+ * @returns {{ valid: boolean, error?: string }}
+ */
+export function validateBolt11Invoice(invoice) {
+  if (!invoice || typeof invoice !== 'string') {
+    return { valid: false, error: 'invoice (BOLT11) is required' };
+  }
+
+  const lower = invoice.toLowerCase().trim();
+
+  // Must start with a Lightning Network HRP
+  if (!/^ln(bc|tb|bcrt)/.test(lower)) {
+    return { valid: false, error: 'Invoice must start with lnbc, lntb, or lnbcrt' };
+  }
+
+  // Find the bech32 separator (last '1' in the string)
+  const sepIdx = lower.lastIndexOf('1');
+  if (sepIdx < 4 || sepIdx >= lower.length - 6) {
+    return { valid: false, error: 'Invalid BOLT11 format: missing bech32 separator' };
+  }
+
+  const dataStr = lower.slice(sepIdx + 1);
+
+  // Validate all characters are in the bech32 alphabet
+  for (let i = 0; i < dataStr.length; i++) {
+    if (!BECH32_LOOKUP.has(dataStr[i])) {
+      return { valid: false, error: 'Invalid BOLT11 format: bad bech32 character' };
+    }
+  }
+
+  // Strip the 6-character bech32 checksum
+  if (dataStr.length < 13) {
+    return { valid: false, error: 'Invalid BOLT11 format: data section too short' };
+  }
+  const payload = dataStr.slice(0, -6);
+
+  // First 7 groups of 5 bits = 35-bit timestamp
+  if (payload.length < 7) {
+    return { valid: false, error: 'Invalid BOLT11 format: missing timestamp' };
+  }
+  let timestamp = 0;
+  for (let i = 0; i < 7; i++) {
+    timestamp = timestamp * 32 + BECH32_LOOKUP.get(payload[i]);
+  }
+
+  // Walk tagged fields to find expiry (tag 'x' = bech32 value 6)
+  // Each tag: 1 char tag + 2 chars data-length (big-endian, 10 bits) + data
+  let expiry = 3600; // BOLT11 default: 1 hour
+  let pos = 7;
+  while (pos + 3 <= payload.length) {
+    const tag = BECH32_LOOKUP.get(payload[pos]);
+    const dataLen = BECH32_LOOKUP.get(payload[pos + 1]) * 32 + BECH32_LOOKUP.get(payload[pos + 2]);
+    pos += 3;
+    if (pos + dataLen > payload.length) break;
+
+    if (tag === 6) { // 'x' tag = expiry
+      let val = 0;
+      for (let i = 0; i < dataLen; i++) {
+        val = val * 32 + BECH32_LOOKUP.get(payload[pos + i]);
+      }
+      expiry = val;
+      break;
+    }
+    pos += dataLen;
+  }
+
+  const expiresAt = timestamp + expiry;
+  const now = Math.floor(Date.now() / 1000);
+  if (expiresAt <= now) {
+    return {
+      valid: false,
+      error: `Invoice expired ${now - expiresAt} seconds ago (at ${new Date(expiresAt * 1000).toISOString()}). Request a fresh invoice.`,
+    };
+  }
+
+  return { valid: true };
+}
 
 export class AgentCashuWalletOperations {
   constructor({ proofStore, ledger, mintUrl, mintPort, seedManager }) {
@@ -180,6 +271,14 @@ export class AgentCashuWalletOperations {
     if (!invoice || typeof invoice !== 'string') {
       throw new Error('invoice (BOLT11) is required');
     }
+
+    // Validate BOLT11 format and reject expired invoices before hitting the mint.
+    // Prevents payment-hash-reuse exploits (e.g. LNbits CVE) by catching stale invoices early.
+    const bolt11Check = validateBolt11Invoice(invoice);
+    if (!bolt11Check.valid) {
+      throw new Error(bolt11Check.error);
+    }
+
     const wallet = await this._getAgentWallet(agentId);
     const quote = await wallet.createMeltQuote(invoice);
 
@@ -331,6 +430,18 @@ export class AgentCashuWalletOperations {
     if (!token || typeof token !== 'string') {
       throw new Error('token (Cashu ecash token) is required');
     }
+
+    // Validate mint URL to prevent keyset ID collision attacks (conduition.io disclosure).
+    // Reject tokens minted by unknown mints before passing them to wallet.receive().
+    const decoded = getDecodedToken(token);
+    const tokenMint = decoded.mint?.replace(/\/+$/, '');
+    const platformMint = this.mintUrl.replace(/\/+$/, '');
+    if (tokenMint !== platformMint) {
+      throw new Error(
+        `Rejected: token was minted by ${tokenMint || '(unknown)'}, not by the platform mint. Only tokens from the platform mint are accepted.`
+      );
+    }
+
     const wallet = await this._getAgentWallet(agentId);
     const unlock = await acquire(`cashu:${agentId}`);
     try {

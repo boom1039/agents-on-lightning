@@ -141,6 +141,15 @@ export class AnalyticsGateway {
   // -------------------------------------------------------------------------
 
   /**
+   * Check whether a query_id exists in the catalog.
+   * @param {string} queryId
+   * @returns {boolean}
+   */
+  isKnownQuery(queryId) {
+    return _catalogIndex.has(queryId);
+  }
+
+  /**
    * Return the full query catalog with descriptions, parameters, and pricing.
    */
   getCatalog() {

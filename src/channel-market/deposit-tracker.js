@@ -212,7 +212,8 @@ export class DepositTracker {
         if (!activeAddresses.has(addr)) continue;
 
         const entry = this._state[addr];
-        const amountSats = Math.abs(parseInt(output.amount, 10));
+        const amountSats = parseInt(output.amount, 10);
+        if (!Number.isFinite(amountSats) || amountSats <= 0) continue;
 
         // --- Phase 1: Detect new deposit ---
         if (entry.status === 'watching' && !entry.txid) {
@@ -326,6 +327,20 @@ export class DepositTracker {
     if (stateChanged) {
       await this._persist();
     }
+
+    // --- Periodic aggregate solvency check ---
+    try {
+      const solvency = await this._capitalLedger.checkAggregateBalance(client);
+      if (!solvency.is_solvent) {
+        await this._auditLog.append({
+          domain: 'capital',
+          type: 'solvency_warning',
+          total_committed_sats: solvency.total_committed_sats,
+          on_chain_balance_sats: solvency.on_chain_balance_sats,
+          shortfall_sats: solvency.shortfall_sats,
+        });
+      }
+    } catch { /* non-fatal — solvency check is advisory */ }
   }
 
   // ---------------------------------------------------------------------------

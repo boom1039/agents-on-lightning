@@ -9,7 +9,7 @@ import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit, resetCounters } from '../identity/rate-limiter.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
 import { runIdempotentRoute } from '../identity/idempotency-route.js';
-import { validateChannelIdOrPoint } from '../identity/validators.js';
+import { validateChannelIdOrPoint, clampQueryInt } from '../identity/validators.js';
 import { rejectUnauthorizedOperatorRoute, rejectUnauthorizedTestRoute } from '../identity/request-security.js';
 import { err400Validation } from '../identity/agent-friendly-errors.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
@@ -316,7 +316,7 @@ export function channelAccountabilityRoutes(daemon) {
   // --- Agent: instruction history ---
   router.get('/api/v1/channels/instructions', auth, rateLimit('channel_read'), async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+      const limit = clampQueryInt(req.query.limit, 100, 1, 1000);
       const instructions = await daemon.channelExecutor.getInstructions(req.agentId, limit);
       res.json({ instructions });
     } catch (err) {
@@ -328,8 +328,8 @@ export function channelAccountabilityRoutes(daemon) {
   // --- Public: audit chain ---
   router.get('/api/v1/channels/audit', rateLimit('channel_read'), async (_req, res) => {
     try {
-      const limit = Math.min(parseInt(_req.query.limit, 10) || 100, 1000);
-      const since = _req.query.since ? parseInt(_req.query.since, 10) : undefined;
+      const limit = clampQueryInt(_req.query.limit, 100, 1, 1000);
+      const since = _req.query.since ? clampQueryInt(_req.query.since, 0, 0, Number.MAX_SAFE_INTEGER) : undefined;
       const entries = await daemon.channelAuditLog.readAll({ since, limit });
       res.json({
         entries: entries.map(summarizeAuditEntry).filter(Boolean),
@@ -347,7 +347,7 @@ export function channelAccountabilityRoutes(daemon) {
     const chanCheck = validateChannelIdOrPoint(req.params.chanId);
     if (!chanCheck.valid) return res.status(400).json({ error: chanCheck.reason });
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+      const limit = clampQueryInt(req.query.limit, 100, 1, 1000);
       const entries = await daemon.channelAuditLog.readByChannel(req.params.chanId, limit);
       res.json({
         chan_id: req.params.chanId,
@@ -388,7 +388,7 @@ export function channelAccountabilityRoutes(daemon) {
   // --- Public: violations ---
   router.get('/api/v1/channels/violations', rateLimit('channel_read'), async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+      const limit = clampQueryInt(req.query.limit, 100, 1, 1000);
       const violations = await daemon.channelAuditLog.readByType('violation_detected', limit);
       res.json({
         violations: violations.map(summarizeAuditEntry).filter(Boolean),

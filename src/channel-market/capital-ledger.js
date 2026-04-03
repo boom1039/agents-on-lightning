@@ -745,6 +745,9 @@ export class CapitalLedger {
     if (!reference || typeof reference !== 'string') {
       throw new Error('creditRevenue requires a reference string');
     }
+    if (!/^forward:\d+:\d+$/.test(reference)) {
+      throw new Error(`creditRevenue reference must match forward:{timestamp}:{chanId}, got: ${reference}`);
+    }
 
     const unlock = await this._mutex.acquire(`capital:${agentId}`);
     try {
@@ -893,6 +896,56 @@ export class CapitalLedger {
       unlock();
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Aggregate solvency check (B4)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Verify that the sum of all agents' capital balances does not exceed
+   * the node's actual on-chain balance.
+   *
+   * @param {object} nodeClient - LND client with walletBalance()
+   * @returns {Promise<{ total_committed_sats: number, on_chain_balance_sats: number, is_solvent: boolean, shortfall_sats: number }>}
+   */
+  async checkAggregateBalance(nodeClient) {
+    if (!nodeClient || typeof nodeClient.walletBalance !== 'function') {
+      throw new Error('checkAggregateBalance requires an LND client with walletBalance()');
+    }
+
+    const allBalances = await this.getAllBalances();
+    let totalCommitted = 0;
+    for (const balance of Object.values(allBalances)) {
+      if (balance.error) continue;
+      totalCommitted += (balance.available || 0) + (balance.locked || 0) +
+                        (balance.pending_deposit || 0) + (balance.pending_close || 0);
+    }
+
+    const walletResult = await nodeClient.walletBalance();
+    const onChainSats = parseInt(walletResult.confirmed_balance || '0', 10);
+
+    const result = {
+      total_committed_sats: totalCommitted,
+      on_chain_balance_sats: onChainSats,
+      is_solvent: totalCommitted <= onChainSats,
+      shortfall_sats: Math.max(0, totalCommitted - onChainSats),
+      agent_count: Object.keys(allBalances).length,
+    };
+
+    if (!result.is_solvent) {
+      console.warn(
+        `[CapitalLedger] SOLVENCY WARNING: Agents hold ${totalCommitted} sats ` +
+        `but on-chain balance is only ${onChainSats} sats ` +
+        `(shortfall: ${result.shortfall_sats} sats)`
+      );
+    }
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Activity log
+  // ---------------------------------------------------------------------------
 
   /**
    * Read the activity log. Supports pagination.

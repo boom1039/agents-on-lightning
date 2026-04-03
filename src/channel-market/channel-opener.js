@@ -31,6 +31,8 @@ const CHANNEL_OPEN_CONFIG = {
 
 const DEFAULT_PEER_FORCE_CLOSE_LIMIT = 0;
 const DEFAULT_REQUIRE_PEER_ALLOWLIST = true;
+const DEFAULT_MIN_PEER_CHANNELS = 3;
+const DEFAULT_MAX_PEER_LAST_UPDATE_AGE_S = 86_400; // 24 hours
 const STARTUP_POLICY_LIMITS = {
   minBaseFeeMsat: 0,
   maxBaseFeeMsat: 10_000,
@@ -168,6 +170,16 @@ const HINTS = {
   peer_force_close_history_unavailable:
     'Peer safety history is temporarily unavailable, so this open needs review before it can proceed. ' +
     'Try again later or choose another approved peer.',
+
+  peer_too_few_channels: (count, min) =>
+    `This peer has only ${count} channel(s), below the minimum of ${min}. ` +
+    'Nodes with very few channels are risky — they may be ephemeral or poorly connected. ' +
+    'Use GET /api/v1/analysis/suggest-peers/:pubkey to find better-connected peers.',
+
+  peer_stale_graph_update: (ageHours) =>
+    `This peer was last seen in the network graph ${ageHours.toFixed(1)} hours ago. ` +
+    'Nodes that have not updated recently may be offline or abandoned. ' +
+    'Try connecting to a peer that has been active more recently.',
 
   startup_policy_invalid:
     'Startup policy fields must use whole numbers. Supported fields: base_fee_msat, fee_rate_ppm, min_htlc_msat, max_htlc_msat, time_lock_delta.',
@@ -628,6 +640,38 @@ export class ChannelOpener {
         failed_at: 'peer_safe_for_open',
         checks_passed,
       };
+    }
+
+    // Peer quality: minimum channel count
+    const minPeerChannels = this.config.minPeerChannels ?? DEFAULT_MIN_PEER_CHANNELS;
+    const peerNumChannels = peerInfo.num_channels ?? peerInfo.node?.num_channels ?? 0;
+    if (minPeerChannels > 0 && peerNumChannels < minPeerChannels) {
+      return {
+        success: false,
+        error: `Peer has ${peerNumChannels} channel(s), minimum required is ${minPeerChannels}`,
+        hint: HINTS.peer_too_few_channels(peerNumChannels, minPeerChannels),
+        status: 400,
+        failed_at: 'peer_safe_for_open',
+        checks_passed,
+      };
+    }
+
+    // Peer quality: last update freshness (reject stale/dead nodes)
+    const maxPeerLastUpdateAgeS = this.config.maxPeerLastUpdateAgeS ?? DEFAULT_MAX_PEER_LAST_UPDATE_AGE_S;
+    const peerLastUpdate = peerInfo.node?.last_update;
+    if (maxPeerLastUpdateAgeS > 0 && peerLastUpdate) {
+      const now = Math.floor(Date.now() / 1000);
+      const ageS = now - peerLastUpdate;
+      if (ageS > maxPeerLastUpdateAgeS) {
+        return {
+          success: false,
+          error: `Peer last seen ${(ageS / 3600).toFixed(1)} hours ago, exceeds ${(maxPeerLastUpdateAgeS / 3600).toFixed(1)}-hour limit`,
+          hint: HINTS.peer_stale_graph_update(ageS / 3600),
+          status: 400,
+          failed_at: 'peer_safe_for_open',
+          checks_passed,
+        };
+      }
     }
 
     const peerForceCloseLimit = getPeerForceCloseLimit();
