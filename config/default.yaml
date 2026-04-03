@@ -13,7 +13,7 @@ nodes:
     lndDir: ~/.lnd
     host: localhost
     restPort: 8080
-    macaroonPath: ~/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
+    macaroonPath: ~/.lnd/data/chain/bitcoin/mainnet/agents-on-lightning.macaroon
     tlsCertPath: ~/.lnd/tls.cert
 
 # Cashu ecash wallet

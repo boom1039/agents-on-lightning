@@ -1,6 +1,6 @@
 [Unit]
-Description=Agents on Lightning API
-After=network-online.target
+Description=Agents on Lightning Monitor Dashboard
+After=network-online.target agents-on-lightning.service
 Wants=network-online.target
 
 [Service]
@@ -8,8 +8,8 @@ Type=simple
 User=agentsonlightning
 Group=agentsonlightning
 WorkingDirectory=/opt/agents_on_lightning
-EnvironmentFile=/etc/agents-on-lightning/agents-on-lightning.env
-ExecStart=/usr/bin/node /opt/agents_on_lightning/src/index.js
+EnvironmentFile=/etc/agents-on-lightning/agents-on-lightning-monitor.env
+ExecStart=/usr/bin/node /opt/agents_on_lightning/monitoring_dashboards/server.mjs
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -17,7 +17,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/agents-on-lightning /opt/agents_on_lightning/data
+ReadWritePaths=/opt/agents_on_lightning/data
+ReadOnlyPaths=/opt/agents_on_lightning
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictRealtime=true
 LockPersonality=true

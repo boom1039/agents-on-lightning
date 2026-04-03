@@ -6,7 +6,7 @@ nodes:
     host: 127.0.0.1
     restPort: 8080
     lndDir: /var/lib/lnd
-    macaroonPath: /var/lib/lnd/data/chain/bitcoin/mainnet/admin.macaroon
+    macaroonPath: /var/lib/lnd/data/chain/bitcoin/mainnet/agents-on-lightning.macaroon
     tlsCertPath: /var/lib/lnd/tls.cert
 
 cashu:
