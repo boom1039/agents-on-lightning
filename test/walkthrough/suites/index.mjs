@@ -7,6 +7,7 @@ import { suite as channels } from './channels.mjs';
 import { suite as market } from './market.mjs';
 import { suite as analytics } from './analytics.mjs';
 import { suite as capital } from './capital.mjs';
+import { suite as adversarial } from './adversarial.mjs';
 
 export const ALL_SUITES = [
   discovery,
@@ -18,6 +19,7 @@ export const ALL_SUITES = [
   market,
   analytics,
   capital,
+  adversarial,
 ];
 
 export function getSuite(name) {

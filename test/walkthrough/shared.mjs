@@ -298,7 +298,8 @@ export async function doHttp({ method, url, body, headers = {} }, baseUrl = '') 
   if (!safeUrl) {
     return {
       raw: JSON.stringify({ status: 0, error: 'missing url' }),
-      status: 0, parsed: null, latency: 0, reqBody: body || null,
+      status: 0, parsed: null, latency: 0, latency_ms: 0, reqBody: body || null,
+      started_at_ms: null, finished_at_ms: null,
       errSnippet: 'missing url', responseBytes: 0,
     };
   }
@@ -310,21 +311,24 @@ export async function doHttp({ method, url, body, headers = {} }, baseUrl = '') 
     opts.body = typeof body === 'string' ? body : JSON.stringify(body);
   }
 
-  const t0 = Date.now();
+  const startedAtMs = Date.now();
   let res;
   try {
     res = await fetch(fullUrl, opts);
   } catch (err) {
-    const latency = Date.now() - t0;
+    const finishedAtMs = Date.now();
+    const latency = finishedAtMs - startedAtMs;
     return {
       raw: JSON.stringify({ status: 0, error: err.message }),
-      status: 0, parsed: null, latency, reqBody: body || null,
+      status: 0, parsed: null, latency, latency_ms: latency, reqBody: body || null,
+      started_at_ms: startedAtMs, finished_at_ms: finishedAtMs,
       errSnippet: err.message, responseBytes: 0,
     };
   }
 
-  const latency = Date.now() - t0;
   const text = await res.text();
+  const finishedAtMs = Date.now();
+  const latency = finishedAtMs - startedAtMs;
   let parsed;
   try { parsed = JSON.parse(text); } catch { parsed = null; }
 
@@ -341,7 +345,8 @@ export async function doHttp({ method, url, body, headers = {} }, baseUrl = '') 
   const responseBytes = text.length;
   return {
     raw: JSON.stringify({ status: res.status, body: result }),
-    status: res.status, parsed, latency, reqBody: body || null,
+    status: res.status, parsed, latency, latency_ms: latency, reqBody: body || null,
+    started_at_ms: startedAtMs, finished_at_ms: finishedAtMs,
     errSnippet, responseBytes,
   };
 }

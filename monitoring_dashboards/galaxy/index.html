@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Galaxy — Agent Flow Monitor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #000; font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; color: #c8d6e0; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+
+    .hud { position: fixed; pointer-events: none; z-index: 10; }
+
+    #hud-legend {
+      top: 24px; left: 24px;
+    }
+    #hud-legend h1 {
+      font-size: 14px; letter-spacing: 4px; font-weight: 600;
+      margin-bottom: 14px; color: #c8d6e0;
+    }
+    #hud-legend .domain-item {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; margin-bottom: 6px; opacity: 0.75;
+    }
+    #hud-legend .domain-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+
+    #hud-stats {
+      top: 24px; right: 24px; text-align: right;
+    }
+    .stat-row {
+      font-size: 11px; margin-bottom: 6px; opacity: 0.7;
+    }
+    .stat-value {
+      font-size: 18px; font-weight: 600; color: #c8d6e0;
+      display: block; margin-top: 2px;
+    }
+
+    #hud-status {
+      bottom: 24px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; letter-spacing: 2px; opacity: 0.7;
+      background: rgba(13, 17, 23, 0.6);
+      padding: 8px 16px; border-radius: 4px;
+    }
+    #hud-status .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    #hud-status .status-dot.live { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    #hud-status .status-dot.demo { background: #d29922; box-shadow: 0 0 6px #d29922; }
+
+    .domain-label {
+      color: #c8d6e0;
+      font: 600 11px/1 "SF Mono", "Fira Code", "Cascadia Code", monospace;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      text-align: center;
+      pointer-events: none;
+      text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 16px rgba(0,0,0,0.7);
+      white-space: nowrap;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="hud-legend" class="hud">
+    <h1>THE GALAXY</h1>
+    <div id="legend-items"></div>
+  </div>
+
+  <div id="hud-stats" class="hud">
+    <div class="stat-row">AGENTS<span class="stat-value" id="stat-agents">0</span></div>
+    <div class="stat-row">REQ/S<span class="stat-value" id="stat-rps">0.0</span></div>
+    <div class="stat-row">TIME<span class="stat-value" id="stat-time">--:--:--</span></div>
+  </div>
+
+  <div id="hud-status" class="hud">
+    <div class="status-dot demo" id="status-dot"></div>
+    <span id="status-label">DEMO</span>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.164.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.164.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+    // ── Domain constants ──────────────────────────────────────────────
+
+    const DOMAIN_POSITIONS = {
+      'app-level':  { x:  0,   y: 0, z:  0   },  // Center
+      'discovery':  { x: 12,   y: 0, z:  4   },
+      'identity':   { x:  9,   y: 0, z: -9   },
+      'wallet':     { x:  0,   y: 0, z: -13  },
+      'analysis':   { x: -9,   y: 0, z: -9   },
+      'social':     { x: -13,  y: 0, z:  0   },
+      'channels':   { x: -9,   y: 0, z:  9   },
+      'market':     { x:  0,   y: 0, z:  13  },
+      'analytics':  { x:  6,   y: 0, z:  7   },
+      'capital':    { x: -5,   y: 0, z:  5   },
+    };
+
+    const DOMAIN_COLORS = {
+      'app-level':  0xffffff,
+      'discovery':  0x6eb5ff,
+      'identity':   0x5fd89a,
+      'wallet':     0xffd36e,
+      'analysis':   0x64dfdf,
+      'social':     0xc77dff,
+      'channels':   0xff8e98,
+      'market':     0xf4b350,
+      'analytics':  0x72efdd,
+      'capital':    0xff6d6d,
+    };
+
+    const DOMAIN_NAMES = {
+      'app-level': 'App Level',
+      'discovery': 'Discovery',
+      'identity':  'Identity',
+      'wallet':    'Wallet',
+      'analysis':  'Analysis',
+      'social':    'Social',
+      'channels':  'Channels',
+      'market':    'Market',
+      'analytics': 'Analytics',
+      'capital':   'Capital',
+    };
+
+    // ── Scene setup ───────────────────────────────────────────────────
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    document.body.prepend(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    // No fog — everything equally visible from top-down
+
+    // OrthographicCamera — true top-down, no perspective distortion
+    const camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 200);
+    camera.position.set(0, 50, 0);
+    camera.lookAt(0, 0, 0);
+    camera.up.set(0, 0, -1); // X→right, Z→down in screen space
+
+    function fitCamera() {
+      const positions = Object.values(DOMAIN_POSITIONS);
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const p of positions) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+      }
+      const pad = 7; // room for agents + labels
+      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+      const rangeX = (maxX - minX) / 2 + pad;
+      const rangeZ = (maxZ - minZ) / 2 + pad;
+      const aspect = window.innerWidth / window.innerHeight;
+      const halfW = Math.max(rangeX, rangeZ * aspect);
+      const halfH = halfW / aspect;
+      camera.left = -halfW; camera.right = halfW;
+      camera.top = halfH; camera.bottom = -halfH;
+      camera.position.set(cx, 50, cz);
+      camera.updateProjectionMatrix();
+    }
+    fitCamera();
+
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.4,   // strength — subtle glow, not blinding
+      0.3,   // radius
+      0.6    // threshold — only brightest things bloom
+    );
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false;
+    controls.enablePan = false;
+    controls.enableZoom = true;
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    // ── CSS2D label renderer ────────────────────────────────────────────
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0';
+    labelRenderer.domElement.style.left = '0';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    document.body.appendChild(labelRenderer.domElement);
+
+    // ── Resize handler ────────────────────────────────────────────────
+
+    window.addEventListener('resize', () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloomPass.resolution.set(w, h);
+      labelRenderer.setSize(w, h);
+      fitCamera();
+    });
+
+    // ── Background stars ──────────────────────────────────────────────
+
+    {
+      const starCount = 2000;
+      const starGeo = new THREE.BufferGeometry();
+      const starPos = new Float32Array(starCount * 3);
+      for (let i = 0; i < starCount; i++) {
+        const r = 40 + Math.random() * 60;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        starPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+        starPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        starPos[i * 3 + 2] = r * Math.cos(phi);
+      }
+      starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+      const starMat = new THREE.PointsMaterial({
+        size: 0.15, color: 0x888899, transparent: true, opacity: 0.6,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      scene.add(new THREE.Points(starGeo, starMat));
+    }
+
+    // ── Nebulae ───────────────────────────────────────────────────────
+
+    const nebulae = new Map();
+
+    for (const [domain, pos] of Object.entries(DOMAIN_POSITIONS)) {
+      const color = DOMAIN_COLORS[domain];
+      const group = new THREE.Group();
+      group.position.set(pos.x, pos.y, pos.z);
+
+      // Core disc — flat, visible landmark from top-down
+      const coreMat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.12, depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const coreDisc = new THREE.Mesh(new THREE.CircleGeometry(2.0, 32), coreMat);
+      coreDisc.rotation.x = -Math.PI / 2; // lie flat
+      group.add(coreDisc);
+
+      // Ambient dust particles (subtle, few — constrained to XZ plane)
+      const dustCount = 12;
+      const dustGeo = new THREE.BufferGeometry();
+      const dustPositions = new Float32Array(dustCount * 3);
+      const dustBasePositions = new Float32Array(dustCount * 3);
+      for (let i = 0; i < dustCount; i++) {
+        const r = 1.0 + Math.random() * 1.5;
+        const theta = Math.random() * Math.PI * 2;
+        const x = r * Math.cos(theta);
+        const y = 0.05; // nearly flat on the ground plane
+        const z = r * Math.sin(theta);
+        dustPositions[i * 3] = x;
+        dustPositions[i * 3 + 1] = y;
+        dustPositions[i * 3 + 2] = z;
+        dustBasePositions[i * 3] = x;
+        dustBasePositions[i * 3 + 1] = y;
+        dustBasePositions[i * 3 + 2] = z;
+      }
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+      const dustMat = new THREE.PointsMaterial({
+        size: 0.02, color, transparent: true, opacity: 0.12,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const dustPoints = new THREE.Points(dustGeo, dustMat);
+      group.add(dustPoints);
+
+      // Pulse ring
+      const ringMat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0,
+        side: THREE.DoubleSide, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1.3, 1.5, 32), ringMat);
+      ring.rotation.x = -Math.PI / 2; // face upward
+      group.add(ring);
+
+      // Domain label (CSS2D, always faces camera)
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'domain-label';
+      labelDiv.textContent = DOMAIN_NAMES[domain];
+      const label = new CSS2DObject(labelDiv);
+      label.position.set(0, 0.5, -2.8); // above disc in screen space (neg Z = up from top-down)
+      group.add(label);
+
+      group.userData = {
+        ring, ringMat, pulseTime: 0,
+        dustPoints, dustBasePositions,
+      };
+
+      scene.add(group);
+      nebulae.set(domain, group);
+    }
+
+    // ── Agent instanced mesh ──────────────────────────────────────────
+
+    const MAX_AGENTS = 256;
+    const agentGeo = new THREE.SphereGeometry(0.25, 12, 12);
+    const agentMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+    const agentMesh = new THREE.InstancedMesh(agentGeo, agentMat, MAX_AGENTS);
+    agentMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    agentMesh.count = 0;
+
+    // Initialize instanceColor
+    const instanceColors = new Float32Array(MAX_AGENTS * 3);
+    agentMesh.instanceColor = new THREE.InstancedBufferAttribute(instanceColors, 3);
+    agentMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
+    scene.add(agentMesh);
+
+    const agents = new Map();
+    const trailLines = new Map();
+    let nextAgentIndex = 0;
+
+    // ── Utility functions ─────────────────────────────────────────────
+
+    function agentColor(agentId) {
+      let hash = 0;
+      for (let i = 0; i < agentId.length; i++) hash = ((hash << 5) - hash + agentId.charCodeAt(i)) | 0;
+      const hue = ((hash & 0xFFFF) * 137.508) % 360;
+      return new THREE.Color().setHSL(hue / 360, 0.8, 0.65);
+    }
+
+    function createTransferArc(from, to) {
+      const mid = new THREE.Vector3().lerpVectors(from, to, 0.5);
+      mid.y += 1.5; // slight upward arc visible as subtle lift from above
+      const dir = new THREE.Vector3().subVectors(to, from).normalize();
+      const lateral = new THREE.Vector3(-dir.z, 0, dir.x);
+      const offset = from.distanceTo(to) * 0.2;
+      const cp = mid.clone().add(lateral.multiplyScalar(offset));
+      return new THREE.CatmullRomCurve3(
+        [from.clone(), cp, to.clone()],
+        false, 'catmullrom', 0.5
+      );
+    }
+
+    function curlNoise(x, y, z, t) {
+      const e = 0.001;
+      const n = (px, py, pz) =>
+        Math.sin(px * 1.3 + t) * Math.cos(py * 1.7 + t * 0.7) * Math.sin(pz * 2.1 + t * 0.5);
+      return {
+        x: (n(x, y + e, z) - n(x, y - e, z)) / (2 * e) - (n(x, y, z + e) - n(x, y, z - e)) / (2 * e),
+        y: (n(x, y, z + e) - n(x, y, z - e)) / (2 * e) - (n(x + e, y, z) - n(x - e, y, z)) / (2 * e),
+        z: (n(x + e, y, z) - n(x - e, y, z)) / (2 * e) - (n(x, y + e, z) - n(x, y - e, z)) / (2 * e),
+      };
+    }
+
+    function classifyDomain(path) {
+      if (path === '/' || path === '/llms.txt' || path === '/health') return 'app-level';
+      if (path === '/api/v1/' || path.startsWith('/api/v1/platform/') || path === '/api/v1/ethos' ||
+          path === '/api/v1/capabilities' || path.startsWith('/api/v1/strategies') ||
+          path.startsWith('/api/v1/knowledge/') || path.startsWith('/api/v1/skills')) return 'discovery';
+      if (path.startsWith('/api/v1/agents/') || path.startsWith('/api/v1/node/') ||
+          path.startsWith('/api/v1/actions/')) return 'identity';
+      if (path.startsWith('/api/v1/wallet/') || path === '/api/v1/ledger') return 'wallet';
+      if (path.startsWith('/api/v1/analysis/')) return 'analysis';
+      if (path.startsWith('/api/v1/messages') || path.startsWith('/api/v1/alliances') ||
+          path.startsWith('/api/v1/leaderboard') || path.startsWith('/api/v1/tournaments') ||
+          path.startsWith('/api/v1/bounties')) return 'social';
+      if (path.startsWith('/api/v1/channels/')) return 'channels';
+      if (path.startsWith('/api/v1/market/')) return 'market';
+      if (path.startsWith('/api/v1/analytics/')) return 'analytics';
+      if (path.startsWith('/api/v1/capital/') || path === '/api/v1/help') return 'capital';
+      return null;
+    }
+
+    // ── Trail management ──────────────────────────────────────────────
+
+    function getOrCreateTrail(agentId, color) {
+      if (trailLines.has(agentId)) return trailLines.get(agentId);
+
+      const maxTrailLen = 30;
+      const trailGeo = new THREE.BufferGeometry();
+      const trailPositions = new Float32Array(maxTrailLen * 3);
+      trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+      trailGeo.setDrawRange(0, 0);
+
+      const trailMat = new THREE.LineBasicMaterial({
+        color, transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const line = new THREE.Line(trailGeo, trailMat);
+      line.frustumCulled = false;
+      scene.add(line);
+      trailLines.set(agentId, line);
+      return line;
+    }
+
+    function updateTrail(agentId, agent) {
+      const line = getOrCreateTrail(agentId, agent.color);
+      const posAttr = line.geometry.getAttribute('position');
+      const trail = agent.trail;
+      for (let i = 0; i < trail.length; i++) {
+        posAttr.setXYZ(i, trail[i].x, trail[i].y, trail[i].z);
+      }
+      posAttr.needsUpdate = true;
+      line.geometry.setDrawRange(0, trail.length);
+    }
+
+    // ── Agent distribution (Fermat spiral) ────────────────────────────
+
+    const domainAgentSlots = new Map(); // domain → count of agents placed
+
+    function agentOffsetInDomain(domain, slotIndex) {
+      const goldenAngle = 2.399963; // radians (137.508°)
+      const spacing = 0.55;
+      const angle = slotIndex * goldenAngle;
+      const r = spacing * Math.sqrt(slotIndex + 1);
+      const maxR = 3.5;
+      const clampedR = Math.min(r, maxR);
+      return {
+        x: clampedR * Math.cos(angle),
+        z: clampedR * Math.sin(angle),
+      };
+    }
+
+    function claimSlotInDomain(domain) {
+      const slot = domainAgentSlots.get(domain) || 0;
+      domainAgentSlots.set(domain, slot + 1);
+      return agentOffsetInDomain(domain, slot);
+    }
+
+    // ── Event handling ────────────────────────────────────────────────
+
+    const eventTimestamps = [];
+    let totalRequests = 0;
+
+    function pulseNebula(domain) {
+      const neb = nebulae.get(domain);
+      if (!neb) return;
+      neb.userData.pulseTime = Date.now();
+      neb.userData.ring.scale.setScalar(1);
+      neb.userData.ringMat.opacity = 0.4;
+    }
+
+    function handleInit(data) {
+      // Place agents at their current domain positions on initial load
+      for (const a of data.agents) {
+        if (!a.agent_id || !a.domain || agents.has(a.agent_id)) continue;
+        if (nextAgentIndex >= MAX_AGENTS) break;
+        const domPos = DOMAIN_POSITIONS[a.domain];
+        if (!domPos) continue;
+        const color = agentColor(a.agent_id);
+        const offset = claimSlotInDomain(a.domain);
+        const pos = new THREE.Vector3(
+          domPos.x + offset.x,
+          0.3,  // float just above the domain disc
+          domPos.z + offset.z,
+        );
+        agents.set(a.agent_id, {
+          index: nextAgentIndex++,
+          color, currentDomain: a.domain, targetDomain: null,
+          position: pos, arcCurve: null, arcProgress: 0, arcDuration: 1000,
+          pulseFactor: 1.0, statusColor: null, statusFlashEnd: 0,
+          lastEventTime: Date.now() - 10000, trail: [pos.clone()],
+        });
+        getOrCreateTrail(a.agent_id, color);
+      }
+      if (data.totalRequests) totalRequests = data.totalRequests;
+    }
+
+    function handleEvent(event) {
+      // Handle init message
+      if (event.type === 'init') { handleInit(event); return; }
+      if (event.event !== 'api_request' || !event.agent_id) return;
+
+      const domain = classifyDomain(event.path);
+      if (!domain) return;
+
+      totalRequests++;
+      eventTimestamps.push(Date.now());
+
+      const id = event.agent_id;
+      let agent = agents.get(id);
+
+      if (!agent) {
+        if (nextAgentIndex >= MAX_AGENTS) return;
+        const color = agentColor(id);
+        const domPos = DOMAIN_POSITIONS[domain];
+        const offset = claimSlotInDomain(domain);
+        const pos = new THREE.Vector3(
+          domPos.x + offset.x,
+          0.3,
+          domPos.z + offset.z,
+        );
+        agent = {
+          index: nextAgentIndex++,
+          color,
+          currentDomain: domain,
+          targetDomain: null,
+          position: pos,
+          arcCurve: null,
+          arcProgress: 0,
+          arcDuration: 1000,
+          pulseFactor: 1.8,
+          statusColor: null,
+          statusFlashEnd: 0,
+          lastEventTime: Date.now(),
+          trail: [pos.clone()],
+        };
+        agents.set(id, agent);
+        getOrCreateTrail(id, color);
+      }
+
+      // Domain change -> create arc
+      if (domain !== agent.currentDomain && !agent.arcCurve) {
+        const fromPos = agent.position.clone();
+        const toCenter = DOMAIN_POSITIONS[domain];
+        const offset = claimSlotInDomain(domain);
+        const toPos = new THREE.Vector3(
+          toCenter.x + offset.x,
+          0.3,
+          toCenter.z + offset.z,
+        );
+        agent.arcCurve = createTransferArc(fromPos, toPos);
+        agent.arcProgress = 0;
+        const dist = fromPos.distanceTo(toPos);
+        agent.arcDuration = Math.min(2000, 600 + dist * 80);
+        agent.targetDomain = domain;
+      } else if (domain === agent.currentDomain) {
+        // Already in domain, just note activity
+        agent.lastEventTime = Date.now();
+      }
+
+      agent.pulseFactor = 1.8;
+      agent.lastEventTime = Date.now();
+
+      // Status flash for errors
+      if (event.status && event.status >= 400) {
+        agent.statusColor = event.status >= 500
+          ? new THREE.Color(0xff4444)
+          : new THREE.Color(0xffaa33);
+        agent.statusFlashEnd = Date.now() + 300;
+      }
+
+      pulseNebula(domain);
+    }
+
+    // ── HUD setup ─────────────────────────────────────────────────────
+
+    const legendContainer = document.getElementById('legend-items');
+    for (const [domain, color] of Object.entries(DOMAIN_COLORS)) {
+      const item = document.createElement('div');
+      item.className = 'domain-item';
+      const hex = '#' + new THREE.Color(color).getHexString();
+      item.innerHTML = `<div class="domain-dot" style="background:${hex};box-shadow:0 0 4px ${hex}"></div><span>${DOMAIN_NAMES[domain]}</span>`;
+      legendContainer.appendChild(item);
+    }
+
+    const statAgents = document.getElementById('stat-agents');
+    const statRps = document.getElementById('stat-rps');
+    const statTime = document.getElementById('stat-time');
+    const statusDot = document.getElementById('status-dot');
+    const statusLabel = document.getElementById('status-label');
+
+    function setConnectionStatus(live) {
+      if (live) {
+        statusDot.className = 'status-dot live';
+        statusLabel.textContent = 'LIVE';
+      } else {
+        statusDot.className = 'status-dot demo';
+        statusLabel.textContent = 'DEMO';
+      }
+    }
+
+    function updateHUD() {
+      statAgents.textContent = agents.size;
+
+      // Rolling 10-second RPS
+      const now = Date.now();
+      const cutoff = now - 10000;
+      while (eventTimestamps.length > 0 && eventTimestamps[0] < cutoff) eventTimestamps.shift();
+      const rps = eventTimestamps.length / 10;
+      statRps.textContent = rps.toFixed(1);
+
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      statTime.textContent = `${hh}:${mm}:${ss}`;
+    }
+
+    // ── SSE connection ────────────────────────────────────────────────
+
+    let isLive = false;
+
+    function connectSSE() {
+      let es;
+      try {
+        es = new EventSource('/api/events');
+      } catch {
+        setConnectionStatus(false);
+        startDemoMode();
+        return;
+      }
+
+      es.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          handleEvent(event);
+          if (!isLive) {
+            isLive = true;
+            stopDemoMode();
+            setConnectionStatus(true);
+          }
+        } catch { /* ignore parse errors */ }
+      };
+
+      es.onerror = () => {
+        es.close();
+        isLive = false;
+        setConnectionStatus(false);
+        startDemoMode();
+        setTimeout(connectSSE, 10000);
+      };
+    }
+
+    // ── Demo mode ─────────────────────────────────────────────────────
+
+    let demoInterval = null;
+
+    function startDemoMode() {
+      if (demoInterval) return;
+      const paths = [
+        '/api/v1/', '/api/v1/agents/register', '/api/v1/wallet/balance',
+        '/api/v1/analysis/network-health', '/api/v1/messages',
+        '/api/v1/channels/audit', '/api/v1/market/preview',
+        '/api/v1/analytics/catalog', '/api/v1/capital/balance', '/llms.txt',
+        '/api/v1/skills/wallet', '/api/v1/knowledge/strategy',
+        '/api/v1/agents/me', '/api/v1/wallet/send',
+        '/api/v1/leaderboard', '/api/v1/market/open',
+        '/api/v1/alliances', '/api/v1/tournaments',
+      ];
+      const demoAgents = ['demo-a1', 'demo-a2', 'demo-a3', 'demo-a4', 'demo-a5'];
+      demoInterval = setInterval(() => {
+        handleEvent({
+          event: 'api_request',
+          agent_id: demoAgents[Math.floor(Math.random() * demoAgents.length)],
+          path: paths[Math.floor(Math.random() * paths.length)],
+          method: 'GET',
+          status: Math.random() > 0.9 ? 404 : 200,
+          duration_ms: Math.floor(Math.random() * 200),
+          _ts: Date.now(),
+        });
+      }, 500);
+    }
+
+    function stopDemoMode() {
+      if (demoInterval) {
+        clearInterval(demoInterval);
+        demoInterval = null;
+      }
+    }
+
+    // Camera is static — no orbit, no movement
+
+    // ── Dust animation ────────────────────────────────────────────────
+
+    function updateDust(time) {
+      for (const [domain, group] of nebulae) {
+        const ud = group.userData;
+        const dustPoints = ud.dustPoints;
+        const basePosArr = ud.dustBasePositions;
+        const posAttr = dustPoints.geometry.getAttribute('position');
+        const arr = posAttr.array;
+        const count = basePosArr.length / 3;
+
+        for (let i = 0; i < count; i++) {
+          const bx = basePosArr[i * 3];
+          const bz = basePosArr[i * 3 + 2];
+          const curl = curlNoise(bx * 0.5, 0, bz * 0.5, time * 0.15 + i * 0.01);
+          let nx = bx + curl.x * 0.3;
+          let nz = bz + curl.z * 0.3;
+
+          // Contain within radius 2.5 in XZ plane
+          const dist = Math.sqrt(nx * nx + nz * nz);
+          if (dist > 2.5) {
+            const scale = 2.5 / dist;
+            nx *= scale;
+            nz *= scale;
+          }
+
+          arr[i * 3] = nx;
+          arr[i * 3 + 1] = 0.05; // stay flat
+          arr[i * 3 + 2] = nz;
+        }
+        posAttr.needsUpdate = true;
+      }
+    }
+
+    // ── Animation loop ────────────────────────────────────────────────
+
+    const clock = new THREE.Clock();
+    const dummy = new THREE.Object3D();
+    let frameCount = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta() * 1000; // milliseconds
+      const time = clock.getElapsedTime();
+      frameCount++;
+
+      for (const [id, agent] of agents) {
+        // Arc animation
+        if (agent.arcCurve && agent.arcProgress < 1) {
+          agent.arcProgress += dt / agent.arcDuration;
+          if (agent.arcProgress >= 1) {
+            agent.arcProgress = 1;
+            agent.currentDomain = agent.targetDomain;
+            agent.targetDomain = null;
+            const finalPos = agent.arcCurve.getPoint(1);
+            agent.position.copy(finalPos);
+            agent.arcCurve = null;
+          } else {
+            const t = agent.arcProgress;
+            const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            agent.position.copy(agent.arcCurve.getPoint(eased));
+          }
+        }
+        // Idle — agents stay put at their domain position (no drift)
+
+        // Scale pulse decay
+        if (agent.pulseFactor > 1.0) {
+          agent.pulseFactor = Math.max(1.0, agent.pulseFactor - dt * 0.003);
+        }
+
+        // Determine display color (flash on error, or normal)
+        let color = agent.color;
+        if (agent.statusColor && Date.now() < agent.statusFlashEnd) {
+          const t = (agent.statusFlashEnd - Date.now()) / 300;
+          color = agent.color.clone().lerp(agent.statusColor, t);
+        }
+
+        // Update instanced mesh transform
+        dummy.position.copy(agent.position);
+        dummy.scale.setScalar(agent.pulseFactor);
+        dummy.updateMatrix();
+        agentMesh.setMatrixAt(agent.index, dummy.matrix);
+        agentMesh.setColorAt(agent.index, color);
+
+        // Update trail (every 3rd frame to avoid thrashing)
+        if (frameCount % 3 === 0) {
+          agent.trail.push(agent.position.clone());
+          if (agent.trail.length > 30) agent.trail.shift();
+          updateTrail(id, agent);
+        }
+      }
+
+      if (agents.size > 0) {
+        agentMesh.instanceMatrix.needsUpdate = true;
+        if (agentMesh.instanceColor) agentMesh.instanceColor.needsUpdate = true;
+        agentMesh.count = agents.size;
+      }
+
+      // Nebula pulse rings
+      for (const [domain, neb] of nebulae) {
+        const ud = neb.userData;
+        if (ud.pulseTime) {
+          const elapsed = Date.now() - ud.pulseTime;
+          const t = elapsed / 1000;
+          if (t < 1) {
+            ud.ring.scale.setScalar(1 + t * 2);
+            ud.ringMat.opacity = 0.4 * (1 - t);
+          } else {
+            ud.ringMat.opacity = 0;
+            ud.pulseTime = 0;
+          }
+        }
+      }
+
+      // Dust drift (every 4th frame)
+      if (frameCount % 4 === 0) updateDust(time);
+
+      composer.render();
+      labelRenderer.render(scene, camera);
+
+      // Update HUD at ~10fps
+      if (frameCount % 6 === 0) updateHUD();
+    }
+
+    // ── Initialize and start ──────────────────────────────────────────
+
+    connectSSE();
+    animate();
+
+  </script>
+</body>
+</html>

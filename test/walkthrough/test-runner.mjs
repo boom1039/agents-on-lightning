@@ -424,6 +424,8 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
   let setupTurnsUsed = 0;
   let nudgeBudgetMs = EFFECTIVE_NUDGE_TIMEOUT_MS;
   let toolFollowUpExtensionsUsed = 0;
+  let previousTurnFinishedAtMs = null;
+  let lastRequestFinishedAtMs = null;
 
   for (let turn = 0; turn < MAX_TURNS + MAX_PREP_TURNS; turn++) {
     if (Date.now() - nudgeStart > nudgeBudgetMs) {
@@ -431,7 +433,8 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       break;
     }
 
-    const thinkStart = Date.now();
+    const turnStartedAtMs = Date.now();
+    const thinkStart = turnStartedAtMs;
     let response;
     for (let modelAttempt = 1; modelAttempt <= MODEL_RETRY_MAX; modelAttempt++) {
       try {
@@ -465,21 +468,41 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       agentLog(`${pre}${att}  think:${(thinkMs / 1000).toFixed(1)}s  agent: ${first}`);
     }
 
-    turnTraces.push({
+    const turnTrace = {
       attempt,
       turn: turn + 1,
+      turn_started_at_ms: turnStartedAtMs,
+      turn_started_since_nudge_ms: turnStartedAtMs - nudgeStart,
       think_ms: thinkMs,
       assistant_text: response.text || '',
       requested_calls: response.toolCalls.map(tc => summarizeToolCall(tc)),
-    });
+      request_count: 0,
+      tool_ms: 0,
+      http_ms: 0,
+      turn_finished_at_ms: null,
+      turn_finished_since_nudge_ms: null,
+      turn_duration_ms: null,
+      gap_from_prev_turn_ms: previousTurnFinishedAtMs == null
+        ? null
+        : Math.max(0, turnStartedAtMs - previousTurnFinishedAtMs),
+    };
 
-    if (response.toolCalls.length === 0) break;
+    if (response.toolCalls.length === 0) {
+      const turnFinishedAtMs = Date.now();
+      turnTrace.turn_finished_at_ms = turnFinishedAtMs;
+      turnTrace.turn_finished_since_nudge_ms = turnFinishedAtMs - nudgeStart;
+      turnTrace.turn_duration_ms = turnFinishedAtMs - turnStartedAtMs;
+      previousTurnFinishedAtMs = turnFinishedAtMs;
+      turnTraces.push(turnTrace);
+      break;
+    }
 
     const results = [];
     let stopThisNudge = false;
     let hitPhaseRouteThisTurn = false;
     let usedAnyToolThisTurn = false;
     let madeSetupProgressThisTurn = false;
+    const currentTurnRequestIndexes = [];
     for (const tc of response.toolCalls) {
       const toolName = tc.name || HTTP_TOOL.name;
       usedAnyToolThisTurn = true;
@@ -487,7 +510,9 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
         madeSetupProgressThisTurn = true;
         const toolStart = Date.now();
         const toolResult = await ctx.executeLocalTool?.(toolName, tc.input || {});
-        toolMsTotal += Date.now() - toolStart;
+        const toolDurMs = Date.now() - toolStart;
+        toolMsTotal += toolDurMs;
+        turnTrace.tool_ms += toolDurMs;
         const preview = JSON.stringify(toolResult || {});
         agentLog(`${pre}${att}  TOOL ${toolName} → ${preview.substring(0, 120)}`);
         results.push({ id: tc.id, content: JSON.stringify(toolResult || { ok: false, error: `No handler for ${toolName}` }) });
@@ -505,9 +530,25 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       requestTimeline.push({
         attempt,
         turn: turn + 1,
+        turn_index: turn + 1,
         request_timeline_index: requestTimelineIndex,
         ...requestSummary,
+        started_at_ms: null,
+        finished_at_ms: null,
+        started_since_nudge_ms: null,
+        finished_since_nudge_ms: null,
+        latency_ms: null,
+        gap_from_prev_request_ms: null,
+        gap_from_prev_turn_ms: previousTurnFinishedAtMs == null
+          ? null
+          : Math.max(0, turnStartedAtMs - previousTurnFinishedAtMs),
+        turn_started_at_ms: turnStartedAtMs,
+        turn_started_since_nudge_ms: turnStartedAtMs - nudgeStart,
+        turn_finished_at_ms: null,
+        turn_finished_since_nudge_ms: null,
       });
+      currentTurnRequestIndexes.push(requestTimelineIndex);
+      turnTrace.request_count += 1;
 
       if (pendingDocTraces.length > 0) {
         const previousDoc = pendingDocTraces.shift();
@@ -520,6 +561,22 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       }
 
       const httpResult = await doHttp(tc.input);
+      requestTimeline[requestTimelineIndex].started_at_ms = httpResult.started_at_ms;
+      requestTimeline[requestTimelineIndex].finished_at_ms = httpResult.finished_at_ms;
+      requestTimeline[requestTimelineIndex].started_since_nudge_ms = httpResult.started_at_ms == null
+        ? null
+        : httpResult.started_at_ms - nudgeStart;
+      requestTimeline[requestTimelineIndex].finished_since_nudge_ms = httpResult.finished_at_ms == null
+        ? null
+        : httpResult.finished_at_ms - nudgeStart;
+      requestTimeline[requestTimelineIndex].latency_ms = httpResult.latency_ms;
+      requestTimeline[requestTimelineIndex].gap_from_prev_request_ms = lastRequestFinishedAtMs == null || httpResult.started_at_ms == null
+        ? null
+        : Math.max(0, httpResult.started_at_ms - lastRequestFinishedAtMs);
+      if (httpResult.finished_at_ms != null) {
+        lastRequestFinishedAtMs = httpResult.finished_at_ms;
+      }
+      turnTrace.http_ms += Number(httpResult.latency_ms || 0);
       const currentShortUrl = shortUrl(tc.input.url || '');
       const bodyStr = tc.input.body ? ` body:${JSON.stringify(tc.input.body).substring(0, 80)}` : '';
       const errStr = httpResult.errSnippet ? ` err:"${String(httpResult.errSnippet).substring(0, 60)}"` : '';
@@ -560,6 +617,17 @@ async function runNudge(messages, nudge, provider, ctx = {}) {
       results.push({ id: tc.id, content: httpResult.raw });
       if (stopThisNudge) break;
     }
+
+    const turnFinishedAtMs = Date.now();
+    turnTrace.turn_finished_at_ms = turnFinishedAtMs;
+    turnTrace.turn_finished_since_nudge_ms = turnFinishedAtMs - nudgeStart;
+    turnTrace.turn_duration_ms = turnFinishedAtMs - turnStartedAtMs;
+    previousTurnFinishedAtMs = turnFinishedAtMs;
+    for (const index of currentTurnRequestIndexes) {
+      requestTimeline[index].turn_finished_at_ms = turnFinishedAtMs;
+      requestTimeline[index].turn_finished_since_nudge_ms = turnFinishedAtMs - nudgeStart;
+    }
+    turnTraces.push(turnTrace);
 
     for (const tc of response.toolCalls) {
       if (results.some(result => result.id === tc.id)) continue;

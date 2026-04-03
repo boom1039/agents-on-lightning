@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Journey — Live Route Grid</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      overflow: hidden;
+      background: #0d1117;
+      color: #c8d6e0;
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    }
+    canvas { display: block; position: absolute; inset: 0; }
+
+    #topbar, #status, #tooltip {
+      position: fixed;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #topbar {
+      top: 10px;
+      left: 24px;
+      right: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 10px;
+      background: rgba(13,17,23,0.88);
+      border: 1px solid #21262d;
+      border-radius: 999px;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    #divider {
+      position: fixed;
+      z-index: 12;
+      width: 22px;
+      margin-left: -11px;
+      cursor: col-resize;
+      pointer-events: auto;
+      touch-action: none;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+    }
+    #divider .divider-line {
+      width: 1px;
+      border-radius: 999px;
+      background: rgba(48,54,61,0.95);
+      box-shadow: 0 0 0 1px rgba(13,17,23,0.25);
+      transition: width 120ms ease, background 120ms ease, box-shadow 120ms ease;
+    }
+    #divider:hover .divider-line,
+    body.dragging-divider #divider .divider-line {
+      width: 3px;
+      background: #58a6ff;
+      box-shadow: 0 0 12px rgba(88,166,255,0.35);
+    }
+    body.dragging-divider,
+    body.dragging-divider * {
+      cursor: col-resize !important;
+      user-select: none !important;
+    }
+    #title {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+    #title h1 { font-size: 11px; letter-spacing: 2px; font-weight: 700; color: #e6edf3; }
+    #title p {
+      font-size: 9px;
+      color: #8b949e;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #stats {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+    .stat {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      font-size: 9px;
+      color: #8b949e;
+      letter-spacing: 0.8px;
+    }
+    .stat strong {
+      color: #e6edf3;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    #legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      margin-left: auto;
+      overflow: hidden;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9px;
+      color: #8b949e;
+    }
+    .legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .legend-dot.live { background: #58a6ff; box-shadow: 0 0 8px rgba(88,166,255,0.6); }
+    .legend-dot.ok { background: #3fb950; }
+    .legend-dot.warn { background: #d29922; }
+    .legend-dot.err { background: #f85149; }
+    .legend-method {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 12px;
+      height: 12px;
+      padding: 0 3px;
+      border-radius: 999px;
+      border: 1px solid #484f58;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0;
+      line-height: 1;
+    }
+    .legend-method.get {
+      color: #7ee787;
+      background: rgba(63,185,80,0.16);
+      border-color: rgba(63,185,80,0.45);
+    }
+    .legend-method.post {
+      color: #ffd36e;
+      background: rgba(210,153,34,0.16);
+      border-color: rgba(210,153,34,0.45);
+    }
+    .legend-method.put {
+      color: #9ecbff;
+      background: rgba(88,166,255,0.16);
+      border-color: rgba(88,166,255,0.45);
+    }
+    @media (max-width: 1180px) {
+      #title p { display: none; }
+      #topbar { gap: 8px; }
+      #legend { gap: 6px; }
+    }
+    @media (max-width: 980px) {
+      .legend-row .legend-label { display: none; }
+    }
+
+    #status {
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: #8b949e;
+      background: rgba(13,17,23,0.78);
+      border: 1px solid #21262d;
+      border-radius: 999px;
+      padding: 6px 12px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+    .status-dot.live { background: #3fb950; box-shadow: 0 0 8px rgba(63,185,80,0.7); }
+    .status-dot.offline { background: #f85149; box-shadow: 0 0 8px rgba(248,81,73,0.7); }
+    #btn-synthetic {
+      pointer-events: auto;
+      background: transparent;
+      border: 1px solid #30363d;
+      border-radius: 999px;
+      color: #8b949e;
+      font: inherit;
+      font-size: 10px;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+      padding: 2px 10px;
+      cursor: pointer;
+      transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+    }
+    #btn-synthetic:hover { border-color: #58a6ff; color: #58a6ff; }
+    #btn-synthetic:active { background: rgba(88,166,255,0.1); }
+    #btn-synthetic:disabled {
+      cursor: default;
+      opacity: 0.55;
+      border-color: #30363d;
+      color: #8b949e;
+    }
+
+    #tooltip {
+      display: none;
+      max-width: 380px;
+      background: rgba(22,27,34,0.96);
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      font-size: 10px;
+      color: #c8d6e0;
+      line-height: 1.45;
+    }
+    #tooltip .tt-title { color: #e6edf3; font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+    #tooltip .tt-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    #tooltip .tt-label { color: #8b949e; }
+    #tooltip .tt-value { color: #e6edf3; text-align: right; flex: 1; min-width: 0; word-break: break-word; }
+    #tooltip .tt-note { color: #8b949e; margin-top: 6px; font-size: 9px; }
+    #tooltip .tt-divider { border-top: 1px solid #21262d; margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="title">
+      <h1>THE JOURNEY</h1>
+      <p>live route grid</p>
+    </div>
+
+    <div id="stats">
+      <span class="stat">AGENTS<strong id="stat-agents">0</strong></span>
+      <span class="stat">ROUTES<strong id="stat-routes">0</strong></span>
+      <span class="stat">IN FLIGHT<strong id="stat-inflight">0</strong></span>
+    </div>
+
+    <div id="legend">
+      <div class="legend-row"><span class="legend-method get">G</span><span class="legend-label">GET</span></div>
+      <div class="legend-row"><span class="legend-method post">P</span><span class="legend-label">POST</span></div>
+      <div class="legend-row"><span class="legend-method put">U</span><span class="legend-label">PUT</span></div>
+      <div class="legend-row"><div class="legend-dot live"></div><span class="legend-label">live</span></div>
+      <div class="legend-row"><div class="legend-dot ok"></div><span class="legend-label">2xx</span></div>
+      <div class="legend-row"><div class="legend-dot warn"></div><span class="legend-label">4xx</span></div>
+      <div class="legend-row"><div class="legend-dot err"></div><span class="legend-label">5xx</span></div>
+    </div>
+  </div>
+
+  <div id="status">
+    <div class="status-dot offline" id="status-dot"></div>
+    <span id="status-label">CONNECTING</span>
+    <span id="log-label"></span>
+    <button id="btn-synthetic" type="button">SYNTH</button>
+  </div>
+
+  <div id="divider" aria-label="Resize route columns" title="Drag to resize columns">
+    <div class="divider-line"></div>
+  </div>
+
+  <div id="tooltip"></div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const DOMAIN_NAMES = {
+      'app-level': 'App / Docs',
+      discovery: 'Discovery',
+      identity: 'Identity',
+      wallet: 'Wallet',
+      analysis: 'Analysis',
+      social: 'Social',
+      channels: 'Channels',
+      market: 'Market',
+      analytics: 'Analytics',
+      capital: 'Capital',
+      other: 'Other',
+    };
+
+    const DOMAIN_COLORS = {
+      'app-level': '#ffffff',
+      discovery: '#6eb5ff',
+      identity: '#5fd89a',
+      wallet: '#ffd36e',
+      analysis: '#64dfdf',
+      social: '#c77dff',
+      channels: '#ff8e98',
+      market: '#f4b350',
+      analytics: '#72efdd',
+      capital: '#ff6d6d',
+      other: '#8b949e',
+    };
+
+    const LEFT_DOMAINS = ['app-level', 'discovery', 'identity', 'wallet', 'analysis'];
+    const RIGHT_DOMAINS = ['social', 'channels', 'market', 'analytics', 'capital', 'other'];
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip');
+    const divider = document.getElementById('divider');
+
+    let W = 0;
+    let H = 0;
+    let dpr = 1;
+    let dirty = true;
+    let hovered = null;
+
+    const routeMap = new Map();
+    const agentMap = new Map();
+    const routeSlots = new Map();
+    const visualAgents = new Map();
+    let inflightCount = 0;
+    let logInfo = null;
+    let liveConnected = false;
+    let syntheticStatus = { running: false, activeAgents: 0, agentsCreated: 0 };
+    let lastSnapshotAt = 0;
+    let interactions = { tiles: [], dots: [] };
+    let pointerX = 0;
+    let pointerY = 0;
+    let dividerDrag = null;
+    let columnSplitRatio = 0.5;
+    const layoutCache = {
+      signature: '',
+      columns: null,
+      domainRows: new Map(),
+      routeKeysByDomain: new Map(),
+      tiles: new Map(),
+    };
+
+    const MOVE_SLOWDOWN = 3;
+    const REFLOW_MOVE_MS = 220 * MOVE_SLOWDOWN;
+    const ROUTE_MOVE_MS = 900 * MOVE_SLOWDOWN;
+    const STUCK_ROUTE_MS = 2 * 60 * 1000;
+    const STUCK_REQUEST_MS = 30 * 1000;
+    const HARD_STUCK_ROUTE_MS = 10 * 60 * 1000;
+    const HARD_STUCK_REQUEST_MS = 2 * 60 * 1000;
+    const MIN_COLUMN_WIDTH = 220;
+    const MAX_MOVE_QUEUE = 8;
+    const SLOT_HOLE_MS = 12_000;
+    const GRID_TOP = 52;
+    const MIN_DOMAIN_HEADER_H = 14;
+    const MAX_DOMAIN_HEADER_H = 18;
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      invalidateLayout();
+      dirty = true;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function dotColor(agent) {
+      if (agent.phase === 'in-flight') return '#58a6ff';
+      if (agent.status >= 500) return '#f85149';
+      if (agent.status >= 400) return '#d29922';
+      return '#3fb950';
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function lerp(a, b, t) {
+      return a + ((b - a) * t);
+    }
+
+    function easeInOutCubic(t) {
+      return t < 0.5
+        ? 4 * t * t * t
+        : 1 - (Math.pow(-2 * t + 2, 3) / 2);
+    }
+
+    function formatDurationCompact(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '-';
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+      if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+      return `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`;
+    }
+
+    function formatDurationLong(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '-';
+      if (ms < 1000) return `${Math.round(ms)} ms`;
+      if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} sec`;
+      if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} min ${Math.floor((ms % 60_000) / 1000)} sec`;
+      return `${Math.floor(ms / 3_600_000)} hr ${Math.floor((ms % 3_600_000) / 60_000)} min`;
+    }
+
+    function formatTimestamp(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return '-';
+      const date = new Date(ms);
+      return date.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    function formatStatus(agent) {
+      if (!Number.isFinite(agent?.status) || agent.status <= 0) return '-';
+      return agent.statusBucket ? `${agent.status} ${agent.statusBucket}` : String(agent.status);
+    }
+
+    function invalidateLayout() {
+      layoutCache.signature = '';
+      layoutCache.columns = null;
+      layoutCache.domainRows = new Map();
+      layoutCache.routeKeysByDomain = new Map();
+      layoutCache.tiles = new Map();
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function tooltipRow(label, value) {
+      if (value == null || value === '') return '';
+      return `<div class="tt-row"><span class="tt-label">${escapeHtml(label)}</span><span class="tt-value">${escapeHtml(value)}</span></div>`;
+    }
+
+    function getMinColumnWidth(availableWidth) {
+      return Math.min(MIN_COLUMN_WIDTH, Math.max(120, Math.floor(availableWidth * 0.32)));
+    }
+
+    function updateDividerFromClientX(clientX) {
+      const top = GRID_TOP;
+      const bottom = 40;
+      const left = 24;
+      const right = 24;
+      const gutter = 18;
+      const width = Math.max(1, W - left - right - gutter);
+      const minColumnWidth = getMinColumnWidth(width);
+      const minRatio = clamp(minColumnWidth / width, 0.18, 0.45);
+      const maxRatio = 1 - minRatio;
+      const rawRatio = (clientX - left - (gutter / 2)) / width;
+      columnSplitRatio = clamp(rawRatio, minRatio, maxRatio);
+      invalidateLayout();
+      hovered = null;
+      tooltip.style.display = 'none';
+      dirty = true;
+    }
+
+    function finishDividerDrag(event) {
+      if (!dividerDrag) return;
+      if (event && divider.hasPointerCapture?.(event.pointerId)) {
+        divider.releasePointerCapture(event.pointerId);
+      }
+      dividerDrag = null;
+      document.body.classList.remove('dragging-divider');
+      dirty = true;
+    }
+
+    function getCurrentRouteMs(agent, now = Date.now()) {
+      if (Number.isFinite(agent?.routeEnteredAt)) return Math.max(0, now - agent.routeEnteredAt);
+      return Number.isFinite(agent?.currentRouteMs) ? agent.currentRouteMs : null;
+    }
+
+    function getCurrentRequestMs(agent, now = Date.now()) {
+      if (agent?.phase !== 'in-flight') return null;
+      if (Number.isFinite(agent?.startedAt)) return Math.max(0, now - agent.startedAt);
+      return Number.isFinite(agent?.currentRequestMs) ? agent.currentRequestMs : null;
+    }
+
+    function getAgentStuckLevel(agent, now = Date.now()) {
+      const routeMs = getCurrentRouteMs(agent, now);
+      const requestMs = getCurrentRequestMs(agent, now);
+      if ((Number.isFinite(requestMs) && requestMs >= HARD_STUCK_REQUEST_MS) || (Number.isFinite(routeMs) && routeMs >= HARD_STUCK_ROUTE_MS)) {
+        return 'hard';
+      }
+      if ((Number.isFinite(requestMs) && requestMs >= STUCK_REQUEST_MS) || (Number.isFinite(routeMs) && routeMs >= STUCK_ROUTE_MS)) {
+        return 'warn';
+      }
+      return null;
+    }
+
+    function domainWeight(domain, groupedRoutes) {
+      const routes = Array.from(groupedRoutes.values()).filter((route) => route.domain === domain);
+      if (routes.length === 0) return 1;
+      // Keep domain rows stable based on route structure, not live traffic volume.
+      return 1 + Math.sqrt(routes.length);
+    }
+
+    function computeMoveDuration(routeChanged, distance, queueDepth = 0) {
+      const base = routeChanged
+        ? Math.max(550 * MOVE_SLOWDOWN, Math.min(ROUTE_MOVE_MS, (300 + (distance * 1.8)) * MOVE_SLOWDOWN))
+        : Math.max(120 * MOVE_SLOWDOWN, Math.min(REFLOW_MOVE_MS, (80 + (distance * 0.8)) * MOVE_SLOWDOWN));
+      if (queueDepth <= 0) return base;
+      const speedup = Math.max(0.45, 1 - (queueDepth * 0.12));
+      return Math.max(routeChanged ? 280 : 90, base * speedup);
+    }
+
+    function startVisualMove(visual, segment, now) {
+      const distance = Math.hypot(segment.x - visual.x, segment.y - visual.y);
+      visual.fromX = visual.x;
+      visual.fromY = visual.y;
+      visual.toX = segment.x;
+      visual.toY = segment.y;
+      visual.moveStartAt = now;
+      visual.moveDurationMs = computeMoveDuration(
+        segment.routeKey !== visual.currentRouteKey,
+        distance,
+        visual.pending.length
+      );
+      visual.toRouteKey = segment.routeKey;
+      dirty = true;
+    }
+
+    function advanceVisual(visual, now) {
+      if (visual.moveDurationMs <= 0) {
+        if (visual.pending.length > 0) startVisualMove(visual, visual.pending.shift(), now);
+        return;
+      }
+
+      const progress = clamp((now - visual.moveStartAt) / visual.moveDurationMs, 0, 1);
+      const eased = easeInOutCubic(progress);
+      visual.x = lerp(visual.fromX, visual.toX, eased);
+      visual.y = lerp(visual.fromY, visual.toY, eased);
+
+      if (progress < 1) {
+        dirty = true;
+        return;
+      }
+
+      visual.x = visual.toX;
+      visual.y = visual.toY;
+      visual.moveDurationMs = 0;
+      visual.currentRouteKey = visual.toRouteKey;
+      if (visual.pending.length > 0) startVisualMove(visual, visual.pending.shift(), now);
+    }
+
+    function syncVisualAgent(agent, targetX, targetY, now) {
+      let visual = visualAgents.get(agent.id);
+      if (!visual) {
+        visual = {
+          x: targetX,
+          y: targetY,
+          fromX: targetX,
+          fromY: targetY,
+          toX: targetX,
+          toY: targetY,
+          moveStartAt: now,
+          moveDurationMs: 0,
+          currentRouteKey: agent.routeKey,
+          toRouteKey: agent.routeKey,
+          pending: [],
+          seenAt: now,
+        };
+        visualAgents.set(agent.id, visual);
+        return visual;
+      }
+
+      advanceVisual(visual, now);
+
+      const activeTarget = visual.pending.length > 0
+        ? visual.pending[visual.pending.length - 1]
+        : {
+          routeKey: visual.moveDurationMs > 0 ? visual.toRouteKey : visual.currentRouteKey,
+          x: visual.moveDurationMs > 0 ? visual.toX : visual.x,
+          y: visual.moveDurationMs > 0 ? visual.toY : visual.y,
+        };
+      const distance = Math.hypot(targetX - activeTarget.x, targetY - activeTarget.y);
+      const routeChanged = activeTarget.routeKey !== agent.routeKey;
+
+      if (routeChanged) {
+        const pendingLast = visual.pending[visual.pending.length - 1];
+        if (pendingLast && pendingLast.routeKey === agent.routeKey) {
+          pendingLast.x = targetX;
+          pendingLast.y = targetY;
+        } else if (visual.moveDurationMs > 0 || visual.pending.length > 0) {
+          visual.pending.push({ routeKey: agent.routeKey, x: targetX, y: targetY });
+          if (visual.pending.length > MAX_MOVE_QUEUE) visual.pending = visual.pending.slice(-MAX_MOVE_QUEUE);
+        } else {
+          startVisualMove(visual, { routeKey: agent.routeKey, x: targetX, y: targetY }, now);
+        }
+      } else if (distance > 0.75) {
+        if (visual.pending.length > 0) {
+          const pendingLast = visual.pending[visual.pending.length - 1];
+          pendingLast.x = targetX;
+          pendingLast.y = targetY;
+        } else if (visual.moveDurationMs > 0) {
+          visual.toX = targetX;
+          visual.toY = targetY;
+        } else {
+          startVisualMove(visual, { routeKey: agent.routeKey, x: targetX, y: targetY }, now);
+        }
+      }
+      visual.seenAt = now;
+      return visual;
+    }
+
+    function compactPath(path) {
+      return String(path || '')
+        .replace(/^\/api\/v1\//, '')
+        .replace(/^\/docs\//, 'docs/')
+        .replace(/^\//, '');
+    }
+
+    function domainHeaderLabel(domain) {
+      return String(DOMAIN_NAMES[domain] || domain || '');
+    }
+
+    function domainHeaderHeight(row) {
+      return Math.max(MIN_DOMAIN_HEADER_H, Math.min(MAX_DOMAIN_HEADER_H, row.h * 0.16));
+    }
+
+    function drawDomainHeader(domain, row, routes) {
+      const headerH = domainHeaderHeight(row);
+      const activeAgents = routes.reduce((sum, route) => sum + route.agents.length, 0);
+      const inflight = routes.reduce((sum, route) => sum + (route.inFlight || 0), 0);
+      const metric = `${routes.length}r ${activeAgents}a ${inflight}i`;
+
+      ctx.save();
+      ctx.fillStyle = DOMAIN_COLORS[domain] || '#8b949e';
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(row.x, row.y, row.w, headerH);
+      ctx.globalAlpha = 1;
+
+      ctx.strokeStyle = '#21262d';
+      ctx.beginPath();
+      ctx.moveTo(row.x, row.y + headerH + 0.5);
+      ctx.lineTo(row.x + row.w, row.y + headerH + 0.5);
+      ctx.stroke();
+
+      ctx.font = '700 9px "SF Mono", monospace';
+      ctx.fillStyle = '#e6edf3';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(domainHeaderLabel(domain), row.x + 8, row.y + (headerH / 2), row.w * 0.62);
+
+      ctx.font = '8px "SF Mono", monospace';
+      ctx.fillStyle = '#8b949e';
+      ctx.textAlign = 'right';
+      ctx.fillText(metric, row.x + row.w - 8, row.y + (headerH / 2));
+      ctx.restore();
+    }
+
+    function methodBadgeColors(method) {
+      switch (String(method || 'GET').toUpperCase()) {
+        case 'GET':
+          return { fill: 'rgba(63,185,80,0.16)', stroke: 'rgba(63,185,80,0.45)', text: '#7ee787' };
+        case 'POST':
+          return { fill: 'rgba(210,153,34,0.16)', stroke: 'rgba(210,153,34,0.45)', text: '#ffd36e' };
+        case 'PUT':
+          return { fill: 'rgba(88,166,255,0.16)', stroke: 'rgba(88,166,255,0.45)', text: '#9ecbff' };
+        case 'DELETE':
+          return { fill: 'rgba(248,81,73,0.16)', stroke: 'rgba(248,81,73,0.45)', text: '#ffb3ad' };
+        default:
+          return { fill: 'rgba(139,148,158,0.16)', stroke: 'rgba(139,148,158,0.35)', text: '#c8d6e0' };
+      }
+    }
+
+    function methodBadgeText(method) {
+      switch (String(method || 'GET').toUpperCase()) {
+        case 'GET': return 'G';
+        case 'POST': return 'P';
+        case 'PUT': return 'U';
+        case 'DELETE': return 'D';
+        default: return String(method || 'GET').toUpperCase().slice(0, 1);
+      }
+    }
+
+    function drawMethodBadge(method, x, y) {
+      const fullMethod = String(method || 'GET').toUpperCase();
+      const label = methodBadgeText(fullMethod);
+      const colors = methodBadgeColors(fullMethod);
+      ctx.save();
+      ctx.font = '700 7px "SF Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const width = 12;
+      ctx.fillStyle = colors.fill;
+      ctx.fillRect(x, y, width, 10);
+      ctx.strokeStyle = colors.stroke;
+      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, 9);
+      ctx.fillStyle = colors.text;
+      ctx.fillText(label, x + 3, y + 2);
+      ctx.restore();
+      return width;
+    }
+
+    function shortRouteLabel(path) {
+      const compact = compactPath(path);
+      if (!compact) return '/';
+      const parts = compact.split('/').filter(Boolean);
+      if (parts.length === 0) return '/';
+      const last = parts[parts.length - 1];
+      if (last.startsWith(':') && parts.length > 1) {
+        return `${parts[parts.length - 2]}/${last}`;
+      }
+      return last;
+    }
+
+    function isRouteHovered(routeKey) {
+      if (!hovered) return false;
+      if (hovered.routeKey === routeKey) return true;
+      return hovered.route?.routeKey === routeKey;
+    }
+
+    function sortRoutes(a, b) {
+      const groupCmp = String(a.group || '').localeCompare(String(b.group || ''));
+      if (groupCmp !== 0) return groupCmp;
+      const pathCmp = String(a.routePath || a.routeLabel || '').localeCompare(String(b.routePath || b.routeLabel || ''));
+      if (pathCmp !== 0) return pathCmp;
+      return String(a.method || 'GET').localeCompare(String(b.method || 'GET'));
+    }
+
+    function routeLayoutStamp(route) {
+      return [
+        route.routeKey,
+        route.domain || 'other',
+        route.group || 'other',
+        route.method || 'GET',
+        route.routePath || route.routeLabel || '',
+      ].join('|');
+    }
+
+    function snapRect(rect) {
+      const x = Math.round(rect.x);
+      const y = Math.round(rect.y);
+      const w = Math.max(1, Math.round(rect.w));
+      const h = Math.max(1, Math.round(rect.h));
+      return { x, y, w, h };
+    }
+
+    function buildLayoutSignature(groupedRoutes) {
+      const routeSets = [...LEFT_DOMAINS, ...RIGHT_DOMAINS].map((domain) => {
+        const routes = Array.from(groupedRoutes.values())
+          .filter((route) => route.domain === domain)
+          .sort(sortRoutes)
+          .map(routeLayoutStamp)
+          .join(',');
+        return `${domain}:${routes}`;
+      }).join(';');
+      return `${W}x${H}|${columnSplitRatio.toFixed(4)}|${routeSets}`;
+    }
+
+    function computeLayout(groupedRoutes) {
+      const columns = layoutColumns();
+      const domainRows = new Map();
+      const routeKeysByDomain = new Map();
+      const tiles = new Map();
+
+      for (const column of [columns.left, columns.right]) {
+        const weights = column.domains.map((domain) => domainWeight(domain, groupedRoutes));
+        const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+        let cursorY = column.y;
+
+        for (let i = 0; i < column.domains.length; i++) {
+          const domain = column.domains[i];
+          const rowHeight = (column.h * weights[i]) / totalWeight;
+          const row = snapRect({
+            x: column.x,
+            y: cursorY,
+            w: column.w,
+            h: rowHeight,
+          });
+          cursorY += rowHeight;
+          domainRows.set(domain, row);
+
+          const routes = Array.from(groupedRoutes.values())
+            .filter((route) => route.domain === domain)
+            .sort(sortRoutes);
+          routeKeysByDomain.set(domain, routes.map((route) => route.routeKey));
+
+          const headerH = domainHeaderHeight(row);
+          const inner = snapRect({
+            x: row.x + 2,
+            y: row.y + headerH + 2,
+            w: row.w - 4,
+            h: row.h - headerH - 4,
+          });
+          if (routes.length === 0 || inner.w <= 4 || inner.h <= 4) continue;
+
+          const cols = Math.max(1, Math.ceil(Math.sqrt(routes.length * (inner.w / Math.max(inner.h, 1)))));
+          const rows = Math.max(1, Math.ceil(routes.length / cols));
+          const tileW = inner.w / cols;
+          const tileH = inner.h / rows;
+
+          for (let idx = 0; idx < routes.length; idx++) {
+            const route = routes[idx];
+            const col = idx % cols;
+            const gridRow = Math.floor(idx / cols);
+            tiles.set(route.routeKey, snapRect({
+              x: inner.x + col * tileW + 2,
+              y: inner.y + gridRow * tileH + 2,
+              w: tileW - 4,
+              h: tileH - 4,
+            }));
+          }
+        }
+      }
+
+      return { columns, domainRows, routeKeysByDomain, tiles };
+    }
+
+    function ensureLayout(groupedRoutes) {
+      const signature = buildLayoutSignature(groupedRoutes);
+      if (layoutCache.signature === signature) return layoutCache;
+      const next = computeLayout(groupedRoutes);
+      layoutCache.signature = signature;
+      layoutCache.columns = next.columns;
+      layoutCache.domainRows = next.domainRows;
+      layoutCache.routeKeysByDomain = next.routeKeysByDomain;
+      layoutCache.tiles = next.tiles;
+      return layoutCache;
+    }
+
+    function syncRouteSlots(groupedRoutes, now = Date.now()) {
+      const activeKeys = new Set();
+      for (const route of groupedRoutes.values()) {
+        activeKeys.add(route.routeKey);
+        const agentsById = new Map(route.agents.map((agent) => [agent.id, agent]));
+        const previousSlots = routeSlots.get(route.routeKey) || [];
+        const nextSlots = [];
+
+        for (const slot of previousSlots) {
+          if (slot?.agentId && agentsById.has(slot.agentId)) {
+            nextSlots.push({ agentId: slot.agentId, vacatedAt: null });
+            continue;
+          }
+          if (slot?.agentId && !agentsById.has(slot.agentId)) {
+            nextSlots.push({ agentId: null, vacatedAt: now });
+            continue;
+          }
+          if (!slot?.agentId && Number.isFinite(slot?.vacatedAt) && (now - slot.vacatedAt) <= SLOT_HOLE_MS) {
+            nextSlots.push(slot);
+          }
+        }
+
+        const seen = new Set(nextSlots.map((slot) => slot.agentId).filter(Boolean));
+        const newcomers = route.agents
+          .filter((agent) => !seen.has(agent.id))
+          .sort((a, b) => {
+            const aEntered = Number.isFinite(a.routeEnteredAt) ? a.routeEnteredAt : (a.lastEventTime || 0);
+            const bEntered = Number.isFinite(b.routeEnteredAt) ? b.routeEnteredAt : (b.lastEventTime || 0);
+            if (aEntered !== bEntered) return aEntered - bEntered;
+            const aSeen = a.lastEventTime || 0;
+            const bSeen = b.lastEventTime || 0;
+            if (aSeen !== bSeen) return aSeen - bSeen;
+            return String(a.id).localeCompare(String(b.id));
+          });
+
+        for (const agent of newcomers) {
+          const emptyIndex = nextSlots.findIndex((slot) => !slot.agentId);
+          if (emptyIndex >= 0) nextSlots[emptyIndex] = { agentId: agent.id, vacatedAt: null };
+          else nextSlots.push({ agentId: agent.id, vacatedAt: null });
+        }
+
+        while (nextSlots.length > 0) {
+          const last = nextSlots[nextSlots.length - 1];
+          if (last?.agentId) break;
+          if (Number.isFinite(last?.vacatedAt) && (now - last.vacatedAt) <= SLOT_HOLE_MS) break;
+          nextSlots.pop();
+        }
+
+        routeSlots.set(route.routeKey, nextSlots);
+        route.slotEntries = nextSlots.map((slot) => slot.agentId ? agentsById.get(slot.agentId) : null);
+        route.agents = route.slotEntries.filter(Boolean);
+        route.inFlight = route.agents.filter((agent) => agent.phase === 'in-flight').length;
+        const ages = route.agents
+          .map((agent) => getCurrentRouteMs(agent, now))
+          .filter((value) => Number.isFinite(value));
+        route.oldestRouteMs = ages.length > 0 ? Math.max(...ages) : null;
+        route.avgRouteMs = ages.length > 0 ? ages.reduce((sum, value) => sum + value, 0) / ages.length : null;
+        route.stuckAgents = route.agents.filter((agent) => getAgentStuckLevel(agent, now)).length;
+      }
+
+      for (const routeKey of Array.from(routeSlots.keys())) {
+        if (activeKeys.has(routeKey)) continue;
+        routeSlots.delete(routeKey);
+      }
+    }
+
+    function upsertRoute(routeLike) {
+      if (!routeLike || !routeLike.routeKey) return;
+      const existing = routeMap.get(routeLike.routeKey) || {};
+      const layoutChanged = (
+        !existing.routeKey
+        || existing.routePath !== routeLike.routePath
+        || existing.routeLabel !== routeLike.routeLabel
+        || existing.method !== routeLike.method
+        || existing.domain !== routeLike.domain
+        || existing.group !== routeLike.group
+      );
+      routeMap.set(routeLike.routeKey, {
+        ...existing,
+        ...routeLike,
+      });
+      if (layoutChanged) invalidateLayout();
+    }
+
+    function applySnapshot(snapshot) {
+      // Keep seen routes pinned so tiles stay stable across live snapshot refreshes.
+      agentMap.clear();
+      let layoutChanged = false;
+      for (const route of snapshot.routes || []) {
+        const existing = routeMap.get(route.routeKey);
+        if (
+          !existing
+          || existing.routePath !== route.routePath
+          || existing.routeLabel !== route.routeLabel
+          || existing.method !== route.method
+          || existing.domain !== route.domain
+          || existing.group !== route.group
+        ) {
+          layoutChanged = true;
+        }
+        routeMap.set(route.routeKey, { ...existing, ...route });
+      }
+      for (const agent of snapshot.agents || []) {
+        agentMap.set(agent.id, { ...agent });
+        upsertRoute({
+          routeKey: agent.routeKey,
+          routePath: agent.routePath,
+          routeLabel: agent.routeLabel,
+          method: agent.method,
+          domain: agent.domain,
+          group: agent.group,
+          surfaceType: agent.surfaceType,
+          canonical: agent.canonical,
+          lastEventTime: agent.lastEventTime,
+        });
+      }
+      if (layoutChanged) invalidateLayout();
+      inflightCount = snapshot.stats?.inFlight || 0;
+      logInfo = snapshot.log || null;
+      lastSnapshotAt = snapshot.builtAt || Date.now();
+      dirty = true;
+      updateHud();
+    }
+
+    function applyEvent(event) {
+      if (event.type === 'snapshot' && event.snapshot) {
+        applySnapshot(event.snapshot);
+        return;
+      }
+      if (event.routeKey) {
+        upsertRoute({
+          routeKey: event.routeKey,
+          routePath: event.routePath,
+          routeLabel: event.routePath,
+          method: event.method,
+          domain: event.domain,
+          group: event.group,
+          lastEventTime: event.ts,
+        });
+      }
+      if (event.event === 'request_start') inflightCount += 1;
+      if (event.event === 'request_finish') inflightCount = Math.max(0, inflightCount - 1);
+      if (event.agent) {
+        agentMap.set(event.agent.id, { ...event.agent });
+        upsertRoute({
+          routeKey: event.agent.routeKey,
+          routePath: event.agent.routePath,
+          routeLabel: event.agent.routeLabel,
+          method: event.agent.method,
+          domain: event.agent.domain,
+          group: event.agent.group,
+          surfaceType: event.agent.surfaceType,
+          canonical: event.agent.canonical,
+          lastEventTime: event.agent.lastEventTime,
+        });
+      }
+      dirty = true;
+      updateHud();
+    }
+
+    function computeRouteGroups(now = Date.now()) {
+      const grouped = new Map();
+      for (const route of routeMap.values()) {
+        grouped.set(route.routeKey, { ...route, agents: [] });
+      }
+      for (const agent of agentMap.values()) {
+        if (!agent.routeKey) continue;
+        if (!grouped.has(agent.routeKey)) {
+          grouped.set(agent.routeKey, {
+            routeKey: agent.routeKey,
+            routePath: agent.routePath,
+            routeLabel: agent.routeLabel,
+            method: agent.method,
+            domain: agent.domain || 'other',
+            group: agent.group || 'other',
+            inFlight: 0,
+            agents: [],
+          });
+        }
+        grouped.get(agent.routeKey).agents.push(agent);
+      }
+      for (const route of grouped.values()) {
+      }
+      syncRouteSlots(grouped, now);
+      return grouped;
+    }
+
+    function updateHud() {
+      document.getElementById('stat-agents').textContent = agentMap.size.toLocaleString();
+      document.getElementById('stat-routes').textContent = routeMap.size.toLocaleString();
+      document.getElementById('stat-inflight').textContent = inflightCount.toLocaleString();
+      if (logInfo) {
+        const bytes = Number(logInfo.lastSizeBytes || 0);
+        const mb = (bytes / 1024 / 1024).toFixed(1);
+        document.getElementById('log-label').textContent = `LOG ${mb}MB ${String(logInfo.level || 'ok').toUpperCase()}`;
+      }
+    }
+
+    function setLiveStatus(connected, label) {
+      liveConnected = connected;
+      document.getElementById('status-dot').className = `status-dot ${connected ? 'live' : 'offline'}`;
+      document.getElementById('status-label').textContent = label;
+    }
+
+    function renderSyntheticButton(state = syntheticStatus, pendingLabel = '') {
+      const button = document.getElementById('btn-synthetic');
+      if (!button) return;
+      if (pendingLabel) {
+        button.textContent = pendingLabel;
+        button.disabled = true;
+        return;
+      }
+      const activeAgents = Number(state.activeAgents || 0);
+      button.textContent = state.running ? `STOP ${activeAgents}A` : 'SYNTH';
+      button.disabled = false;
+      button.title = state.running
+        ? 'Stop synthetic traffic'
+        : 'Start synthetic traffic';
+    }
+
+    async function refreshSyntheticStatus() {
+      try {
+        const res = await fetch('/api/demo/synthetic', { cache: 'no-store' });
+        if (!res.ok) return;
+        syntheticStatus = await res.json();
+        renderSyntheticButton();
+      } catch {}
+    }
+
+    async function toggleSyntheticTraffic() {
+      const nextAction = syntheticStatus.running ? 'STOPPING…' : 'STARTING…';
+      renderSyntheticButton(syntheticStatus, nextAction);
+      try {
+        const path = syntheticStatus.running
+          ? '/api/demo/synthetic/stop'
+          : '/api/demo/synthetic/start';
+        const res = await fetch(path, { method: 'POST' });
+        const data = await res.json();
+        syntheticStatus = data;
+        renderSyntheticButton();
+      } catch {
+        renderSyntheticButton(syntheticStatus, 'ERROR');
+        setTimeout(() => renderSyntheticButton(), 1500);
+      }
+    }
+
+    function layoutColumns() {
+      const top = GRID_TOP;
+      const bottom = 40;
+      const left = 24;
+      const right = 24;
+      const gutter = 18;
+      const width = Math.max(1, W - left - right - gutter);
+      const minColumnWidth = getMinColumnWidth(width);
+      const minRatio = clamp(minColumnWidth / width, 0.18, 0.45);
+      columnSplitRatio = clamp(columnSplitRatio, minRatio, 1 - minRatio);
+      const leftWidth = width * columnSplitRatio;
+      const rightWidth = width - leftWidth;
+      const dividerX = left + leftWidth + (gutter / 2);
+      divider.style.left = `${dividerX}px`;
+      divider.style.top = `${top}px`;
+      divider.style.height = `${Math.max(0, H - top - bottom)}px`;
+      return {
+        left: { x: left, y: top, w: leftWidth, h: H - top - bottom, domains: LEFT_DOMAINS },
+        right: { x: left + leftWidth + gutter, y: top, w: rightWidth, h: H - top - bottom, domains: RIGHT_DOMAINS },
+      };
+    }
+
+    function drawColumn(column, groupedRoutes, now, seenAgents, layout, dotDraws) {
+      for (const domain of column.domains) {
+        const row = layout.domainRows.get(domain);
+        if (!row) continue;
+        drawDomainRow(domain, row, groupedRoutes, now, seenAgents, layout, dotDraws);
+      }
+    }
+
+    function drawDomainRow(domain, row, groupedRoutes, now, seenAgents, layout, dotDraws) {
+      const routeKeys = layout.routeKeysByDomain.get(domain) || [];
+      const routes = routeKeys.map((routeKey) => groupedRoutes.get(routeKey)).filter(Boolean);
+      const headerH = domainHeaderHeight(row);
+      ctx.fillStyle = 'rgba(15,19,24,0.9)';
+      ctx.fillRect(row.x, row.y, row.w, row.h - 2);
+      ctx.strokeStyle = '#161b22';
+      ctx.strokeRect(row.x + 0.5, row.y + 0.5, row.w - 1, row.h - 3);
+
+      drawDomainHeader(domain, row, routes);
+
+      if (routeKeys.length === 0) {
+        ctx.fillStyle = '#484f58';
+        ctx.font = '8px "SF Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('no active routes', row.x + 10, row.y + headerH + ((row.h - headerH) / 2), row.w - 20);
+        return;
+      }
+
+      for (const route of routes) {
+        const tile = layout.tiles.get(route.routeKey);
+        if (!route || !tile) continue;
+        drawRouteTile(route, tile, now, seenAgents, dotDraws);
+      }
+    }
+
+    function drawRouteTile(route, tile, now, seenAgents, dotDraws) {
+      const border = hovered?.type === 'tile' && hovered.routeKey === route.routeKey ? '#58a6ff' : '#21262d';
+      ctx.fillStyle = 'rgba(13,17,23,0.88)';
+      ctx.fillRect(tile.x, tile.y, tile.w, tile.h);
+      ctx.strokeStyle = border;
+      ctx.strokeRect(tile.x + 0.5, tile.y + 0.5, tile.w - 1, tile.h - 1);
+
+      ctx.fillStyle = DOMAIN_COLORS[route.domain] || '#8b949e';
+      ctx.globalAlpha = 0.18;
+      ctx.fillRect(tile.x, tile.y, tile.w, 14);
+      ctx.globalAlpha = 1;
+
+      if (tile.h > 18 && tile.w > 42) {
+        const compact = compactPath(route.routePath || route.routeLabel);
+        const label = isRouteHovered(route.routeKey) ? compact : shortRouteLabel(route.routePath || route.routeLabel);
+        const badgeX = tile.x + 4;
+        const badgeY = tile.y + 2;
+        const badgeW = drawMethodBadge(route.method, badgeX, badgeY);
+        const count = `${route.agents.length}`;
+        ctx.fillStyle = route.inFlight > 0 ? '#58a6ff' : '#8b949e';
+        ctx.font = '600 8px "SF Mono", monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.fillText(count, tile.x + tile.w - 4, tile.y + 3);
+
+        const countWidth = Math.ceil(ctx.measureText(count).width);
+        const labelX = badgeX + badgeW + 4;
+        const labelMax = Math.max(0, tile.w - badgeW - countWidth - 18);
+        if (labelMax > 8) {
+          ctx.fillStyle = '#c8d6e0';
+          ctx.textAlign = 'left';
+          ctx.fillText(label, labelX, tile.y + 3, labelMax);
+        }
+      }
+
+      const inner = {
+        x: tile.x + 4,
+        y: tile.y + 18,
+        w: tile.w - 8,
+        h: tile.h - 22,
+      };
+      interactions.tiles.push({ ...tile, type: 'tile', routeKey: route.routeKey, route });
+
+      const slotEntries = Array.isArray(route.slotEntries) ? route.slotEntries : route.agents;
+      if (inner.w <= 4 || inner.h <= 4 || slotEntries.length === 0) return;
+
+      const dotRadius = Math.max(1.5, Math.min(4.5, Math.min(inner.w, inner.h) / 10));
+      const cell = dotRadius * 2 + 1.5;
+      const cols = Math.max(1, Math.floor(inner.w / cell));
+      const visible = Math.min(slotEntries.length, cols * Math.max(1, Math.floor(inner.h / cell)));
+
+      for (let i = 0; i < visible; i++) {
+        const agent = slotEntries[i];
+        if (!agent) continue;
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const targetX = inner.x + col * cell + dotRadius + 1;
+        const targetY = inner.y + row * cell + dotRadius + 1;
+        const visual = syncVisualAgent(agent, targetX, targetY, now);
+        const cx = visual.x;
+        const cy = visual.y;
+        seenAgents.add(agent.id);
+        dotDraws.push({
+          x: cx,
+          y: cy,
+          r: dotRadius,
+          agent,
+          route,
+          moving: visual.moveDurationMs > 0 || visual.pending.length > 0,
+          inFlight: agent.phase === 'in-flight',
+        });
+      }
+
+      const hiddenAgents = slotEntries.slice(visible).filter(Boolean).length;
+      if (hiddenAgents > 0) {
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '8px "SF Mono", monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`+${hiddenAgents}`, tile.x + tile.w - 4, tile.y + tile.h - 10);
+      }
+    }
+
+    function drawDots(dotDraws) {
+      dotDraws
+        .sort((a, b) => {
+          if (a.moving !== b.moving) return a.moving ? 1 : -1;
+          if (a.inFlight !== b.inFlight) return a.inFlight ? 1 : -1;
+          return String(a.agent.id).localeCompare(String(b.agent.id));
+        })
+        .forEach((dot) => {
+          ctx.beginPath();
+          ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+          ctx.fillStyle = dotColor(dot.agent);
+          ctx.globalAlpha = 0.95;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          if (dot.inFlight) {
+            ctx.strokeStyle = '#9ecbff';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+          }
+          interactions.dots.push({
+            x: dot.x,
+            y: dot.y,
+            r: dot.r + 2,
+            type: 'dot',
+            agent: dot.agent,
+            route: dot.route,
+          });
+        });
+    }
+
+    function draw() {
+      if (!dirty) return;
+      dirty = false;
+      interactions = { tiles: [], dots: [] };
+      const now = Date.now();
+      const seenAgents = new Set();
+      const dotDraws = [];
+
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, W, H);
+
+      const groupedRoutes = computeRouteGroups(now);
+      const layout = ensureLayout(groupedRoutes);
+      drawColumn(layout.columns.left, groupedRoutes, now, seenAgents, layout, dotDraws);
+      drawColumn(layout.columns.right, groupedRoutes, now, seenAgents, layout, dotDraws);
+      drawDots(dotDraws);
+
+      for (const [agentId, visual] of visualAgents) {
+        if (seenAgents.has(agentId)) continue;
+        if (!agentMap.has(agentId)) {
+          visualAgents.delete(agentId);
+          continue;
+        }
+        if ((now - visual.seenAt) > 5_000) visualAgents.delete(agentId);
+      }
+    }
+
+    function showTooltip(x, y, payload) {
+      if (!payload) {
+        tooltip.style.display = 'none';
+        return;
+      }
+      const now = Date.now();
+      if (payload.type === 'dot') {
+        const agent = payload.agent;
+        const routeMs = getCurrentRouteMs(agent, now);
+        const requestMs = getCurrentRequestMs(agent, now);
+        const sessionAgeMs = Number.isFinite(agent.sessionStartedAt)
+          ? Math.max(0, now - agent.sessionStartedAt)
+          : (Number.isFinite(agent.sessionAgeMs) ? agent.sessionAgeMs : null);
+        const lastSeenMs = Number.isFinite(agent.lastEventTime) ? Math.max(0, now - agent.lastEventTime) : null;
+        const dwellHistory = Array.isArray(agent.dwellHistory) ? agent.dwellHistory.slice(-3).reverse() : [];
+        const rows = [
+          tooltipRow('route', agent.routePath),
+          agent.rawPath && agent.rawPath !== agent.routePath ? tooltipRow('raw path', agent.rawPath) : '',
+          tooltipRow('method', agent.method),
+          tooltipRow('domain', DOMAIN_NAMES[agent.domain] || agent.domain),
+          tooltipRow('group', agent.group),
+          tooltipRow('surface', agent.surfaceType),
+          tooltipRow('phase', agent.phase),
+          tooltipRow('status', formatStatus(agent)),
+          tooltipRow('session', formatDurationLong(sessionAgeMs)),
+          tooltipRow('session start', formatTimestamp(agent.sessionStartedAt)),
+          agent.registeredAt ? tooltipRow('registered', formatTimestamp(agent.registeredAt)) : '',
+          tooltipRow('on route', formatDurationLong(routeMs)),
+          tooltipRow('entered route', formatTimestamp(agent.routeEnteredAt)),
+          requestMs == null ? '' : tooltipRow('in request', formatDurationLong(requestMs)),
+          requestMs == null ? '' : tooltipRow('request start', formatTimestamp(agent.startedAt)),
+          tooltipRow('last seen', lastSeenMs == null ? '-' : `${formatDurationLong(lastSeenMs)} ago`),
+          tooltipRow('last event', formatTimestamp(agent.lastEventTime)),
+          tooltipRow('requests', agent.requestCount),
+          agent.resultCount !== agent.requestCount ? tooltipRow('results', agent.resultCount) : '',
+          agent.traceId ? tooltipRow('trace', agent.traceId) : '',
+        ].filter(Boolean);
+        const dwellHtml = dwellHistory.length === 0
+          ? ''
+          : `<div class="tt-divider"></div>${dwellHistory.map((entry) => (
+            tooltipRow(compactPath(entry.routePath), `${formatDurationCompact(entry.dwellMs)} • left ${formatTimestamp(entry.leftAt)}`)
+          )).join('')}<div class="tt-note">Recent route stays</div>`;
+        tooltip.innerHTML = `<div class="tt-title">${escapeHtml(agent.id)}</div>${rows.join('')}${dwellHtml}`;
+      } else {
+        const route = payload.route;
+        const ages = route.agents
+          .map((agent) => getCurrentRouteMs(agent, now))
+          .filter((value) => Number.isFinite(value));
+        const oldest = ages.length > 0 ? Math.max(...ages) : null;
+        const avg = ages.length > 0 ? (ages.reduce((sum, value) => sum + value, 0) / ages.length) : null;
+        tooltip.innerHTML = `
+          <div class="tt-title">${escapeHtml(route.routePath)}</div>
+          ${tooltipRow('method', route.method)}
+          ${tooltipRow('domain', DOMAIN_NAMES[route.domain] || route.domain)}
+          ${tooltipRow('group', route.group)}
+          ${tooltipRow('surface', route.surfaceType)}
+          ${tooltipRow('agents', route.agents.length)}
+          ${tooltipRow('in flight', route.inFlight || 0)}
+          ${tooltipRow('oldest stay', formatDurationLong(oldest))}
+          ${tooltipRow('avg stay', formatDurationLong(avg))}
+        `;
+      }
+
+      let tx = x + 14;
+      let ty = y + 14;
+      tooltip.style.display = 'block';
+      const rect = tooltip.getBoundingClientRect();
+      if (tx + rect.width > W) tx = x - rect.width + 4;
+      if (ty + rect.height > H) ty = H - rect.height - 8;
+      tooltip.style.left = `${Math.max(8, tx)}px`;
+      tooltip.style.top = `${Math.max(8, ty)}px`;
+    }
+
+    canvas.addEventListener('mousemove', (event) => {
+      if (dividerDrag) return;
+      const x = event.clientX;
+      const y = event.clientY;
+      pointerX = x;
+      pointerY = y;
+      let next = null;
+      for (const dot of interactions.dots) {
+        const dx = x - dot.x;
+        const dy = y - dot.y;
+        if ((dx * dx + dy * dy) <= (dot.r * dot.r)) {
+          next = dot;
+          break;
+        }
+      }
+      if (!next) {
+        next = interactions.tiles.find(tile => (
+          x >= tile.x && x <= tile.x + tile.w && y >= tile.y && y <= tile.y + tile.h
+        )) || null;
+      }
+      hovered = next;
+      showTooltip(x, y, next);
+      dirty = true;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (dividerDrag) return;
+      hovered = null;
+      tooltip.style.display = 'none';
+      dirty = true;
+    });
+
+    divider.addEventListener('pointerdown', (event) => {
+      dividerDrag = { pointerId: event.pointerId };
+      divider.setPointerCapture?.(event.pointerId);
+      document.body.classList.add('dragging-divider');
+      updateDividerFromClientX(event.clientX);
+      event.preventDefault();
+    });
+
+    divider.addEventListener('pointermove', (event) => {
+      if (!dividerDrag) return;
+      updateDividerFromClientX(event.clientX);
+      event.preventDefault();
+    });
+
+    divider.addEventListener('pointerup', finishDividerDrag);
+    divider.addEventListener('pointercancel', finishDividerDrag);
+    window.addEventListener('pointermove', (event) => {
+      if (!dividerDrag) return;
+      updateDividerFromClientX(event.clientX);
+    });
+    window.addEventListener('pointerup', finishDividerDrag);
+
+    async function loadSnapshot() {
+      const res = await fetch('/api/journey');
+      const snapshot = await res.json();
+      applySnapshot(snapshot);
+    }
+
+    function connectSse() {
+      let es;
+      try {
+        es = new EventSource('/api/journey/events');
+      } catch {
+        setLiveStatus(false, 'SSE FAILED');
+        return;
+      }
+
+      es.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+          applyEvent(event);
+          setLiveStatus(true, 'LIVE');
+        } catch {}
+      };
+
+      es.onerror = () => {
+        es.close();
+        setLiveStatus(false, 'RECONNECTING');
+        setTimeout(connectSse, 3000);
+      };
+    }
+
+    async function init() {
+      setLiveStatus(false, 'LOADING');
+      renderSyntheticButton();
+      document.getElementById('btn-synthetic').addEventListener('click', toggleSyntheticTraffic);
+      await loadSnapshot();
+      await refreshSyntheticStatus();
+      connectSse();
+      setInterval(() => {
+        if (!liveConnected) loadSnapshot().catch(() => {});
+      }, 15000);
+      setInterval(() => {
+        refreshSyntheticStatus().catch(() => {});
+      }, 2000);
+      setInterval(() => {
+        if (hovered) showTooltip(pointerX, pointerY, hovered);
+      }, 1000);
+      requestAnimationFrame(function loop() {
+        draw();
+        requestAnimationFrame(loop);
+      });
+    }
+
+    init().catch(() => {
+      setLiveStatus(false, 'LOAD FAILED');
+    });
+  </script>
+</body>
+</html>
