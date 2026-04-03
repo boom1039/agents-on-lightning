@@ -194,6 +194,49 @@ export function normalizeFreeText(s, {
 /**
  * Strip control characters and truncate for safe logging.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function validateUUID(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'ID must be a string' };
+  if (!UUID_RE.test(s)) return { valid: false, reason: 'Invalid ID format (expected UUID)' };
+  return { valid: true };
+}
+
+export function clampQueryInt(value, defaultVal, min, max) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return defaultVal;
+  return Math.max(min, Math.min(max, n));
+}
+
+const ALLIANCE_ID_RE = /^alliance-[0-9a-f]{8}$/;
+const TOURNAMENT_ID_RE = /^tourn-[0-9a-f]{8}$/;
+const ACTION_ID_RE = /^act-\d{10,16}-[a-z0-9]{2,8}$/;
+const SAFE_EXTERNAL_ID_RE = /^[a-zA-Z0-9\-]{1,64}$/;
+
+export function validateAllianceId(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'alliance ID must be a string' };
+  if (!ALLIANCE_ID_RE.test(s)) return { valid: false, reason: 'Invalid alliance ID format (expected alliance-XXXXXXXX)' };
+  return { valid: true };
+}
+
+export function validateTournamentId(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'tournament ID must be a string' };
+  if (!TOURNAMENT_ID_RE.test(s)) return { valid: false, reason: 'Invalid tournament ID format (expected tourn-XXXXXXXX)' };
+  return { valid: true };
+}
+
+export function validateActionId(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'action ID must be a string' };
+  if (!ACTION_ID_RE.test(s)) return { valid: false, reason: 'Invalid action ID format' };
+  return { valid: true };
+}
+
+export function validateSwapId(s) {
+  if (typeof s !== 'string') return { valid: false, reason: 'swap ID must be a string' };
+  if (!SAFE_EXTERNAL_ID_RE.test(s)) return { valid: false, reason: 'Invalid swap ID format (alphanumeric + hyphens, max 64 chars)' };
+  return { valid: true };
+}
+
 export function sanitizeForLog(s, maxLen = 200) {
   if (typeof s !== 'string') return String(s).slice(0, maxLen);
   return normalizeTextValue(s, { allowNewlines: false }).slice(0, maxLen);

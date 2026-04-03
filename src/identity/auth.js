@@ -85,6 +85,7 @@ export function requireAuth(registry) {
     req.agentId = agent.id;
     req.agentApiKey = apiKey;
     req.agentProfile = agent;
+    req.dashboardBindAgent?.(agent.id);
     next();
   };
 }
@@ -109,6 +110,7 @@ export function optionalAuth(registry) {
       req.agentId = agent.id;
       req.agentApiKey = apiKey;
       req.agentProfile = agent;
+      req.dashboardBindAgent?.(agent.id);
     } else {
       logAuthFailure(socketIp, true);
       req.agentId = null;

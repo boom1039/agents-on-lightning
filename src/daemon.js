@@ -14,6 +14,7 @@ import { resolve, join } from 'node:path';
 import { AgentRegistry } from './identity/registry.js';
 import { acquire as acquireMutex } from './identity/mutex.js';
 import { configureRateLimiterPersistence } from './identity/rate-limiter.js';
+import { SpendingVelocityTracker } from './identity/spending-velocity.js';
 
 // Wallet
 import { PublicLedger } from './wallet/ledger.js';
@@ -153,6 +154,8 @@ export class AgentDaemon {
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
     });
+
+    this.spendingVelocity = new SpendingVelocityTracker();
 
     this.depositTracker = new DepositTracker({
       capitalLedger: this.capitalLedger,

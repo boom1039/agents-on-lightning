@@ -42,6 +42,83 @@ const _counters = new Map();
 const _globalCounter = { count: 0, windowStart: Date.now() };
 let _persistentStore = null;
 
+// ---------------------------------------------------------------------------
+// Progressive penalty tracking
+// ---------------------------------------------------------------------------
+// Tracks consecutive rate-limit violations per agent. After 5+ consecutive
+// violations the effective cooldown doubles; after 10+ it quadruples.
+// A clean request (no rate limit hit) resets the counter.
+
+const PROGRESSIVE_THRESHOLDS = [
+  { violations: 10, multiplier: 4 },
+  { violations: 5,  multiplier: 2 },
+];
+const PROGRESSIVE_RESET_WINDOW_MS = 300_000; // 5 minutes without violations → full reset
+
+// Map<agentId, { count: number, lastViolation: number }>
+const _violationCounters = new Map();
+
+/**
+ * Record a rate-limit violation for an agent. Returns the penalty multiplier.
+ */
+export function recordViolation(agentId) {
+  if (!agentId) return 1;
+  const now = Date.now();
+  const entry = _violationCounters.get(agentId) || { count: 0, lastViolation: 0 };
+  entry.count++;
+  entry.lastViolation = now;
+  _violationCounters.set(agentId, entry);
+  return _getPenaltyMultiplier(agentId);
+}
+
+/**
+ * Reset violation counter for an agent after a clean request.
+ */
+export function resetViolations(agentId) {
+  if (!agentId) return;
+  const entry = _violationCounters.get(agentId);
+  if (!entry) return;
+  // Only reset if enough time has passed since last violation, or count is low
+  const now = Date.now();
+  if (now - entry.lastViolation > PROGRESSIVE_RESET_WINDOW_MS || entry.count <= 1) {
+    _violationCounters.delete(agentId);
+  } else {
+    // Decay: reduce count on each clean request so recovery is gradual
+    entry.count = Math.max(0, entry.count - 1);
+    if (entry.count === 0) _violationCounters.delete(agentId);
+  }
+}
+
+/**
+ * Get the current penalty multiplier for an agent.
+ */
+export function _getPenaltyMultiplier(agentId) {
+  if (!agentId) return 1;
+  const entry = _violationCounters.get(agentId);
+  if (!entry) return 1;
+
+  // Auto-expire if no violations in the reset window
+  const now = Date.now();
+  if (now - entry.lastViolation > PROGRESSIVE_RESET_WINDOW_MS) {
+    _violationCounters.delete(agentId);
+    return 1;
+  }
+
+  for (const { violations, multiplier } of PROGRESSIVE_THRESHOLDS) {
+    if (entry.count >= violations) return multiplier;
+  }
+  return 1;
+}
+
+/**
+ * Get violation info for an agent (for testing / diagnostics).
+ */
+export function getViolationInfo(agentId) {
+  const entry = _violationCounters.get(agentId);
+  if (!entry) return { count: 0, multiplier: 1 };
+  return { count: entry.count, multiplier: _getPenaltyMultiplier(agentId) };
+}
+
 function defaultPersistentState() {
   return {
     counters: {},
@@ -250,20 +327,29 @@ export function rateLimit(category) {
     }
 
     // 3. Per-agent limit (only if authenticated)
+    // Apply progressive penalty: repeat offenders get a longer effective window
     if (config.perAgent && agentId) {
-      const agentCheck = await checkAndIncrement(`${category}:agent:${agentId}`, config.perAgent, config.windowMs);
+      const multiplier = _getPenaltyMultiplier(agentId);
+      const effectiveWindow = config.windowMs * multiplier;
+      const agentCheck = await checkAndIncrement(`${category}:agent:${agentId}`, config.perAgent, effectiveWindow);
       if (!agentCheck.allowed) {
+        recordViolation(agentId);
+        const penaltyInfo = multiplier > 1 ? ` (penalty ${multiplier}x due to repeated violations)` : '';
         logRateLimitHit(category, socketIp, agentId);
-        return err429(res, { category, retryAfter: agentCheck.retryAfter });
+        return err429(res, { category, retryAfter: agentCheck.retryAfter, penaltyMultiplier: multiplier, penaltyInfo });
       }
     }
 
     // 4. Global per-category limit
     const catCheck = await checkAndIncrement(`${category}:global`, config.global, config.windowMs);
     if (!catCheck.allowed) {
+      if (agentId) recordViolation(agentId);
       logRateLimitHit(category, socketIp, agentId);
       return err429(res, { category, retryAfter: catCheck.retryAfter });
     }
+
+    // Clean pass — decay violation counter
+    if (agentId) resetViolations(agentId);
 
     next();
     } catch (err) {
@@ -295,6 +381,7 @@ export async function globalRateLimit(req, res, next) {
  */
 export async function resetCounters() {
   _counters.clear();
+  _violationCounters.clear();
   _globalCounter.count = 0;
   _globalCounter.windowStart = Date.now();
   if (_persistentStore) {
