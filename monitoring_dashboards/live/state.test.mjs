@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import express from 'express';
 import { LiveJourneyState } from './state.mjs';
+import { registerApp } from '../../src/monitor/agent-surface-inventory.js';
+import { agentGatewayRoutes } from '../../src/routes/agent-gateway.js';
+
+// Populate ROUTE_CATALOG from the live Express router so seeded tests work
+{
+  const app = express();
+  const daemon = new Proxy({}, { get: () => () => {} });
+  app.get('/', (_req, res) => res.end());
+  app.get('/llms.txt', (_req, res) => res.end());
+  app.use(agentGatewayRoutes(daemon));
+  app.get('/health', (_req, res) => res.end());
+  registerApp(app);
+}
 
 test('live journey state binds in-flight work to an agent and finishes on the route', () => {
   const state = new LiveJourneyState({
@@ -99,7 +113,7 @@ test('route timing tracks current dwell and prior route dwell history', () => {
   assert.equal(agent.sessionStartedAt, 1000);
   assert.equal(agent.sessionAgeMs, 2100);
   assert.equal(agent.dwellHistory.length, 1);
-  assert.equal(agent.dwellHistory[0].routeKey, 'GET /api/v1/agents/:id');
+  assert.equal(agent.dwellHistory[0].routeKey, 'GET /api/v1/agents/me');
   assert.equal(agent.dwellHistory[0].dwellMs, 1500);
 });
 

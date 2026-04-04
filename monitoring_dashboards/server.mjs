@@ -9,6 +9,8 @@ import { createSyntheticJourneySprayController } from './live/synthetic-spray.mj
 import { getAuditLogStatus } from '../src/identity/audit-log.js';
 import { AnalyticsDB } from './live/analytics-db.mjs';
 import { classifyDomain } from './live/classify-domain.mjs';
+import { registerApp } from '../src/monitor/agent-surface-inventory.js';
+import { agentGatewayRoutes } from '../src/routes/agent-gateway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUDIT_LOG = path.resolve(__dirname, '../data/security-audit.jsonl');
@@ -44,6 +46,18 @@ const DOMAIN_COLORS = {
   'analytics':  '#72efdd',
   'capital':    '#ff6d6d',
 };
+
+// Populate ROUTE_CATALOG from the live Express router so dashboards see real routes
+{
+  const gatewayApp = express();
+  const daemon = new Proxy({}, { get: () => () => {} });
+  gatewayApp.get('/', (_req, res) => res.end());
+  gatewayApp.get('/llms.txt', (_req, res) => res.end());
+  gatewayApp.use(agentGatewayRoutes(daemon));
+  gatewayApp.get('/health', (_req, res) => res.end());
+  const catalog = registerApp(gatewayApp);
+  console.log(`[monitor] ${catalog.length} agent-facing routes extracted from live router`);
+}
 
 // In-memory state
 

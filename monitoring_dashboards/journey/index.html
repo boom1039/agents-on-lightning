@@ -883,6 +883,7 @@
 
     function upsertRoute(routeLike) {
       if (!routeLike || !routeLike.routeKey) return;
+      if (routeLike.canonical === false && !routeMap.has(routeLike.routeKey)) return;
       const existing = routeMap.get(routeLike.routeKey) || {};
       const layoutChanged = (
         !existing.routeKey
@@ -903,7 +904,7 @@
       // Keep seen routes pinned so tiles stay stable across live snapshot refreshes.
       agentMap.clear();
       let layoutChanged = false;
-      for (const route of snapshot.routes || []) {
+      for (const route of (snapshot.routes || []).filter(r => r.canonical !== false)) {
         const existing = routeMap.get(route.routeKey);
         if (
           !existing

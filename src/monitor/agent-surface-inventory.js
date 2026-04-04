@@ -1,21 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..', '..');
-
-export const ROUTE_FILES = [
-  'src/index.js',
-  'src/routes/agent-discovery-routes.js',
-  'src/routes/agent-identity-routes.js',
-  'src/routes/agent-wallet-routes.js',
-  'src/routes/agent-analysis-routes.js',
-  'src/routes/agent-social-routes.js',
-  'src/routes/channel-accountability-routes.js',
-  'src/routes/agent-paid-services-routes.js',
-  'src/routes/channel-market-routes.js',
-];
+import { classifyDomain } from '../../monitoring_dashboards/live/classify-domain.mjs';
 
 export const CANONICAL_SKILL_NAMES = [
   'discovery',
@@ -66,10 +49,6 @@ export const DOMAIN_ORDER = [
   'capital',
 ];
 
-function normalizeRoute(method, path) {
-  return `${method.toUpperCase()} ${path}`;
-}
-
 function splitRouteKey(route) {
   const [method, ...pathParts] = route.split(' ');
   return {
@@ -79,65 +58,31 @@ function splitRouteKey(route) {
   };
 }
 
-function extractRoutesFromSource(source) {
-  const routes = [];
-  const routePattern = /\b(?:router|app)\.(get|post|put|delete|patch)\s*\(\s*(\[[\s\S]*?\]|'[^']+'|"[^"]+")/g;
-  let match;
-  while ((match = routePattern.exec(source)) !== null) {
-    const method = match[1].toUpperCase();
-    const raw = match[2].trim();
-    const paths = [];
-    if (raw.startsWith('[')) {
-      for (const item of raw.matchAll(/['"]([^'"]+)['"]/g)) {
-        paths.push(item[1]);
-      }
-    } else {
-      paths.push(raw.slice(1, -1));
-    }
-    for (const path of paths) {
-      if (path.startsWith('/')) routes.push(normalizeRoute(method, path));
-    }
-  }
-  return routes;
-}
-
-export function collectAgentFacingRoutes() {
+/**
+ * Walk a live Express app's router stack and extract all registered routes.
+ * Call this AFTER all routes are mounted.
+ */
+export function extractRoutesFromApp(app) {
   const routes = new Set();
-  for (const relativePath of ROUTE_FILES) {
-    const source = readFileSync(resolve(ROOT, relativePath), 'utf8');
-    for (const route of extractRoutesFromSource(source)) {
-      if (ROUTE_EXCLUDED.has(route) || route.startsWith('GET /dashboard')) continue;
-      routes.add(ROUTE_ALIASES.get(route) || route);
+  function walk(stack) {
+    for (const layer of stack) {
+      if (layer.route) {
+        const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+        for (const routePath of paths) {
+          if (typeof routePath !== 'string') continue;
+          for (const method of Object.keys(layer.route.methods)) {
+            const key = `${method.toUpperCase()} ${routePath}`;
+            if (ROUTE_EXCLUDED.has(key) || routePath.startsWith('/dashboard')) continue;
+            routes.add(ROUTE_ALIASES.get(key) || key);
+          }
+        }
+      } else if (layer.name === 'router' && layer.handle?.stack) {
+        walk(layer.handle.stack);
+      }
     }
   }
+  if (app._router?.stack) walk(app._router.stack);
   return [...routes].sort();
-}
-
-function classifyRouteDomain(path) {
-  if (path === '/' || path === '/llms.txt' || path === '/health') return 'app-level';
-  if (
-    path === '/api/v1/'
-    || path.startsWith('/api/v1/platform/')
-    || path === '/api/v1/ethos'
-    || path === '/api/v1/capabilities'
-    || path.startsWith('/api/v1/strategies')
-    || path.startsWith('/api/v1/knowledge/')
-    || path.startsWith('/api/v1/skills')
-  ) return 'discovery';
-  if (path.startsWith('/api/v1/agents/') || path.startsWith('/api/v1/node/') || path.startsWith('/api/v1/actions/')) return 'identity';
-  if (path.startsWith('/api/v1/wallet/') || path === '/api/v1/ledger') return 'wallet';
-  if (path.startsWith('/api/v1/analysis/')) return 'analysis';
-  if (
-    path.startsWith('/api/v1/messages')
-    || path.startsWith('/api/v1/alliances')
-    || path.startsWith('/api/v1/leaderboard')
-    || path.startsWith('/api/v1/tournaments')
-  ) return 'social';
-  if (path.startsWith('/api/v1/channels/')) return 'channels';
-  if (path.startsWith('/api/v1/market/')) return 'market';
-  if (path.startsWith('/api/v1/analytics/')) return 'analytics';
-  if (path.startsWith('/api/v1/capital/') || path === '/api/v1/help') return 'capital';
-  return 'other';
 }
 
 function escapeRegex(text) {
@@ -153,23 +98,48 @@ function pathPatternToRegex(path) {
   return new RegExp(`^/${parts.join('/')}$`);
 }
 
-export const ROUTE_CATALOG = collectAgentFacingRoutes().map(route => {
-  const { method, path } = splitRouteKey(route);
+// Populated at startup by registerApp() — empty until then.
+export const ROUTE_CATALOG = [];
+let ROUTE_BY_KEY = new Map();
+
+function buildCatalogEntry(routeKey) {
+  const { method, path } = splitRouteKey(routeKey);
   return {
-    key: route,
+    key: routeKey,
     method,
     path,
-    domain: classifyRouteDomain(path),
+    domain: classifyDomain(path) || 'other',
     regex: pathPatternToRegex(path),
   };
-}).sort((a, b) => {
-  const domainDelta = DOMAIN_ORDER.indexOf(a.domain) - DOMAIN_ORDER.indexOf(b.domain);
-  if (domainDelta !== 0) return domainDelta;
-  if (a.path !== b.path) return a.path.localeCompare(b.path);
-  return a.method.localeCompare(b.method);
-});
+}
 
-const ROUTE_BY_KEY = new Map(ROUTE_CATALOG.map(route => [route.key, route]));
+function hasParam(path) { return path.includes(':'); }
+
+function sortCatalog(catalog) {
+  return catalog.sort((a, b) => {
+    const domainDelta = DOMAIN_ORDER.indexOf(a.domain) - DOMAIN_ORDER.indexOf(b.domain);
+    if (domainDelta !== 0) return domainDelta;
+    // Literal paths before parameterized ones so exact matches win in linear scan
+    const aParam = hasParam(a.path);
+    const bParam = hasParam(b.path);
+    if (aParam !== bParam) return aParam ? 1 : -1;
+    if (a.path !== b.path) return a.path.localeCompare(b.path);
+    return a.method.localeCompare(b.method);
+  });
+}
+
+/**
+ * Call once after all Express routes are mounted.
+ * Walks the live router stack and populates ROUTE_CATALOG.
+ */
+export function registerApp(app) {
+  const keys = extractRoutesFromApp(app);
+  ROUTE_CATALOG.length = 0;
+  for (const key of keys) ROUTE_CATALOG.push(buildCatalogEntry(key));
+  sortCatalog(ROUTE_CATALOG);
+  ROUTE_BY_KEY = new Map(ROUTE_CATALOG.map(route => [route.key, route]));
+  return ROUTE_CATALOG;
+}
 
 const ROUTE_ALIAS_CATALOG = [...ROUTE_ALIASES.entries()].map(([aliasKey, canonicalKey]) => {
   const { method, path } = splitRouteKey(aliasKey);

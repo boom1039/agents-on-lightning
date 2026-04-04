@@ -14,6 +14,7 @@ import { auditMiddleware } from './identity/audit-log.js';
 import { handleJsonBodyError, requireDashboardOperatorAuth, requireJsonWriteContent } from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
 import { dashboardRoutes } from './routes/dashboard-routes.js';
+import { registerApp } from './monitor/agent-surface-inventory.js';
 import { getDefaultPortForRole, getServerRole, reserveServerSlot } from './server-instance-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -121,6 +122,10 @@ export async function startServer() {
   // Mount monitoring dashboard behind operator auth
   app.use('/dashboard', requireDashboardOperatorAuth);
   app.use(dashboardRoutes(daemon));
+
+  // Extract live route catalog from the mounted Express router
+  const routes = registerApp(app);
+  console.log(`[server] ${routes.length} agent-facing routes registered`);
 
   // Health check
   app.get('/health', (_req, res) => {

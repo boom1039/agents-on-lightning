@@ -1,7 +1,19 @@
 #!/usr/bin/env node
 
 import { ALL_SUITES } from './suites/index.mjs';
-import { collectAgentFacingRoutes } from '../../src/monitor/agent-surface-inventory.js';
+import express from 'express';
+import { extractRoutesFromApp } from '../../src/monitor/agent-surface-inventory.js';
+import { agentGatewayRoutes } from '../../src/routes/agent-gateway.js';
+
+function collectAgentFacingRoutes() {
+  const app = express();
+  const daemon = new Proxy({}, { get: () => () => {} });
+  app.get('/', (_req, res) => res.end());
+  app.get('/llms.txt', (_req, res) => res.end());
+  app.use(agentGatewayRoutes(daemon));
+  app.get('/health', (_req, res) => res.end());
+  return extractRoutesFromApp(app);
+}
 
 export function collectCoveredRoutes() {
   const routeOwners = new Map();
