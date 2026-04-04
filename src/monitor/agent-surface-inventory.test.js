@@ -9,7 +9,7 @@ import {
 } from './agent-surface-inventory.js';
 
 test('route and doc inventories match the current public surface', () => {
-  assert.equal(ROUTE_CATALOG.length, 108);
+  assert.equal(ROUTE_CATALOG.length, 109);
   assert.equal(DOC_CATALOG.length, 28);
 });
 

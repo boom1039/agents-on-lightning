@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { validateAmount } from '../identity/validators.js';
-import { err400Validation, err400MissingField, err500Internal, agentError } from '../identity/agent-friendly-errors.js';
+import { err400Validation, err400MissingField, err500Internal, agentError, buildRecovery } from '../identity/agent-friendly-errors.js';
 
 export function agentWalletRoutes(daemon) {
   const router = Router();
@@ -35,10 +35,18 @@ export function agentWalletRoutes(daemon) {
       });
 
       const result = await daemon.agentCashuWallet.mintQuote(req.agentId, parsed);
-      res.json(result);
+      res.json({
+        ...result,
+        cost_summary: { action: 'mint_quote', amount_sats: parsed, fee_sats: 0, total_sats: parsed, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message, {
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
         hint: 'Mint flow: POST /api/v1/wallet/mint-quote → pay invoice → POST /api/v1/wallet/mint.',
+        extra: { recovery: buildRecovery('safe', 'No sats were deducted. Quote creation failed before any funds moved.', [
+          'Fix the request and retry POST /api/v1/wallet/mint-quote',
+        ]) },
       });
     }
   });
@@ -53,7 +61,13 @@ export function agentWalletRoutes(daemon) {
       const result = await daemon.agentCashuWallet.checkMintQuote(req.agentId, quote_id);
       res.json(result);
     } catch (err) {
-      return err400Validation(res, err.message);
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
+        extra: { recovery: buildRecovery('safe', 'This is a read-only status check. No funds were affected.', [
+          'Verify your quote_id and retry POST /api/v1/wallet/check-mint-quote',
+        ]) },
+      });
     }
   });
 
@@ -68,9 +82,19 @@ export function agentWalletRoutes(daemon) {
       });
 
       const result = await daemon.agentCashuWallet.mintProofs(req.agentId, parsed, quote_id);
-      res.json(result);
+      res.json({
+        ...result,
+        cost_summary: { action: 'mint', amount_sats: parsed, fee_sats: 0, total_sats: parsed, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message);
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
+        extra: { recovery: buildRecovery('action_needed', 'If you already paid the invoice, your sats are held by the mint. Retry minting with the same quote_id to claim them.', [
+          'Retry POST /api/v1/wallet/mint with the same quote_id and amount_sats',
+          'If retries fail, POST /api/v1/wallet/restore to recover proofs from seed',
+        ]) },
+      });
     }
   });
 
@@ -78,21 +102,39 @@ export function agentWalletRoutes(daemon) {
     try {
       const { invoice } = req.body;
       if (!invoice || typeof invoice !== 'string') {
-        return err400MissingField(res, 'invoice', {
+        return agentError(res, 400, {
+          error: 'missing_required_field',
+          message: 'invoice is required.',
           hint: 'Provide a BOLT11 Lightning invoice starting with lnbc.',
+          extra: { recovery: buildRecovery('safe', 'No sats were deducted. Quote creation requires a valid invoice.', [
+            'POST /api/v1/wallet/melt-quote with {"invoice": "lnbc..."}',
+          ]) },
         });
       }
       if (invoice.length > 2000) {
-        return err400Validation(res, 'Invoice too long (max 2000 chars).');
-      }
-      if (!/^ln(bc|tb|tbs|bcrt)1[a-z0-9]+$/i.test(invoice)) {
-        return err400Validation(res, 'Invalid BOLT11 invoice format.');
+        return agentError(res, 400, {
+          error: 'validation_error',
+          message: 'Invoice too long (max 2000 chars).',
+          extra: { recovery: buildRecovery('safe', 'No sats were deducted. The invoice was rejected before any funds moved.', [
+            'Use a shorter BOLT11 invoice and retry POST /api/v1/wallet/melt-quote',
+          ]) },
+        });
       }
 
       const result = await daemon.agentCashuWallet.meltQuote(req.agentId, invoice);
-      res.json(result);
+      res.json({
+        ...result,
+        cost_summary: { action: 'melt_quote', amount_sats: result.amount, fee_sats: result.fee_reserve, total_sats: result.amount + result.fee_reserve, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message);
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
+        extra: { recovery: buildRecovery('safe', 'No sats were deducted. Melt quote creation failed before any funds moved.', [
+          'Request a fresh invoice from the recipient',
+          'POST /api/v1/wallet/melt-quote with the new invoice',
+        ]) },
+      });
     }
   });
 
@@ -104,9 +146,29 @@ export function agentWalletRoutes(daemon) {
       });
 
       const result = await daemon.agentCashuWallet.meltProofs(req.agentId, quote_id);
-      res.json(result);
+      const meltAmount = result.amount || 0;
+      const meltFee = result.fee_reserve || 0;
+      res.json({
+        ...result,
+        cost_summary: { action: 'melt', amount_sats: meltAmount, fee_sats: meltFee, total_sats: meltAmount + meltFee, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message);
+      const isBal = err.message && err.message.includes('Insufficient');
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
+        hint: isBal ? 'Check your balance at GET /api/v1/wallet/balance.' : 'Use the quote_id from POST /api/v1/wallet/melt-quote.',
+        extra: { recovery: isBal
+          ? buildRecovery('safe', 'No sats were deducted. Your balance is too low for this melt.', [
+            'GET /api/v1/wallet/balance to check available sats',
+            'Deposit more sats via POST /api/v1/wallet/mint-quote',
+          ])
+          : buildRecovery('pending', 'Proofs may have been swapped before the payment failed. They are saved on disk.', [
+            'POST /api/v1/wallet/restore to recover any stuck proofs',
+            'GET /api/v1/wallet/balance to verify your current balance',
+          ]),
+        },
+      });
     }
   });
 
@@ -118,11 +180,28 @@ export function agentWalletRoutes(daemon) {
       if (!amtCheck.valid) return err400Validation(res, amtCheck.reason);
 
       const result = await daemon.agentCashuWallet.sendEcash(req.agentId, parsed);
-      res.json(result);
+      res.json({
+        ...result,
+        cost_summary: { action: 'send', amount_sats: parsed, fee_sats: 0, total_sats: parsed, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message, {
+      const isBal = err.message && err.message.includes('Insufficient');
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
         hint: 'Check your balance at GET /api/v1/wallet/balance.',
         see: 'GET /api/v1/wallet/balance',
+        extra: { recovery: isBal
+          ? buildRecovery('safe', 'No sats were deducted. Your balance is too low for this send.', [
+            'GET /api/v1/wallet/balance to check available sats',
+            'Deposit more sats via POST /api/v1/wallet/mint-quote',
+          ])
+          : buildRecovery('pending', 'A proof swap may have started. Proofs are saved on disk for recovery.', [
+            'POST /api/v1/wallet/restore to recover any stuck proofs',
+            'GET /api/v1/wallet/balance to verify your current balance',
+            'POST /api/v1/wallet/reclaim-pending to reclaim unclaimed sent tokens',
+          ]),
+        },
       });
     }
   });
@@ -135,14 +214,21 @@ export function agentWalletRoutes(daemon) {
           hint: 'Provide a Cashu ecash token string (from POST /api/v1/wallet/send).',
         });
       }
-      if (typeof token !== 'string' || token.length > 10_000) {
-        return err400Validation(res, 'Token must be a string under 10,000 characters.');
-      }
 
       const result = await daemon.agentCashuWallet.receiveEcash(req.agentId, token);
-      res.json(result);
+      res.json({
+        ...result,
+        cost_summary: { action: 'receive', amount_sats: result.amount, fee_sats: 0, total_sats: result.amount, unit: 'sat' },
+      });
     } catch (err) {
-      return err400Validation(res, err.message);
+      return agentError(res, 400, {
+        error: 'validation_error',
+        message: err.message,
+        extra: { recovery: buildRecovery('safe', 'Your existing wallet balance is unchanged. The token was not redeemed.', [
+          'Verify the token is a valid Cashu ecash string and retry POST /api/v1/wallet/receive',
+          'The token may have already been claimed by another agent',
+        ]) },
+      });
     }
   });
 
@@ -181,7 +267,18 @@ export function agentWalletRoutes(daemon) {
         balance_sats: result.balance,
       });
     } catch (err) {
-      return err500Internal(res, 'restoring wallet from seed');
+      return agentError(res, 500, {
+        error: 'internal_error',
+        message: 'Something went wrong while restoring wallet from seed.',
+        retryable: true,
+        retry_after_seconds: 5,
+        hint: 'Wait a few seconds and retry. Your deterministic seed is safe — restoration can always be retried.',
+        see: 'GET /api/v1/wallet/balance',
+        extra: { recovery: buildRecovery('safe', 'Your seed and any existing proofs are safe. Restoration can be retried.', [
+          'Wait a few seconds and retry POST /api/v1/wallet/restore',
+          'GET /api/v1/wallet/balance to check your current balance',
+        ]) },
+      });
     }
   });
 
@@ -199,7 +296,18 @@ export function agentWalletRoutes(daemon) {
         pending_remaining: result.pendingRemaining,
       });
     } catch (err) {
-      return err500Internal(res, 'reclaiming pending sends');
+      return agentError(res, 500, {
+        error: 'internal_error',
+        message: 'Something went wrong while reclaiming pending sends.',
+        retryable: true,
+        retry_after_seconds: 5,
+        hint: 'Wait a few seconds and retry. Pending tokens are still tracked and can be reclaimed later.',
+        see: 'GET /api/v1/wallet/balance',
+        extra: { recovery: buildRecovery('safe', 'Pending tokens are still tracked. No funds were lost — reclaim can be retried.', [
+          'Wait a few seconds and retry POST /api/v1/wallet/reclaim-pending',
+          'GET /api/v1/wallet/balance to check your current balance',
+        ]) },
+      });
     }
   });
 

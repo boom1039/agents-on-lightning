@@ -253,3 +253,42 @@ export function err500Internal(res, context) {
     see: 'GET /api/v1/platform/status',
   });
 }
+
+// --- Recovery guidance for financial operations ---
+
+const MAX_RECOVERY_MESSAGE_CHARS = 160;
+const MAX_RECOVERY_STEP_CHARS = 140;
+
+/**
+ * Build a recovery guidance block for financial error responses.
+ *
+ * @param {'safe'|'pending'|'action_needed'} fundsStatus
+ * @param {string} message - Plain English explanation of fund safety
+ * @param {string[]} nextSteps - Actionable instructions
+ * @returns {{ funds_status: string, message: string, next_steps: string[] }}
+ */
+export function buildRecovery(fundsStatus, message, nextSteps) {
+  const recovery = { funds_status: fundsStatus };
+  const compactMsg = compactText(message, MAX_RECOVERY_MESSAGE_CHARS);
+  if (compactMsg) recovery.message = compactMsg;
+  if (Array.isArray(nextSteps) && nextSteps.length > 0) {
+    recovery.next_steps = nextSteps
+      .map((s) => compactText(s, MAX_RECOVERY_STEP_CHARS))
+      .filter(Boolean);
+  }
+  return recovery;
+}
+
+/**
+ * Merge a recovery block into an existing error response body object.
+ *
+ * @param {object} body - The error response body (mutated in place)
+ * @param {'safe'|'pending'|'action_needed'} fundsStatus
+ * @param {string} message
+ * @param {string[]} nextSteps
+ * @returns {object} body with recovery field added
+ */
+export function withRecovery(body, fundsStatus, message, nextSteps) {
+  body.recovery = buildRecovery(fundsStatus, message, nextSteps);
+  return body;
+}

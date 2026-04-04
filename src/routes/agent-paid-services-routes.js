@@ -7,10 +7,10 @@
 import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
-import { validateBitcoinAddress, clampQueryInt } from '../identity/validators.js';
+import { validateBitcoinAddress } from '../identity/validators.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
 import { runIdempotentRoute } from '../identity/idempotency-route.js';
-import { err503Service, err400MissingField, err400Validation, err500Internal, agentError } from '../identity/agent-friendly-errors.js';
+import { err503Service, err400MissingField, err400Validation, err500Internal, agentError, buildRecovery, withRecovery } from '../identity/agent-friendly-errors.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
 
 function capitalWithdrawalsEnabled() {
@@ -82,9 +82,6 @@ export function agentPaidServicesRoutes(daemon) {
           see: 'GET /api/v1/analytics/catalog',
         });
       }
-      if (!daemon.analyticsGateway.isKnownQuery(query_id)) {
-        return err400Validation(res, `Unknown query_id: ${query_id}`, { hint: 'GET /api/v1/analytics/catalog' });
-      }
       const quote = daemon.analyticsGateway.getQuote(query_id, params || {});
       res.json(quote);
     } catch (err) {
@@ -124,18 +121,14 @@ export function agentPaidServicesRoutes(daemon) {
             },
           };
         }
-        if (!daemon.analyticsGateway.isKnownQuery(query_id)) {
-          return {
-            statusCode: 400,
-            body: {
-              error: 'validation_error',
-              message: `Unknown query_id: ${query_id}`,
-              hint: 'GET /api/v1/analytics/catalog',
-            },
-          };
-        }
         const result = await daemon.analyticsGateway.execute(req.agentId, query_id, params || {});
-        return { statusCode: 200, body: result };
+        return {
+          statusCode: 200,
+          body: {
+            ...result,
+            cost_summary: { action: 'analytics_execute', amount_sats: result.price_sats, fee_sats: 0, total_sats: result.price_sats, unit: 'sat' },
+          },
+        };
       },
       onError: (err) => {
         const status = err.statusCode || 500;
@@ -143,7 +136,13 @@ export function agentPaidServicesRoutes(daemon) {
           console.error(`[Gateway] ${req.path}: ${err.message}`);
           return {
             statusCode: 500,
-            body: { error: 'internal_error', message: 'Internal error while executing analytics query.' },
+            body: withRecovery(
+              { error: 'internal_error', message: 'Internal error while executing analytics query.' },
+              'safe', 'Idempotent operation — you will not be double-charged. Retry safely.', [
+                'Retry the same POST /api/v1/analytics/execute request',
+                'GET /api/v1/analytics/history to check if the query already completed',
+              ],
+            ),
           };
         }
         const extra = {};
@@ -151,13 +150,18 @@ export function agentPaidServicesRoutes(daemon) {
         if (err.validation_errors) extra.validation_errors = err.validation_errors;
         return {
           statusCode: status,
-          body: {
-            error: 'analytics_error',
-            message: err.message,
-            hint: 'Check GET /api/v1/analytics/catalog for valid query IDs and required params.',
-            see: 'GET /api/v1/analytics/catalog',
-            ...(Object.keys(extra).length ? extra : {}),
-          },
+          body: withRecovery(
+            {
+              error: 'analytics_error',
+              message: err.message,
+              hint: 'Check GET /api/v1/analytics/catalog for valid query IDs and required params.',
+              see: 'GET /api/v1/analytics/catalog',
+              ...(Object.keys(extra).length ? extra : {}),
+            },
+            err.refunded ? 'safe' : 'safe',
+            err.refunded ? 'Payment was refunded. No sats were deducted.' : 'No sats were deducted for a failed query.',
+            ['Check GET /api/v1/analytics/catalog for valid query IDs and params', 'Retry with corrected parameters'],
+          ),
         };
       },
     });
@@ -217,8 +221,8 @@ export function agentPaidServicesRoutes(daemon) {
       if (!daemon.capitalLedger) {
         return err503Service(res, 'Capital ledger');
       }
-      const limit = clampQueryInt(req.query.limit, 50, 1, 500);
-      const offset = clampQueryInt(req.query.offset, 0, 0, 100_000);
+      const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 50), 500);
+      const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
       const { entries, total } = await daemon.capitalLedger.readActivity({
         agentId: req.agentId,
         limit,
@@ -248,12 +252,20 @@ export function agentPaidServicesRoutes(daemon) {
         error: 'capital_withdrawals_disabled',
         message: 'Capital withdrawals are disabled until a real on-chain send path is enabled.',
         hint: 'This route is intentionally off for safety. Do not rely on it to move funds yet.',
+        extra: { recovery: buildRecovery('safe', 'No funds were moved. Withdrawals are disabled platform-wide.', [
+          'Use capital for channel opens instead: POST /api/v1/market/open',
+          'GET /api/v1/capital/balance to check your available sats',
+        ]) },
       });
     }
     return agentError(res, 503, {
       error: 'capital_withdrawals_unimplemented',
       message: 'Capital withdrawals stay off until a real on-chain sender is fully wired in.',
       hint: 'Keep this route disabled for now. Use capital for channel opens, or close a channel to free funds first.',
+      extra: { recovery: buildRecovery('safe', 'No funds were moved. Withdrawals are not yet implemented.', [
+        'Use capital for channel opens instead: POST /api/v1/market/open',
+        'GET /api/v1/capital/balance to check your available sats',
+      ]) },
     });
     if (!daemon.capitalLedger) {
       return err503Service(res, 'Capital ledger');
@@ -268,22 +280,33 @@ export function agentPaidServicesRoutes(daemon) {
         if (!amount_sats || !Number.isInteger(amount_sats) || amount_sats <= 0) {
           return {
             statusCode: 400,
-            body: {
-              error: 'validation_error',
-              message: 'amount_sats must be a positive integer.',
-              hint: 'Specify exact satoshis to withdraw. 1 BTC = 100,000,000 sats.',
-            },
+            body: withRecovery(
+              {
+                error: 'validation_error',
+                message: 'amount_sats must be a positive integer.',
+                hint: 'Specify exact satoshis to withdraw. 1 BTC = 100,000,000 sats.',
+              },
+              'safe', 'No funds were moved. Validation failed before any withdrawal.', [
+                'Fix amount_sats and retry POST /api/v1/capital/withdraw',
+                'GET /api/v1/capital/balance to check available sats',
+              ],
+            ),
           };
         }
         const addressCheck = validateBitcoinAddress(destination_address);
         if (!addressCheck.valid) {
           return {
             statusCode: 400,
-            body: {
-              error: 'validation_error',
-              message: `destination_address: ${addressCheck.reason}`,
-              hint: 'Provide a Bitcoin on-chain address (bech32 bc1..., P2SH 3..., or legacy 1...).',
-            },
+            body: withRecovery(
+              {
+                error: 'validation_error',
+                message: `destination_address: ${addressCheck.reason}`,
+                hint: 'Provide a Bitcoin on-chain address (bech32 bc1..., P2SH 3..., or legacy 1...).',
+              },
+              'safe', 'No funds were moved. The address was rejected before any withdrawal.', [
+                'Provide a valid Bitcoin address and retry POST /api/v1/capital/withdraw',
+              ],
+            ),
           };
         }
 
@@ -291,13 +314,18 @@ export function agentPaidServicesRoutes(daemon) {
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many withdrawal attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another withdrawal.',
-            },
+            body: withRecovery(
+              {
+                error: 'cooldown_active',
+                message: 'Too many withdrawal attempts this hour.',
+                retryable: true,
+                retry_after_seconds: attempts.retryAfter,
+                hint: 'Wait before trying another withdrawal.',
+              },
+              'safe', 'No funds were moved. You hit a rate limit.', [
+                `Wait ${attempts.retryAfter} seconds and retry POST /api/v1/capital/withdraw`,
+              ],
+            ),
           };
         }
 
@@ -309,13 +337,18 @@ export function agentPaidServicesRoutes(daemon) {
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent withdrawal is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before sending another withdrawal.',
-            },
+            body: withRecovery(
+              {
+                error: 'cooldown_active',
+                message: 'A recent withdrawal is still cooling down.',
+                retryable: true,
+                retry_after_seconds: cooldown.retryAfterSeconds,
+                hint: 'Wait for the cooldown window to pass before sending another withdrawal.',
+              },
+              'safe', 'No funds were moved. A cooldown is active from a recent withdrawal.', [
+                `Wait ${cooldown.retryAfterSeconds} seconds and retry POST /api/v1/capital/withdraw`,
+              ],
+            ),
           };
         }
 
@@ -333,29 +366,41 @@ export function agentPaidServicesRoutes(daemon) {
         if (decision.decision === 'hard_cap') {
           return {
             statusCode: 403,
-            body: {
-              error: 'cap_exceeded',
-              message: sharedReason ? 'This withdrawal is above the shared-node safety cap.' : 'This withdrawal is above the safety cap.',
-              hint: sharedReason ? 'Use a smaller withdrawal amount, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal amount.',
-              requested_sats: amount_sats,
-              instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
-              rolling_24h_sats: rolling24h,
-              rolling_24h_limit_sats: rollingLimit,
-            },
+            body: withRecovery(
+              {
+                error: 'cap_exceeded',
+                message: sharedReason ? 'This withdrawal is above the shared-node safety cap.' : 'This withdrawal is above the safety cap.',
+                hint: sharedReason ? 'Use a smaller withdrawal amount, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal amount.',
+                requested_sats: amount_sats,
+                instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
+                rolling_24h_sats: rolling24h,
+                rolling_24h_limit_sats: rollingLimit,
+              },
+              'safe', 'No funds were moved. The amount exceeds the safety cap.', [
+                'Reduce amount_sats and retry POST /api/v1/capital/withdraw',
+                'GET /api/v1/capital/balance to check available sats',
+              ],
+            ),
           };
         }
         if (decision.decision === 'review_required') {
           return {
             statusCode: 202,
-            body: {
-              review_required: true,
-              message: sharedReason ? 'This withdrawal is above the shared-node instant-approve limit.' : 'This withdrawal is above the instant-approve limit.',
-              hint: sharedReason ? 'Use a smaller withdrawal, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal, or wait for manual review.',
-              requested_sats: amount_sats,
-              instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
-              rolling_24h_sats: rolling24h,
-              rolling_24h_limit_sats: rollingLimit,
-            },
+            body: withRecovery(
+              {
+                review_required: true,
+                message: sharedReason ? 'This withdrawal is above the shared-node instant-approve limit.' : 'This withdrawal is above the instant-approve limit.',
+                hint: sharedReason ? 'Use a smaller withdrawal, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal, or wait for manual review.',
+                requested_sats: amount_sats,
+                instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
+                rolling_24h_sats: rolling24h,
+                rolling_24h_limit_sats: rollingLimit,
+              },
+              'safe', 'No funds were moved yet. The withdrawal requires manual review.', [
+                'Use a smaller amount for instant approval',
+                'GET /api/v1/capital/balance to check available sats',
+              ],
+            ),
           };
         }
 
@@ -373,6 +418,7 @@ export function agentPaidServicesRoutes(daemon) {
             destination_address,
             balance_after: balance,
             learn: 'Withdrawal recorded. Only available sats can be withdrawn. Locked sats require closing the channel first.',
+            cost_summary: { action: 'withdraw', amount_sats, fee_sats: 0, total_sats: amount_sats, unit: 'sat' },
           },
         };
       },
@@ -380,18 +426,30 @@ export function agentPaidServicesRoutes(daemon) {
         if (err.message.includes('Insufficient')) {
           return {
             statusCode: 409,
-            body: {
-              error: 'insufficient_balance',
-              message: err.message,
-              hint: 'Check your balance at GET /api/v1/capital/balance. Only available sats can be withdrawn — locked sats require closing the channel first.',
-              see: 'GET /api/v1/capital/balance',
-            },
+            body: withRecovery(
+              {
+                error: 'insufficient_balance',
+                message: err.message,
+                hint: 'Check your balance at GET /api/v1/capital/balance. Only available sats can be withdrawn — locked sats require closing the channel first.',
+                see: 'GET /api/v1/capital/balance',
+              },
+              'safe', 'No funds were moved. Your available balance is too low for this withdrawal.', [
+                'GET /api/v1/capital/balance to check available vs locked sats',
+                'Close a channel first to unlock sats: POST /api/v1/market/close',
+              ],
+            ),
           };
         }
         console.error(`[Gateway] ${req.path}: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'internal_error', message: 'Internal error while processing withdrawal.' },
+          body: withRecovery(
+            { error: 'internal_error', message: 'Internal error while processing withdrawal.' },
+            'safe', 'No funds were moved. The withdrawal failed due to a server error.', [
+              'Wait a few seconds and retry POST /api/v1/capital/withdraw',
+              'GET /api/v1/capital/balance to verify your balance is unchanged',
+            ],
+          ),
         };
       },
     });
@@ -429,6 +487,7 @@ export function agentPaidServicesRoutes(daemon) {
               dust: 'Deposits below 10,000 sats are credited but not economical to return on-chain.',
               reuse: 'Each address is single-use. Call this endpoint again for a fresh address for each deposit.',
             },
+            cost_summary: { action: 'deposit', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' },
           },
         };
       },
@@ -436,7 +495,12 @@ export function agentPaidServicesRoutes(daemon) {
         console.error(`[Gateway] ${req.path}: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'internal_error', message: 'Internal error while generating deposit address.' },
+          body: withRecovery(
+            { error: 'internal_error', message: 'Internal error while generating deposit address.' },
+            'safe', 'No deposit address was generated. No funds are at risk.', [
+              'Wait a few seconds and retry POST /api/v1/capital/deposit',
+            ],
+          ),
         };
       },
     });

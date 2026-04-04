@@ -49,14 +49,10 @@ import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
 import { runIdempotentRoute } from '../identity/idempotency-route.js';
-import { agentError, err400Validation, err404NotFound } from '../identity/agent-friendly-errors.js';
+import { agentError, err400Validation, err404NotFound, withRecovery } from '../identity/agent-friendly-errors.js';
 import { logAuthorizationDenied } from '../identity/audit-log.js';
 import { getSocketAddress } from '../identity/request-security.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
-import {
-  validateChannelIdOrPoint, validateUUID, validateAgentId,
-  validatePubkey, validateSwapId, clampQueryInt,
-} from '../identity/validators.js';
 
 function submarineSwapsEnabled() {
   return process.env.ENABLE_SUBMARINE_SWAPS === '1';
@@ -365,7 +361,12 @@ export function channelMarketRoutes(daemon) {
       res.status(response.statusCode).json(response.body);
     } catch (err) {
       console.error(`[market/preview] Error: ${err.message}`);
-      res.status(500).json({ error: 'Internal error during preview' });
+      res.status(500).json(withRecovery(
+        { error: 'Internal error during preview' },
+        'safe', 'Preview is read-only. No funds were locked or spent.', [
+          'Wait a few seconds and retry POST /api/v1/market/preview',
+        ],
+      ));
     }
   });
 
@@ -471,13 +472,9 @@ export function channelMarketRoutes(daemon) {
             amountSats,
           });
           if (policy) return policy;
-          // Spending velocity: track for operator visibility but don't block.
-          // Agents can spend their own capital freely — existing cooldowns and
-          // DangerRoutePolicyStore caps provide sufficient guardrails.
         }
         const result = await daemon.channelOpener.open(req.agentId, req.body);
         if (result?.success && Number.isInteger(amountSats) && amountSats > 0) {
-          daemon.spendingVelocity?.record(req.agentId, amountSats);
           await dangerPolicy.recordSuccess({
             scope: OPEN_CAPS.scope,
             agentId: req.agentId,
@@ -488,13 +485,23 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
-        return { statusCode: result.success ? 200 : (result.status || 400), body: result };
+        const openBody = result?.success && Number.isInteger(amountSats) && amountSats > 0
+          ? { ...result, cost_summary: { action: 'channel_open', amount_sats: amountSats, fee_sats: 0, total_sats: amountSats, unit: 'sat' } }
+          : result;
+        return { statusCode: result.success ? 200 : (result.status || 400), body: openBody };
       },
       onError: (err) => {
         console.error(`[market/open] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'Internal error during channel open' },
+          body: withRecovery(
+            { error: 'Internal error during channel open' },
+            'action_needed', 'Capital may have been locked for this channel open. Check your capital balance and pending opens.', [
+              'GET /api/v1/capital/balance to check if capital was locked',
+              'GET /api/v1/market/pending to check if the open is in progress',
+              'Locked capital auto-releases if the channel open fails to confirm',
+            ],
+          ),
         };
       },
     });
@@ -633,13 +640,22 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
-        return { statusCode: result.success ? 200 : (result.status || 400), body: result };
+        const closeBody = result?.success
+          ? { ...result, cost_summary: { action: 'channel_close', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' } }
+          : result;
+        return { statusCode: result.success ? 200 : (result.status || 400), body: closeBody };
       },
       onError: (err) => {
         console.error(`[market/close] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'Internal error during channel close' },
+          body: withRecovery(
+            { error: 'Internal error during channel close' },
+            'safe', 'The channel is still open. No funds were moved by this failed close request.', [
+              'GET /api/v1/market/closes to check if the close was already initiated',
+              'Retry POST /api/v1/market/close with the same signed instruction',
+            ],
+          ),
         };
       },
     });
@@ -683,8 +699,6 @@ export function channelMarketRoutes(daemon) {
   });
 
   router.get('/api/v1/market/revenue/:chanId', auth, marketPrivateRead, async (req, res) => {
-    const chanCheck = validateChannelIdOrPoint(req.params.chanId);
-    if (!chanCheck.valid) return err400Validation(res, chanCheck.reason);
     if (!daemon.revenueTracker) {
       return res.status(503).json({ error: 'Revenue tracker not initialized' });
     }
@@ -728,7 +742,7 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Swap provider not initialized' });
     }
     try {
-      const amount = clampQueryInt(req.query.amount_sats, 0, 0, 100_000_000);
+      const amount = parseInt(req.query.amount_sats || '0', 10);
       const result = await daemon.swapProvider.getQuote(amount);
       if (result.success) {
         res.json(result);
@@ -850,15 +864,19 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/swap/create] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'Internal error creating swap' },
+          body: withRecovery(
+            { error: 'Internal error creating swap' },
+            'pending', 'The swap may have been initiated. Check swap history to verify.', [
+              'GET /api/v1/market/swap/history to check if the swap was created',
+              'GET /api/v1/capital/balance to verify your capital balance',
+            ],
+          ),
         };
       },
     });
   });
 
   router.get('/api/v1/market/swap/status/:swapId', auth, marketPrivateRead, async (req, res) => {
-    const swapCheck = validateSwapId(req.params.swapId);
-    if (!swapCheck.valid) return err400Validation(res, swapCheck.reason);
     if (!daemon.swapProvider) {
       return res.status(503).json({ error: 'Swap provider not initialized' });
     }
@@ -1004,15 +1022,20 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/fund-from-ecash] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'Internal error during ecash channel funding' },
+          body: withRecovery(
+            { error: 'Internal error during ecash channel funding' },
+            'action_needed', 'Ecash may have been melted before the channel open failed. Check your balances.', [
+              'GET /api/v1/wallet/balance to check ecash balance',
+              'GET /api/v1/capital/balance to check if capital was credited',
+              'GET /api/v1/market/pending to check if a channel open is in progress',
+            ],
+          ),
         };
       },
     });
   });
 
   router.get('/api/v1/market/fund-from-ecash/:flowId', auth, marketPrivateRead, async (req, res) => {
-    const flowCheck = validateUUID(req.params.flowId);
-    if (!flowCheck.valid) return err400Validation(res, flowCheck.reason);
     if (!daemon.ecashChannelFunder) {
       return res.status(503).json({ error: 'Ecash channel funder not initialized' });
     }
@@ -1042,8 +1065,6 @@ export function channelMarketRoutes(daemon) {
   });
 
   router.get('/api/v1/market/performance/:chanId', auth, marketPrivateRead, async (req, res) => {
-    const chanCheck = validateChannelIdOrPoint(req.params.chanId);
-    if (!chanCheck.valid) return err400Validation(res, chanCheck.reason);
     if (!daemon.performanceTracker) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
     }
@@ -1174,7 +1195,13 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/rebalance] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: { error: 'Internal error during rebalance' },
+          body: withRecovery(
+            { error: 'Internal error during rebalance' },
+            'pending', 'The rebalance payment may be in-flight. Check rebalance history to verify.', [
+              'GET /api/v1/market/rebalances to check if the rebalance completed',
+              'GET /api/v1/capital/balance to verify your capital balance',
+            ],
+          ),
         };
       },
     });
@@ -1233,7 +1260,7 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Rebalance executor not initialized' });
     }
     try {
-      const limit = clampQueryInt(req.query.limit, 50, 1, 500);
+      const limit = parseInt(req.query.limit || '50', 10);
       const result = await daemon.rebalanceExecutor.getRebalanceHistory(req.agentId, limit);
       res.json(result);
     } catch (err) {
@@ -1253,7 +1280,7 @@ export function channelMarketRoutes(daemon) {
     }
     try {
       const metric = req.query.metric || 'fees';
-      const limit = clampQueryInt(req.query.limit, 10, 1, 100);
+      const limit = parseInt(req.query.limit || '10', 10);
       const result = daemon.performanceTracker.getLeaderboard(metric, limit);
       if (result.success === false) {
         return res.status(result.status || 400).json(result);
@@ -1283,8 +1310,8 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
     }
     try {
-      const limit = clampQueryInt(req.query.limit, 50, 1, 100);
-      const offset = clampQueryInt(req.query.offset, 0, 0, 100_000);
+      const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
+      const offset = parseInt(req.query.offset || '0', 10);
       const result = await daemon.marketTransparency.getChannels({ limit, offset });
       res.json(result);
     } catch (err) {
@@ -1294,8 +1321,6 @@ export function channelMarketRoutes(daemon) {
   });
 
   router.get('/api/v1/market/agent/:agentId', marketRL, async (req, res) => {
-    const idCheck = validateAgentId(req.params.agentId);
-    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
     }
@@ -1312,8 +1337,6 @@ export function channelMarketRoutes(daemon) {
   });
 
   router.get('/api/v1/market/peer-safety/:pubkey', marketRL, async (req, res) => {
-    const pkCheck = validatePubkey(req.params.pubkey);
-    if (!pkCheck.valid) return err400Validation(res, pkCheck.reason);
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
     }
@@ -1330,8 +1353,6 @@ export function channelMarketRoutes(daemon) {
   });
 
   router.get('/api/v1/market/fees/:peerPubkey', marketRL, async (req, res) => {
-    const pkCheck = validatePubkey(req.params.peerPubkey);
-    if (!pkCheck.valid) return err400Validation(res, pkCheck.reason);
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
     }

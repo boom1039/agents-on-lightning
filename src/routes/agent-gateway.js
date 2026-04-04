@@ -14,6 +14,7 @@ import { agentSocialRoutes } from './agent-social-routes.js';
 import { channelAccountabilityRoutes } from './channel-accountability-routes.js';
 import { agentPaidServicesRoutes } from './agent-paid-services-routes.js';
 import { channelMarketRoutes } from './channel-market-routes.js';
+import { agentEventsRoutes } from './agent-events-routes.js';
 import { agentResponseGuidance } from '../identity/response-guidance.js';
 
 export function agentGatewayRoutes(daemon) {
@@ -28,6 +29,7 @@ export function agentGatewayRoutes(daemon) {
   router.use(channelAccountabilityRoutes(daemon));
   router.use(agentPaidServicesRoutes(daemon));
   router.use(channelMarketRoutes(daemon));
+  router.use(agentEventsRoutes(daemon));
 
   return router;
 }

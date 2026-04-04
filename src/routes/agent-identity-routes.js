@@ -10,7 +10,6 @@ import { rateLimit } from '../identity/rate-limiter.js';
 import {
   validateAgentId,
   validateString, validateTier,
-  validateActionId,
 } from '../identity/validators.js';
 import { logRegistrationAttempt } from '../identity/audit-log.js';
 import { err400Validation, err400MissingField, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
@@ -90,8 +89,6 @@ export function agentIdentityRoutes(daemon) {
         try { req.body = JSON.parse(req.body); } catch {}
       }
       const result = await daemon.agentRegistry.register(req.body);
-      req.agentId = result.agent_id;
-      req.dashboardBindAgent?.(result.agent_id);
       logRegistrationAttempt(ip, true, result.agent_id);
       res.status(201).json(result);
     } catch (err) {
@@ -122,8 +119,6 @@ export function agentIdentityRoutes(daemon) {
   });
 
   router.put('/api/v1/agents/me', auth, rateLimit('identity_write'), async (req, res) => {
-    const unexpected = findUnexpectedKeys(req.body, ['name', 'description', 'framework', 'contact_url', 'pubkey', 'public_key']);
-    if (unexpected.length > 0) return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/skills/identity');
     try {
       const updated = await daemon.agentRegistry.updateProfile(req.agentId, req.body);
       const { api_key, ...pub } = updated;
@@ -316,6 +311,74 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // =========================================================================
+  // DASHBOARD
+  // =========================================================================
+
+  router.get('/api/v1/agents/me/dashboard', auth, rateLimit('identity_read'), async (req, res) => {
+    const agentId = req.agentId;
+    const dashboard = {};
+
+    // Wallet: ecash balance
+    try {
+      const ecash = await daemon.agentCashuWallet?.getBalance(agentId);
+      dashboard.wallet = { ecash_balance_sats: ecash ?? 0 };
+    } catch {
+      dashboard.wallet = null;
+    }
+
+    // Capital: on-chain capital ledger
+    try {
+      const capital = await daemon.capitalLedger?.getBalance(agentId);
+      dashboard.capital = capital ?? null;
+    } catch {
+      dashboard.capital = null;
+    }
+
+    // Channels: count + total capacity from assignment registry
+    try {
+      const assignments = daemon.channelAssignments?.getByAgent(agentId) || [];
+      const lndChannels = await daemon.lndCache?.getChannels() || [];
+      const lndByPoint = new Map();
+      for (const c of lndChannels) {
+        if (c.channel_point) lndByPoint.set(c.channel_point, c);
+      }
+      let activeCount = 0;
+      let totalCapacity = 0;
+      for (const a of assignments) {
+        const lndCh = lndByPoint.get(a.channel_point);
+        if (lndCh?.active) activeCount++;
+        totalCapacity += a.capacity || (lndCh ? parseInt(lndCh.capacity || '0', 10) : 0);
+      }
+      dashboard.channels = {
+        assigned: assignments.length,
+        active: activeCount,
+        total_capacity_sats: totalCapacity,
+      };
+    } catch {
+      dashboard.channels = null;
+    }
+
+    // Social: unread inbox count
+    try {
+      const inbox = await daemon.messaging?.getInbox(agentId) || [];
+      dashboard.social = { unread_inbox_count: inbox.length };
+    } catch {
+      dashboard.social = null;
+    }
+
+    // Rank: leaderboard position
+    try {
+      const data = daemon.externalLeaderboard?.getData();
+      const entry = data?.entries?.find(e => e.agent_id === agentId);
+      dashboard.rank = entry ? { position: entry.rank, total: data.entries.length, fees_per_sat: entry.fees_per_sat } : null;
+    } catch {
+      dashboard.rank = null;
+    }
+
+    res.json(dashboard);
+  });
+
+  // =========================================================================
   // ACTIONS
   // =========================================================================
 
@@ -373,8 +436,6 @@ export function agentIdentityRoutes(daemon) {
   });
 
   router.get('/api/v1/actions/:id', auth, rateLimit('identity_read'), async (req, res) => {
-    const idCheck = validateActionId(req.params.id);
-    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);
       const action = actions.find(a => a.action_id === req.params.id);
