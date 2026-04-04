@@ -7,6 +7,8 @@ import { LiveJourneyState } from './live/state.mjs';
 import { buildDefaultDemoSpray, loadReplayCatalog, stampBatchEvents } from './live/demo-spray.mjs';
 import { createSyntheticJourneySprayController } from './live/synthetic-spray.mjs';
 import { getAuditLogStatus } from '../src/identity/audit-log.js';
+import { AnalyticsDB } from './live/analytics-db.mjs';
+import { classifyDomain } from './live/classify-domain.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUDIT_LOG = path.resolve(__dirname, '../data/security-audit.jsonl');
@@ -14,22 +16,6 @@ const PORT = Number.parseInt(process.env.MONITOR_DASHBOARD_PORT || process.env.P
 const HOST = process.env.MONITOR_DASHBOARD_HOST || '127.0.0.1';
 const IDLE_MS = 60_000;
 const MAX_REQ = 500;
-
-// Domain classification (ported from agent-surface-inventory.js)
-
-function classifyDomain(p) {
-  if (p === '/' || p === '/llms.txt' || p === '/health') return 'app-level';
-  if (p === '/api/v1/' || p.startsWith('/api/v1/platform/') || p === '/api/v1/ethos' || p === '/api/v1/capabilities' || p.startsWith('/api/v1/strategies') || p.startsWith('/api/v1/knowledge/') || p.startsWith('/api/v1/skills')) return 'discovery';
-  if (p.startsWith('/api/v1/agents/') || p.startsWith('/api/v1/node/') || p.startsWith('/api/v1/actions/')) return 'identity';
-  if (p.startsWith('/api/v1/wallet/') || p === '/api/v1/ledger') return 'wallet';
-  if (p.startsWith('/api/v1/analysis/')) return 'analysis';
-  if (p.startsWith('/api/v1/messages') || p.startsWith('/api/v1/alliances') || p.startsWith('/api/v1/leaderboard') || p.startsWith('/api/v1/tournaments') || p.startsWith('/api/v1/bounties')) return 'social';
-  if (p.startsWith('/api/v1/channels/')) return 'channels';
-  if (p.startsWith('/api/v1/market/')) return 'market';
-  if (p.startsWith('/api/v1/analytics/')) return 'analytics';
-  if (p.startsWith('/api/v1/capital/') || p === '/api/v1/help') return 'capital';
-  return null;
-}
 
 // Domain metadata
 
@@ -65,6 +51,7 @@ const agents = new Map();
 const domainStats = new Map();
 const transitions = new Map();
 const journeyState = new LiveJourneyState();
+const analyticsDb = new AnalyticsDB();
 let totalRequests = 0;
 let byteOffset = 0;
 const sseClients = new Set();
@@ -154,18 +141,23 @@ function processEvent(evt) {
 async function readFullLog() {
   if (!fs.existsSync(AUDIT_LOG)) return;
   const stat = fs.statSync(AUDIT_LOG);
+  const needsImport = await analyticsDb.needsImport();
   const rl = readline.createInterface({
     input: fs.createReadStream(AUDIT_LOG, { encoding: 'utf8' }),
     crlfDelay: Infinity,
   });
+  let imported = 0;
   for await (const line of rl) {
     if (!line.trim()) continue;
     try {
       const parsed = JSON.parse(line);
       processEvent(parsed);
       journeyState.applyEvent(parsed);
+      if (needsImport) { analyticsDb.ingest(parsed); imported++; }
     } catch {}
   }
+  await analyticsDb.flush();
+  if (imported > 0) console.log(`[analytics] Imported ${imported} events from JSONL into DuckDB`);
   byteOffset = stat.size;
 }
 
@@ -183,8 +175,10 @@ async function readNewLines() {
   for await (const line of rl) {
     if (!line.trim()) continue;
     try {
-      const evt = processEvent(JSON.parse(line));
+      const parsed = JSON.parse(line);
+      const evt = processEvent(parsed);
       if (evt) newEvents.push(evt);
+      journeyState.applyEvent(parsed);
     } catch {}
   }
   byteOffset = stat.size;
@@ -438,6 +432,7 @@ app.get('/api/flow', (_, res) => {
 
 app.post('/api/live-events', (req, res) => {
   const events = Array.isArray(req.body?.events) ? req.body.events : [];
+  for (const evt of events) analyticsDb.ingest(evt);
   const applied = ingestJourneyEvents(events);
   res.json({ ok: true, accepted: events.length, applied: applied.length });
 });
@@ -569,8 +564,72 @@ app.get('/api/domains', (_, res) => {
   });
 });
 
+// ── Analytics API (DuckDB) ──
+
+function intParam(val) { return val ? parseInt(val, 10) : undefined; }
+function analyticsHandler(fn, errorStatus = 500) {
+  return async (req, res) => {
+    try { res.json(await fn(req)); }
+    catch (err) { res.status(errorStatus).json({ error: err.message }); }
+  };
+}
+
+app.get('/api/analytics/summary', analyticsHandler(() => analyticsDb.summary()));
+
+app.get('/api/analytics/timeseries', analyticsHandler(req => {
+  const { interval, since, until, domain, agent_id } = req.query;
+  return analyticsDb.eventsByInterval({
+    intervalMinutes: intParam(interval) || 60,
+    since: intParam(since),
+    until: intParam(until),
+    domain: domain || undefined,
+    agentId: agent_id || undefined,
+  });
+}));
+
+app.get('/api/analytics/top-routes', analyticsHandler(req => {
+  const { limit, since, domain } = req.query;
+  return analyticsDb.topRoutes({
+    limit: intParam(limit) || 20,
+    since: intParam(since),
+    domain: domain || undefined,
+  });
+}));
+
+app.get('/api/analytics/agents', analyticsHandler(req => {
+  const { limit, since } = req.query;
+  return analyticsDb.agentActivity({
+    limit: intParam(limit) || 50,
+    since: intParam(since),
+  });
+}));
+
+app.get('/api/analytics/domains', analyticsHandler(req => {
+  const { since } = req.query;
+  return analyticsDb.domainBreakdown({ since: intParam(since) });
+}));
+
+app.get('/api/analytics/errors', analyticsHandler(req => {
+  const { since, limit } = req.query;
+  return analyticsDb.errorBreakdown({
+    since: intParam(since),
+    limit: intParam(limit) || 20,
+  });
+}));
+
+app.get('/api/analytics/agent/:id/journey', analyticsHandler(req =>
+  analyticsDb.agentJourney(req.params.id)
+));
+
+app.post('/api/analytics/query', analyticsHandler(async req => {
+  const { sql, params } = req.body || {};
+  if (!sql) throw new Error('sql is required');
+  return analyticsDb.query(sql, params);
+}, 400));
+
 // Start
 
-await readFullLog();
+await analyticsDb.open();
+await readFullLog();  // single pass: populates in-memory state + DuckDB
 startWatcher();
 app.listen(PORT, HOST, () => console.log(`Agent Flow Monitor at http://${HOST}:${PORT}`));

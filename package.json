@@ -23,6 +23,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@cashu/cashu-ts": "^2.2.0",
     "cors": "^2.8.5",
+    "duckdb-async": "^1.4.2",
     "express": "^4.21.0",
     "yaml": "^2.6.0"
   },
