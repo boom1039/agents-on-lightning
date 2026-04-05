@@ -74,7 +74,7 @@ function buildCatalog() {
 
   const skillByDomain = new Map();
   for (const domain of JOURNEY_DOMAIN_ORDER) {
-    const skill = byKey.get(`GET /api/v1/skills/${domain}`);
+    const skill = byKey.get(`GET /docs/skills/${domain}.txt`);
     if (skill) skillByDomain.set(domain, skill);
   }
 

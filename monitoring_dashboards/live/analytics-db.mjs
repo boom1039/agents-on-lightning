@@ -22,6 +22,33 @@ function deBigInt(rows) {
   });
 }
 
+function parseExtra(extra) {
+  if (!extra) return {};
+  if (typeof extra === 'object') return extra;
+  try {
+    return JSON.parse(extra);
+  } catch {
+    return {};
+  }
+}
+
+function decodeEventRow(row) {
+  return {
+    ts: typeof row.ts === 'bigint' ? Number(row.ts) : row.ts,
+    _ts: typeof row.ts === 'bigint' ? Number(row.ts) : row.ts,
+    event: row.event,
+    method: row.method || null,
+    path: row.path || null,
+    status: row.status == null ? null : Number(row.status),
+    duration_ms: row.duration_ms == null ? null : Number(row.duration_ms),
+    agent_id: row.agent_id || null,
+    ip: row.ip || null,
+    domain: row.domain || null,
+    doc_kind: row.doc_kind || null,
+    ...parseExtra(row.extra),
+  };
+}
+
 const DEFAULT_DB_PATH = path.resolve(
   import.meta.dirname || path.dirname(new URL(import.meta.url).pathname),
   '../../data/journey-analytics.duckdb',
@@ -63,20 +90,29 @@ function normalizeEvent(raw) {
   const duration = Number.isFinite(raw.duration_ms) ? Math.round(raw.duration_ms) : null;
   const agentId = raw.agent_id || null;
   const ip = raw.ip || null;
-  const domain = classifyDomain(p);
+  const domain = raw.domain || classifyDomain(p);
   const docKind = raw.doc_kind || null;
 
-  // Stash less-common fields in extra JSON
+  const knownKeys = new Set([
+    '_ts',
+    'ts',
+    'event',
+    'method',
+    'path',
+    'endpoint',
+    'status',
+    'status_code',
+    'duration_ms',
+    'agent_id',
+    'ip',
+    'domain',
+    'doc_kind',
+  ]);
   const extra = {};
-  if (raw.field) extra.field = raw.field;
-  if (raw.value_snippet) extra.value_snippet = raw.value_snippet;
-  if (raw.success !== undefined) extra.success = raw.success;
-  if (raw.resource_id) extra.resource_id = raw.resource_id;
-  if (raw.route) extra.route = raw.route;
-  if (raw.reason) extra.reason = raw.reason;
-  if (raw.operation) extra.operation = raw.operation;
-  if (raw.amount_sats !== undefined) extra.amount_sats = raw.amount_sats;
-  if (raw.trace_id) extra.trace_id = raw.trace_id;
+  for (const [key, value] of Object.entries(raw)) {
+    if (knownKeys.has(key) || value === undefined) continue;
+    extra[key] = value;
+  }
   const extraJson = Object.keys(extra).length > 0 ? JSON.stringify(extra) : null;
 
   return [ts, event, method, p, status, duration, agentId, ip, domain, docKind, extraJson];
@@ -168,8 +204,9 @@ export class AnalyticsDB {
 
   /** Event counts bucketed by time interval */
   async eventsByInterval({ intervalMinutes = 60, since, until, domain, agentId } = {}) {
-    const where = [];
+    const where = ['event = ?'];
     const params = [];
+    params.push('api_request');
     if (since) { where.push('ts >= ?'); params.push(since); }
     if (until) { where.push('ts <= ?'); params.push(until); }
     if (domain) { where.push('domain = ?'); params.push(domain); }
@@ -195,8 +232,9 @@ export class AnalyticsDB {
 
   /** Top routes by request count */
   async topRoutes({ limit = 20, since, domain } = {}) {
-    const where = ['method IS NOT NULL', 'path IS NOT NULL'];
+    const where = ['event = ?', 'method IS NOT NULL', 'path IS NOT NULL'];
     const params = [];
+    params.push('api_request');
     if (since) { where.push('ts >= ?'); params.push(since); }
     if (domain) { where.push('domain = ?'); params.push(domain); }
 
@@ -219,8 +257,9 @@ export class AnalyticsDB {
 
   /** Per-agent activity summary */
   async agentActivity({ limit = 50, since } = {}) {
-    const where = ['agent_id IS NOT NULL'];
+    const where = ['event = ?', 'agent_id IS NOT NULL'];
     const params = [];
+    params.push('api_request');
     if (since) { where.push('ts >= ?'); params.push(since); }
 
     return deBigInt(await this.db.all(`
@@ -243,8 +282,9 @@ export class AnalyticsDB {
 
   /** Domain breakdown */
   async domainBreakdown({ since } = {}) {
-    const where = ['domain IS NOT NULL'];
+    const where = ['event = ?', 'domain IS NOT NULL'];
     const params = [];
+    params.push('api_request');
     if (since) { where.push('ts >= ?'); params.push(since); }
 
     return deBigInt(await this.db.all(`
@@ -265,8 +305,9 @@ export class AnalyticsDB {
 
   /** Error breakdown */
   async errorBreakdown({ since, limit = 20 } = {}) {
-    const where = ['status >= 400'];
+    const where = ['event = ?', 'status >= 400'];
     const params = [];
+    params.push('api_request');
     if (since) { where.push('ts >= ?'); params.push(since); }
 
     return deBigInt(await this.db.all(`
@@ -290,9 +331,42 @@ export class AnalyticsDB {
     return deBigInt(await this.db.all(`
       SELECT ts, event, method, path, status, duration_ms, domain
       FROM events
-      WHERE agent_id = ?
+      WHERE event = 'api_request' AND agent_id = ?
       ORDER BY ts
     `, agentId));
+  }
+
+  /** Raw stored events for rebuilding live state or custom audit views. */
+  async listEvents({
+    since,
+    until,
+    agentId,
+    eventTypes,
+    limit,
+    order = 'ASC',
+  } = {}) {
+    const where = [];
+    const params = [];
+    if (since) { where.push('ts >= ?'); params.push(since); }
+    if (until) { where.push('ts <= ?'); params.push(until); }
+    if (agentId) { where.push('agent_id = ?'); params.push(agentId); }
+    if (Array.isArray(eventTypes) && eventTypes.length > 0) {
+      where.push(`event IN (${eventTypes.map(() => '?').join(',')})`);
+      params.push(...eventTypes);
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const normalizedOrder = `${order}`.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+    const limitClause = Number.isFinite(limit) && limit > 0 ? ' LIMIT ?' : '';
+    if (limitClause) params.push(limit);
+
+    const rows = await this.db.all(`
+      SELECT ts, event, method, path, status, duration_ms, agent_id, ip, domain, doc_kind, extra
+      FROM events
+      ${whereClause}
+      ORDER BY ts ${normalizedOrder}${limitClause}
+    `, ...params);
+
+    return rows.map(decodeEventRow);
   }
 
   /** Summary stats */

@@ -21,5 +21,5 @@ Call these exact two routes in this exact order and then stop:
 Rules:
 
 - send `Content-Type: application/json` on route 1
-- do not use lookalikes such as `GET /api/v1/capital/deposit` or `POST /api/v1/capital/deposit-address`
+- [not-live-route] do not use lookalikes such as `GET /api/v1/capital/deposit` or `POST /api/v1/capital/deposit-address`
 - route 1 returns a fresh single-use Taproot deposit address plus `watch_url` explorer links

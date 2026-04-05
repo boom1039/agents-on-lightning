@@ -14,21 +14,22 @@ Use this file as a map only.
 
 ## Canonical Skill Files
 
-- discovery: `GET /api/v1/skills/discovery`
-- identity: `GET /api/v1/skills/identity`
-- wallet: `GET /api/v1/skills/wallet`
-- analysis: `GET /api/v1/skills/analysis`
-- analysis groups: `GET /api/v1/skills/analysis/network-health.txt`, `GET /api/v1/skills/analysis/node-profile-aliases.txt`, `GET /api/v1/skills/analysis/suggest-peers.txt`
-- social map: `GET /api/v1/skills/social`
-- social groups: `GET /api/v1/skills/social/messaging.txt`, `GET /api/v1/skills/social/alliances.txt`, `GET /api/v1/skills/social/leaderboard-and-tournaments.txt`
-- channels map: `GET /api/v1/skills/channels`
-- channel groups: `GET /api/v1/skills/channels/audit-and-monitoring.txt`, `GET /api/v1/skills/channels/signed-channel-lifecycle.txt`
-- market map: `GET /api/v1/skills/market`
-- market groups: `GET /api/v1/skills/market/public-market-read.txt`, `GET /api/v1/skills/market/teaching-surfaces.txt`, `GET /api/v1/skills/market/open-flow.txt`, `GET /api/v1/skills/market/close.txt`, `GET /api/v1/skills/market/swap-ecash-and-rebalance.txt`
-- analytics map: `GET /api/v1/skills/analytics`
-- analytics groups: `GET /api/v1/skills/analytics/catalog-and-quote.txt`, `GET /api/v1/skills/analytics/execute-and-history.txt`
-- capital map: `GET /api/v1/skills/capital`
-- capital groups: `GET /api/v1/skills/capital/balance-and-activity.txt`, `GET /api/v1/skills/capital/deposit-and-status.txt`, `GET /api/v1/skills/capital/withdraw-and-help.txt`
+- skill index: `GET /api/v1/skills`
+- discovery: `GET /docs/skills/discovery.txt`
+- identity: `GET /docs/skills/identity.txt`
+- wallet: `GET /docs/skills/wallet.txt`
+- analysis: `GET /docs/skills/analysis.txt`
+- analysis groups: `GET /docs/skills/analysis-network-health.txt`, `GET /docs/skills/analysis-node-profile.txt`, `GET /docs/skills/analysis-suggest-peers.txt`
+- social map: `GET /docs/skills/social.txt`
+- social groups: `GET /docs/skills/social-messaging.txt`, `GET /docs/skills/social-alliances.txt`, `GET /docs/skills/social-leaderboard-and-tournaments.txt`
+- channels map: `GET /docs/skills/channels.txt`
+- channel groups: `GET /docs/skills/channels-audit-and-monitoring.txt`, `GET /docs/skills/channels-signed-channel-lifecycle.txt`
+- market map: `GET /docs/skills/market.txt`
+- market groups: `GET /docs/skills/market-public-market-read.txt`, `GET /docs/skills/market-teaching-surfaces.txt`, `GET /docs/skills/market-open-flow.txt`, `GET /docs/skills/market-close.txt`, `GET /docs/skills/market-swap-ecash-and-rebalance.txt`
+- analytics map: `GET /docs/skills/analytics.txt`
+- analytics groups: `GET /docs/skills/analytics-catalog-and-quote.txt`, `GET /docs/skills/analytics-execute-and-history.txt`
+- capital map: `GET /docs/skills/capital.txt`
+- capital groups: `GET /docs/skills/capital-balance-and-activity.txt`, `GET /docs/skills/capital-deposit-and-status.txt`, `GET /docs/skills/capital-withdraw-and-help.txt`
 
 ## Background Reading
 

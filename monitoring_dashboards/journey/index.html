@@ -229,7 +229,9 @@
 
     <div id="stats">
       <span class="stat">AGENTS<strong id="stat-agents">0</strong></span>
-      <span class="stat">ROUTES<strong id="stat-routes">0</strong></span>
+      <span class="stat">HIST<strong id="stat-history-agents">0</strong></span>
+      <span class="stat">ENDPTS<strong id="stat-routes">0</strong></span>
+      <span class="stat">DOCS<strong id="stat-docs">0</strong></span>
       <span class="stat">IN FLIGHT<strong id="stat-inflight">0</strong></span>
     </div>
 
@@ -302,11 +304,17 @@
     let hovered = null;
 
     const routeMap = new Map();
+    const routeManifest = new Map();
     const agentMap = new Map();
     const routeSlots = new Map();
     const visualAgents = new Map();
+    const docManifest = new Map();
     let inflightCount = 0;
+    let endpointCount = 0;
+    let docCount = 0;
     let logInfo = null;
+    let manifestInfo = null;
+    let historyInfo = null;
     let liveConnected = false;
     let syntheticStatus = { running: false, activeAgents: 0, agentsCreated: 0 };
     let lastSnapshotAt = 0;
@@ -336,6 +344,45 @@
     const GRID_TOP = 52;
     const MIN_DOMAIN_HEADER_H = 14;
     const MAX_DOMAIN_HEADER_H = 18;
+
+    function routeEntryFromManifest(route) {
+      return {
+        routeKey: route.key,
+        routePath: route.path,
+        routeLabel: route.endpoint || route.label || route.path,
+        method: route.method,
+        domain: route.domain || 'other',
+        group: route.group || route.subgroup || 'other',
+        surfaceType: 'api',
+        canonical: route.canonical !== false,
+        summary: route.summary || null,
+        auth: route.auth || null,
+        sourceFile: route.source_file || null,
+        sourceLine: Number.isInteger(route.source_line) ? route.source_line : null,
+        tags: Array.isArray(route.tags) ? route.tags.slice() : [],
+        order: Number.isInteger(route.order) ? route.order : null,
+        docIds: Array.isArray(route.doc_ids) ? route.doc_ids.slice() : [],
+        linkedRouteKeys: [],
+        linkedDocIds: Array.isArray(route.doc_ids) ? route.doc_ids.slice() : [],
+        activeAgents: 0,
+        inFlight: 0,
+        finished: 0,
+        status2xx: 0,
+        status4xx: 0,
+        status5xx: 0,
+        lastEventTime: 0,
+      };
+    }
+
+    function seedRoutesFromManifest() {
+      routeMap.clear();
+      for (const route of routeManifest.values()) {
+        routeMap.set(route.routeKey, { ...route });
+      }
+      routeSlots.clear();
+      invalidateLayout();
+      dirty = true;
+    }
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -426,6 +473,25 @@
     function tooltipRow(label, value) {
       if (value == null || value === '') return '';
       return `<div class="tt-row"><span class="tt-label">${escapeHtml(label)}</span><span class="tt-value">${escapeHtml(value)}</span></div>`;
+    }
+
+    function formatSourceRef(item) {
+      if (!item?.sourceFile) return '-';
+      return Number.isFinite(item.sourceLine)
+        ? `${item.sourceFile}:${item.sourceLine}`
+        : item.sourceFile;
+    }
+
+    function formatTagList(tags) {
+      if (!Array.isArray(tags) || tags.length === 0) return '-';
+      return tags.join(', ');
+    }
+
+    function formatDocList(docIds, limit = 4) {
+      if (!Array.isArray(docIds) || docIds.length === 0) return '-';
+      const names = docIds.slice(0, limit).map((docId) => docManifest.get(docId)?.title || docId);
+      if (docIds.length > limit) names.push(`+${docIds.length - limit} more`);
+      return names.join(' | ');
     }
 
     function getMinColumnWidth(availableWidth) {
@@ -707,6 +773,9 @@
     }
 
     function sortRoutes(a, b) {
+      const orderA = Number.isInteger(a.order) ? a.order : Number.MAX_SAFE_INTEGER;
+      const orderB = Number.isInteger(b.order) ? b.order : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
       const groupCmp = String(a.group || '').localeCompare(String(b.group || ''));
       if (groupCmp !== 0) return groupCmp;
       const pathCmp = String(a.routePath || a.routeLabel || '').localeCompare(String(b.routePath || b.routeLabel || ''));
@@ -883,41 +952,33 @@
 
     function upsertRoute(routeLike) {
       if (!routeLike || !routeLike.routeKey) return;
-      if (routeLike.canonical === false && !routeMap.has(routeLike.routeKey)) return;
-      const existing = routeMap.get(routeLike.routeKey) || {};
+      const manifestRoute = routeManifest.get(routeLike.routeKey);
+      if (!manifestRoute) return;
+      const existing = routeMap.get(routeLike.routeKey) || manifestRoute;
+      const nextRoute = {
+        ...manifestRoute,
+        ...existing,
+      };
+      for (const [key, value] of Object.entries(routeLike)) {
+        if (value !== undefined) nextRoute[key] = value;
+      }
       const layoutChanged = (
         !existing.routeKey
-        || existing.routePath !== routeLike.routePath
-        || existing.routeLabel !== routeLike.routeLabel
-        || existing.method !== routeLike.method
-        || existing.domain !== routeLike.domain
-        || existing.group !== routeLike.group
+        || existing.routePath !== nextRoute.routePath
+        || existing.routeLabel !== nextRoute.routeLabel
+        || existing.method !== nextRoute.method
+        || existing.domain !== nextRoute.domain
+        || existing.group !== nextRoute.group
       );
-      routeMap.set(routeLike.routeKey, {
-        ...existing,
-        ...routeLike,
-      });
+      routeMap.set(routeLike.routeKey, nextRoute);
       if (layoutChanged) invalidateLayout();
     }
 
     function applySnapshot(snapshot) {
       // Keep seen routes pinned so tiles stay stable across live snapshot refreshes.
       agentMap.clear();
-      let layoutChanged = false;
-      for (const route of (snapshot.routes || []).filter(r => r.canonical !== false)) {
-        const existing = routeMap.get(route.routeKey);
-        if (
-          !existing
-          || existing.routePath !== route.routePath
-          || existing.routeLabel !== route.routeLabel
-          || existing.method !== route.method
-          || existing.domain !== route.domain
-          || existing.group !== route.group
-        ) {
-          layoutChanged = true;
-        }
-        routeMap.set(route.routeKey, { ...existing, ...route });
-      }
+      if (routeManifest.size > 0) seedRoutesFromManifest();
+      for (const route of (snapshot.routes || [])) upsertRoute(route);
       for (const agent of snapshot.agents || []) {
         agentMap.set(agent.id, { ...agent });
         upsertRoute({
@@ -929,12 +990,25 @@
           group: agent.group,
           surfaceType: agent.surfaceType,
           canonical: agent.canonical,
+          summary: agent.summary,
+          auth: agent.auth,
+          sourceFile: agent.sourceFile,
+          sourceLine: agent.sourceLine,
+          tags: agent.tags,
+          docId: agent.docId,
+          docTitle: agent.docTitle,
+          docKind: agent.docKind,
+          docIds: agent.docIds,
+          linkedRouteKeys: agent.linkedRouteKeys,
+          linkedDocIds: agent.linkedDocIds,
           lastEventTime: agent.lastEventTime,
         });
       }
-      if (layoutChanged) invalidateLayout();
+      endpointCount = routeManifest.size || Number(snapshot.stats?.endpoints || snapshot.stats?.routes || 0);
+      docCount = docManifest.size || Number(snapshot.stats?.docs || 0);
       inflightCount = snapshot.stats?.inFlight || 0;
       logInfo = snapshot.log || null;
+      historyInfo = snapshot.history || null;
       lastSnapshotAt = snapshot.builtAt || Date.now();
       dirty = true;
       updateHud();
@@ -953,6 +1027,19 @@
           method: event.method,
           domain: event.domain,
           group: event.group,
+          surfaceType: event.surfaceType,
+          canonical: event.canonical,
+          summary: event.summary,
+          auth: event.auth,
+          sourceFile: event.sourceFile,
+          sourceLine: event.sourceLine,
+          tags: event.tags,
+          docId: event.docId,
+          docTitle: event.docTitle,
+          docKind: event.docKind,
+          docIds: event.docIds,
+          linkedRouteKeys: event.linkedRouteKeys,
+          linkedDocIds: event.linkedDocIds,
           lastEventTime: event.ts,
         });
       }
@@ -969,6 +1056,17 @@
           group: event.agent.group,
           surfaceType: event.agent.surfaceType,
           canonical: event.agent.canonical,
+          summary: event.agent.summary,
+          auth: event.agent.auth,
+          sourceFile: event.agent.sourceFile,
+          sourceLine: event.agent.sourceLine,
+          tags: event.agent.tags,
+          docId: event.agent.docId,
+          docTitle: event.agent.docTitle,
+          docKind: event.agent.docKind,
+          docIds: event.agent.docIds,
+          linkedRouteKeys: event.agent.linkedRouteKeys,
+          linkedDocIds: event.agent.linkedDocIds,
           lastEventTime: event.agent.lastEventTime,
         });
       }
@@ -983,18 +1081,7 @@
       }
       for (const agent of agentMap.values()) {
         if (!agent.routeKey) continue;
-        if (!grouped.has(agent.routeKey)) {
-          grouped.set(agent.routeKey, {
-            routeKey: agent.routeKey,
-            routePath: agent.routePath,
-            routeLabel: agent.routeLabel,
-            method: agent.method,
-            domain: agent.domain || 'other',
-            group: agent.group || 'other',
-            inFlight: 0,
-            agents: [],
-          });
-        }
+        if (!grouped.has(agent.routeKey)) continue;
         grouped.get(agent.routeKey).agents.push(agent);
       }
       for (const route of grouped.values()) {
@@ -1005,12 +1092,15 @@
 
     function updateHud() {
       document.getElementById('stat-agents').textContent = agentMap.size.toLocaleString();
-      document.getElementById('stat-routes').textContent = routeMap.size.toLocaleString();
+      document.getElementById('stat-history-agents').textContent = Number(historyInfo?.uniqueAgents || 0).toLocaleString();
+      document.getElementById('stat-routes').textContent = endpointCount.toLocaleString();
+      document.getElementById('stat-docs').textContent = docCount.toLocaleString();
       document.getElementById('stat-inflight').textContent = inflightCount.toLocaleString();
       if (logInfo) {
-        const bytes = Number(logInfo.lastSizeBytes || 0);
+        const bytes = Number(logInfo.lastSizeBytes || logInfo.sizeBytes || 0);
         const mb = (bytes / 1024 / 1024).toFixed(1);
-        document.getElementById('log-label').textContent = `LOG ${mb}MB ${String(logInfo.level || 'ok').toUpperCase()}`;
+        const prefix = logInfo.backend === 'duckdb' ? 'DB' : 'LOG';
+        document.getElementById('log-label').textContent = `${prefix} ${mb}MB ${String(logInfo.level || 'ok').toUpperCase()}`;
       }
     }
 
@@ -1278,8 +1368,15 @@
           agent.rawPath && agent.rawPath !== agent.routePath ? tooltipRow('raw path', agent.rawPath) : '',
           tooltipRow('method', agent.method),
           tooltipRow('domain', DOMAIN_NAMES[agent.domain] || agent.domain),
-          tooltipRow('group', agent.group),
+          tooltipRow('subgroup', agent.group),
           tooltipRow('surface', agent.surfaceType),
+          agent.summary ? tooltipRow('summary', agent.summary) : '',
+          agent.auth ? tooltipRow('auth', agent.auth) : '',
+          agent.docTitle ? tooltipRow('doc', agent.docTitle) : '',
+          (!agent.docTitle && agent.docId) ? tooltipRow('doc', agent.docId) : '',
+          (Array.isArray(agent.docIds) && agent.docIds.length > 0) ? tooltipRow('linked docs', formatDocList(agent.docIds)) : '',
+          tooltipRow('tags', formatTagList(agent.tags)),
+          tooltipRow('source', formatSourceRef(agent)),
           tooltipRow('phase', agent.phase),
           tooltipRow('status', formatStatus(agent)),
           tooltipRow('session', formatDurationLong(sessionAgeMs)),
@@ -1312,8 +1409,16 @@
           <div class="tt-title">${escapeHtml(route.routePath)}</div>
           ${tooltipRow('method', route.method)}
           ${tooltipRow('domain', DOMAIN_NAMES[route.domain] || route.domain)}
-          ${tooltipRow('group', route.group)}
+          ${tooltipRow('subgroup', route.group)}
           ${tooltipRow('surface', route.surfaceType)}
+          ${route.summary ? tooltipRow('summary', route.summary) : ''}
+          ${route.auth ? tooltipRow('auth', route.auth) : ''}
+          ${(route.docTitle || route.docId) ? tooltipRow('doc', route.docTitle || route.docId) : ''}
+          ${(Array.isArray(route.docIds) && route.docIds.length > 0) ? tooltipRow('linked docs', formatDocList(route.docIds)) : ''}
+          ${(Array.isArray(route.linkedRouteKeys) && route.linkedRouteKeys.length > 0) ? tooltipRow('linked routes', route.linkedRouteKeys.length) : ''}
+          ${(Array.isArray(route.linkedDocIds) && route.linkedDocIds.length > 0) ? tooltipRow('linked docs graph', route.linkedDocIds.length) : ''}
+          ${tooltipRow('tags', formatTagList(route.tags))}
+          ${tooltipRow('source', formatSourceRef(route))}
           ${tooltipRow('agents', route.agents.length)}
           ${tooltipRow('in flight', route.inFlight || 0)}
           ${tooltipRow('oldest stay', formatDurationLong(oldest))}
@@ -1385,6 +1490,23 @@
     });
     window.addEventListener('pointerup', finishDividerDrag);
 
+    async function loadManifest() {
+      const res = await fetch('/api/journey/manifest', { cache: 'no-store' });
+      manifestInfo = await res.json();
+      routeManifest.clear();
+      docManifest.clear();
+      for (const route of (manifestInfo.routes || []).filter(route => route.canonical !== false)) {
+        const entry = routeEntryFromManifest(route);
+        routeManifest.set(entry.routeKey, entry);
+      }
+      for (const doc of manifestInfo.docs || []) docManifest.set(doc.doc_id, doc);
+      endpointCount = routeManifest.size;
+      docCount = docManifest.size;
+      seedRoutesFromManifest();
+      updateHud();
+      dirty = true;
+    }
+
     async function loadSnapshot() {
       const res = await fetch('/api/journey');
       const snapshot = await res.json();
@@ -1419,6 +1541,9 @@
       setLiveStatus(false, 'LOADING');
       renderSyntheticButton();
       document.getElementById('btn-synthetic').addEventListener('click', toggleSyntheticTraffic);
+      await loadManifest().catch(() => {
+        manifestInfo = null;
+      });
       await loadSnapshot();
       await refreshSyntheticStatus();
       connectSse();

@@ -97,7 +97,7 @@ canvas { display: block; }
   <span>Agents: <span class="hud-val" id="hud-agents">0</span></span>
   <span>In-flight: <span class="hud-val" id="hud-inflight">0</span></span>
   <span>Events/s: <span class="hud-val" id="hud-eps">0</span></span>
-  <span>Active: <span class="hud-val" id="hud-active">0/110</span></span>
+  <span>Active: <span class="hud-val" id="hud-active">0/0</span></span>
   <span class="hud-sep"></span>
   <span>Layout: <span class="hud-val" id="hud-layout">Default</span></span>
   <button class="sim-btn" id="btn-simulate">SIMULATE</button>
@@ -105,7 +105,7 @@ canvas { display: block; }
 <div id="tooltip"></div>
 <button id="style-toggle">Style</button>
 <div id="style-panel"></div>
-<div id="drag-hint">Shift+drag: label / box / phase &middot; Double-click phase: flip route anchors &middot; D/S/C = dump</div>
+<div id="drag-hint">Shift+drag: label / box / domain &middot; Double-click domain: flip route anchors &middot; D/S/C = dump</div>
 
 <script>
 // Error capture — catches module load errors, runtime errors, unhandled rejections
@@ -140,6 +140,7 @@ function showErrorOverlay(msg) {
 }
 </script>
 <script type="module">
+import { loadManifest } from './js/manifest.js';
 import { computeLayout } from './js/layout.js';
 import { clearScene, buildScene, updateRouteBoxHeights } from './js/builder.js';
 import { initInteraction, refreshInteraction } from './js/interaction.js';
@@ -151,6 +152,8 @@ import { renderer, camera, controls, composer } from './js/scene.js';
 import { styleState } from './js/constants.js';
 import { routeBoxes, phaseGroups } from './js/builder.js';
 import { LAYOUTS } from './js/layouts.js';
+
+await loadManifest();
 
 const layout = computeLayout();
 buildScene(layout);

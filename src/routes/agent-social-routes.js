@@ -70,7 +70,9 @@ export function agentSocialRoutes(daemon) {
   // MESSAGING & ALLIANCES
   // =========================================================================
 
-  router.post(['/api/v1/messages', '/api/v1/messages/send'], auth, rateLimit('social_write'), async (req, res) => {
+  // Run messages.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"messages","summary":"Run messages.","order":200,"tags":["social","write","agent"],"doc":["skills/social-messaging.txt","skills/social.txt"]}
+  router.post('/api/v1/messages', auth, rateLimit('social_write'), async (req, res) => {
     try {
       const { to, content, type } = req.body;
       if (!to || !content) return err400MissingField(res, 'to and content', {
@@ -92,6 +94,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read messages.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"messages","summary":"Read messages.","order":210,"tags":["social","read","agent"],"doc":["skills/social-messaging.txt","skills/social.txt"]}
   router.get('/api/v1/messages', auth, rateLimit('social_read'), async (req, res) => {
     try {
       const { since, limit } = req.query;
@@ -106,6 +110,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read messages inbox.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"inbox","summary":"Read messages inbox.","order":220,"tags":["social","read","agent"],"doc":["skills/social-messaging.txt","skills/social.txt"]}
   router.get('/api/v1/messages/inbox', auth, rateLimit('social_read'), async (req, res) => {
     try {
       const { since, limit } = req.query;
@@ -120,7 +126,9 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
-  router.post(['/api/v1/alliances', '/api/v1/alliances/propose'], auth, rateLimit('social_write'), async (req, res) => {
+  // Run alliances.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Alliances","label":"alliances","summary":"Run alliances.","order":300,"tags":["social","write","agent"],"doc":["skills/social-alliances.txt","skills/social.txt"]}
+  router.post('/api/v1/alliances', auth, rateLimit('social_write'), async (req, res) => {
     try {
       const { to, terms } = req.body;
       if (!to || !terms) return err400MissingField(res, 'to and terms', {
@@ -138,6 +146,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read alliances.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Alliances","label":"alliances","summary":"Read alliances.","order":310,"tags":["social","read","agent"],"doc":["skills/social-alliances.txt","skills/social.txt"]}
   router.get('/api/v1/alliances', auth, rateLimit('social_read'), async (req, res) => {
     try {
       const alliances = await daemon.allianceManager.list(req.agentId);
@@ -147,6 +157,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Accept alliances by id.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Alliances","label":"accept","summary":"Accept alliances by id.","order":320,"tags":["social","write","dynamic","agent"],"doc":"skills/social.txt"}
   router.post('/api/v1/alliances/:id/accept', auth, rateLimit('social_write'), async (req, res) => {
     const idCheck = validateAllianceId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
@@ -158,6 +170,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Break alliances by id.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Alliances","label":"break","summary":"Break alliances by id.","order":330,"tags":["social","write","dynamic","agent"],"doc":"skills/social.txt"}
   router.post('/api/v1/alliances/:id/break', auth, rateLimit('social_write'), async (req, res) => {
     const idCheck = validateAllianceId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
@@ -180,6 +194,8 @@ export function agentSocialRoutes(daemon) {
   // LEADERBOARD
   // =========================================================================
 
+  // Read leaderboard.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"leaderboard","summary":"Read leaderboard.","order":100,"tags":["social","read","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/leaderboard', rateLimit('discovery'), async (req, res) => {
     try {
       const data = await daemon.externalLeaderboard?.getData() || { entries: [], updatedAt: null };
@@ -195,6 +211,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read leaderboard agent by id.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"agent","summary":"Read leaderboard agent by id.","order":110,"tags":["social","read","dynamic","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/leaderboard/agent/:id', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason, { see: 'GET /api/v1/leaderboard' });
@@ -207,6 +225,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read leaderboard challenges.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"challenges","summary":"Read leaderboard challenges.","order":120,"tags":["social","read","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/leaderboard/challenges', rateLimit('discovery'), async (_req, res) => {
     try {
       const challenges = await daemon.tournamentManager?.getChallenges() || [];
@@ -216,6 +236,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read leaderboard hall of fame.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"hall-of-fame","summary":"Read leaderboard hall of fame.","order":130,"tags":["social","read","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/leaderboard/hall-of-fame', rateLimit('discovery'), async (_req, res) => {
     try {
       const fame = await daemon.tournamentManager?.getHallOfFame() || [];
@@ -225,6 +247,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read leaderboard evangelists.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"evangelists","summary":"Read leaderboard evangelists.","order":140,"tags":["social","read","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/leaderboard/evangelists', rateLimit('discovery'), async (_req, res) => {
     try {
       const evangelists = await daemon.agentRegistry.getTopEvangelists();
@@ -238,6 +262,8 @@ export function agentSocialRoutes(daemon) {
   // TOURNAMENTS
   // =========================================================================
 
+  // Read tournaments.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"tournaments","summary":"Read tournaments.","order":150,"tags":["social","read","public"],"doc":["skills/social-leaderboard-and-tournaments.txt","skills/social.txt"]}
   router.get('/api/v1/tournaments', rateLimit('discovery'), async (_req, res) => {
     try {
       const tournaments = await daemon.tournamentManager?.list() || [];
@@ -247,6 +273,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Enter tournaments by id.
+  // @agent-route {"auth":"agent","domain":"social","subgroup":"Leaderboard","label":"enter","summary":"Enter tournaments by id.","order":160,"tags":["social","write","dynamic","agent"],"doc":"skills/social.txt"}
   router.post('/api/v1/tournaments/:id/enter', auth, rateLimit('social_write'), async (req, res) => {
     const idCheck = validateTournamentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
@@ -258,6 +286,8 @@ export function agentSocialRoutes(daemon) {
     }
   });
 
+  // Read tournaments by id bracket.
+  // @agent-route {"auth":"public","domain":"social","subgroup":"Leaderboard","label":"bracket","summary":"Read tournaments by id bracket.","order":170,"tags":["social","read","dynamic","public"],"doc":"skills/social.txt"}
   router.get('/api/v1/tournaments/:id/bracket', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateTournamentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
@@ -272,3 +302,4 @@ export function agentSocialRoutes(daemon) {
 
   return router;
 }
+

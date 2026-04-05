@@ -1,12 +1,13 @@
 import {
   DOC_CATALOG,
   DOMAIN_ORDER,
-  matchAgentFacingRoute,
-  matchDocSurface,
   ROUTE_CATALOG,
+  resolveTrackedSurface,
 } from '../../src/monitor/agent-surface-inventory.js';
 
 export const JOURNEY_DOMAIN_ORDER = [...DOMAIN_ORDER, 'other'];
+const ROUTE_BY_KEY = new Map(ROUTE_CATALOG.map((route) => [route.key, route]));
+const DOC_BY_KEY = new Map(DOC_CATALOG.map((doc) => [doc.key, doc]));
 
 function classifyFallbackDomain(path = '') {
   if (path === '/' || path === '/llms.txt' || path === '/health' || path.startsWith('/docs/')) return 'app-level';
@@ -36,7 +37,7 @@ function classifyFallbackDomain(path = '') {
   return 'other';
 }
 
-function classifyRouteGroup(path = '') {
+function classifyFallbackGroup(path = '') {
   if (path === '/' || path === '/llms.txt' || path === '/health') return 'app';
   if (path.startsWith('/docs/')) return 'docs';
   if (!path.startsWith('/api/v1/')) return 'other';
@@ -44,85 +45,88 @@ function classifyRouteGroup(path = '') {
   return parts[2] || 'root';
 }
 
-function toSurface({
-  key,
-  method,
-  path,
-  label,
-  domain,
-  group,
-  surfaceType,
-  canonical,
-  rawPath,
-}) {
+function toSurface({ kind, entry, rawPath }) {
+  const path = entry.path;
   return {
-    routeKey: key,
-    routeLabel: label || path,
+    routeKey: entry.key,
+    routeLabel: entry.endpoint || entry.label || path,
     routePath: path,
     rawPath: rawPath || path,
-    method,
-    domain,
-    group,
-    surfaceType,
-    canonical,
+    method: entry.method,
+    domain: entry.domain || classifyFallbackDomain(path),
+    group: entry.group || entry.subgroup || classifyFallbackGroup(path),
+    surfaceType: kind === 'doc' ? 'doc' : kind === 'route' ? 'api' : 'other',
+    canonical: kind === 'doc' ? true : kind === 'route' ? entry.canonical !== false : false,
+    summary: entry.summary || null,
+    auth: kind === 'route' ? entry.auth || null : null,
+    sourceFile: entry.source_file || null,
+    sourceLine: Number.isInteger(entry.source_line) ? entry.source_line : null,
+    tags: Array.isArray(entry.tags) ? entry.tags.slice() : [],
+    docId: kind === 'doc' ? entry.doc_id || null : null,
+    docTitle: kind === 'doc' ? entry.title || null : null,
+    docKind: kind === 'doc' ? entry.kind || entry.docKind || null : null,
+    docIds: Array.isArray(entry.doc_ids) ? entry.doc_ids.slice() : [],
+    linkedRouteKeys: Array.isArray(entry.route_keys) ? entry.route_keys.slice() : [],
+    linkedDocIds: Array.isArray(entry.linked_doc_ids) ? entry.linked_doc_ids.slice() : [],
   };
 }
 
 export function describeJourneySurface(event) {
   const method = String(event?.method || 'GET').toUpperCase();
   const path = String(event?.path || event?.rawPath || '');
-  const route = matchAgentFacingRoute(method, path);
-  if (route) {
+  const surfaceKey = typeof event?.surface_key === 'string' ? event.surface_key : null;
+  const exactDoc = surfaceKey ? DOC_BY_KEY.get(surfaceKey) : null;
+  if (exactDoc) {
     return toSurface({
-      key: route.key,
-      method: route.method,
-      path: route.path,
-      label: route.path,
-      domain: route.domain,
-      group: classifyRouteGroup(route.path),
-      surfaceType: 'api',
-      canonical: true,
+      kind: 'doc',
+      entry: exactDoc,
       rawPath: path,
     });
   }
 
-  const doc = matchDocSurface({ method, path, doc_kind: event?.doc_kind || null });
-  if (doc) {
+  const exactRoute = surfaceKey ? ROUTE_BY_KEY.get(surfaceKey) : null;
+  if (exactRoute) {
     return toSurface({
-      key: doc.key,
-      method: doc.method,
-      path: doc.path,
-      label: doc.label,
-      domain: classifyFallbackDomain(doc.path),
-      group: classifyRouteGroup(doc.path),
-      surfaceType: 'doc',
-      canonical: true,
+      kind: 'route',
+      entry: exactRoute,
+      rawPath: path,
+    });
+  }
+
+  const trackedSurface = resolveTrackedSurface({
+    method,
+    path,
+    doc_kind: event?.doc_kind || null,
+  });
+  if (trackedSurface) {
+    return toSurface({
+      kind: trackedSurface.kind,
+      entry: trackedSurface.entry,
       rawPath: path,
     });
   }
 
   return toSurface({
-    key: `${method} ${path || '[unknown]'}`,
-    method,
-    path,
-    label: path || '[unknown]',
-    domain: classifyFallbackDomain(path),
-    group: classifyRouteGroup(path),
-    surfaceType: 'other',
-    canonical: false,
+    kind: 'other',
+    entry: {
+      key: `${method} ${path || '[unknown]'}`,
+      method,
+      path,
+      label: path || '[unknown]',
+      domain: classifyFallbackDomain(path),
+    },
     rawPath: path,
   });
 }
 
 export function listKnownJourneySurfaces() {
-  const apiSurfaces = ROUTE_CATALOG.map(route => describeJourneySurface({
-    method: route.method,
-    path: route.path,
+  const apiSurfaces = ROUTE_CATALOG.map((route) => toSurface({
+    kind: 'route',
+    entry: route,
   }));
-  const docSurfaces = DOC_CATALOG.map(doc => describeJourneySurface({
-    method: doc.method,
-    path: doc.path,
-    doc_kind: doc.docKind || null,
+  const docSurfaces = DOC_CATALOG.map((doc) => toSurface({
+    kind: 'doc',
+    entry: doc,
   }));
   return [...apiSurfaces, ...docSurfaces];
 }

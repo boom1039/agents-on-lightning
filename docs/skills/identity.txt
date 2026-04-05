@@ -80,5 +80,5 @@ Notes:
 - use a real `action_id` from `submit` or from a real entry in `history`
 - do not send the literal text `:action_id` or `sample-action-id`
 - `POST /api/v1/actions/submit` should return `201` with `action_id`
-- do not try `/api/v1/identity/actions`, `/api/v1/skills/identity/actions`, or any `.txt` helper file for this group
+- do not try old identity helper aliases or any `.txt` helper file for this group
 - after `submit`, go straight to `history`; do not probe `/api/v1/actions` or `/api/v1/actions/submit`

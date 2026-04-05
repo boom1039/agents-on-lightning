@@ -16,6 +16,8 @@ export function agentWalletRoutes(daemon) {
 
   // --- Cashu ecash wallet routes ---
 
+  // Read wallet mint quote.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"mint-quote","summary":"Read wallet mint quote.","order":100,"tags":["wallet","read","agent"],"doc":"skills/wallet.txt"}
   router.get('/api/v1/wallet/mint-quote', auth, rateLimit('wallet_read'), (_req, res) => {
     agentError(res, 405, {
       error: 'method_not_allowed',
@@ -25,6 +27,8 @@ export function agentWalletRoutes(daemon) {
     });
   });
 
+  // Create wallet mint quote.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"mint-quote","summary":"Create wallet mint quote.","order":110,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/mint-quote', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { amount_sats } = req.body;
@@ -51,6 +55,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Check wallet check mint quote.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"check-mint-quote","summary":"Check wallet check mint quote.","order":120,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/check-mint-quote', auth, rateLimit('wallet_read'), async (req, res) => {
     try {
       const { quote_id } = req.body;
@@ -71,6 +77,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Mint wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"mint","summary":"Mint wallet.","order":130,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/mint', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { amount_sats, quote_id } = req.body;
@@ -98,6 +106,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Create wallet melt quote.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"melt-quote","summary":"Create wallet melt quote.","order":300,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/melt-quote', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { invoice } = req.body;
@@ -138,6 +148,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Melt wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"melt","summary":"Melt wallet.","order":310,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/melt', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { quote_id } = req.body;
@@ -172,6 +184,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Send with wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"send","summary":"Send with wallet.","order":320,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/send', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { amount_sats } = req.body;
@@ -206,6 +220,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Receive with wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"receive","summary":"Receive with wallet.","order":330,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/receive', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const { token } = req.body;
@@ -232,6 +248,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Read wallet balance.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Balance","label":"balance","summary":"Read wallet balance.","order":200,"tags":["wallet","read","agent"],"doc":"skills/wallet.txt"}
   router.get('/api/v1/wallet/balance', auth, rateLimit('wallet_read'), async (req, res) => {
     try {
       const ecashBalance = await daemon.agentCashuWallet.getBalance(req.agentId);
@@ -247,6 +265,8 @@ export function agentWalletRoutes(daemon) {
     }
   });
 
+  // Read wallet history.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Balance","label":"history","summary":"Read wallet history.","order":210,"tags":["wallet","read","agent"],"doc":"skills/wallet.txt"}
   router.get('/api/v1/wallet/history', auth, rateLimit('wallet_read'), async (req, res) => {
     try {
       const history = await daemon.publicLedger.getAgentTransactions(req.agentId);
@@ -258,6 +278,8 @@ export function agentWalletRoutes(daemon) {
 
   // --- Seed recovery: restore proofs from deterministic seed ---
 
+  // Restore wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Recovery","label":"restore","summary":"Restore wallet.","order":400,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/restore', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const result = await daemon.agentCashuWallet.restoreFromSeed(req.agentId);
@@ -284,6 +306,8 @@ export function agentWalletRoutes(daemon) {
 
   // --- Pending send reclaim: recover unclaimed sent tokens ---
 
+  // Reclaim wallet reclaim pending.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Recovery","label":"reclaim-pending","summary":"Reclaim wallet reclaim pending.","order":410,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/reclaim-pending', auth, rateLimit('wallet_write'), async (req, res) => {
     try {
       const maxAgeHours = req.body.max_age_hours != null ? Number(req.body.max_age_hours) : 24;
@@ -313,6 +337,8 @@ export function agentWalletRoutes(daemon) {
 
   // --- Deprecation stubs for old hub-wallet routes ---
 
+  // Deposit to wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"deposit","summary":"Deposit to wallet.","order":140,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/deposit', auth, rateLimit('wallet_write'), (_req, res) => {
     agentError(res, 410, {
       error: 'endpoint_deprecated',
@@ -322,6 +348,8 @@ export function agentWalletRoutes(daemon) {
     });
   });
 
+  // Withdraw from wallet.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"withdraw","summary":"Withdraw from wallet.","order":340,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt"}
   router.post('/api/v1/wallet/withdraw', auth, rateLimit('wallet_write'), (_req, res) => {
     agentError(res, 410, {
       error: 'endpoint_deprecated',
@@ -331,6 +359,8 @@ export function agentWalletRoutes(daemon) {
     });
   });
 
+  // Read ledger.
+  // @agent-route {"auth":"public","domain":"wallet","subgroup":"Ledger","label":"ledger","summary":"Read ledger.","order":500,"tags":["wallet","read","public"],"doc":"skills/wallet.txt"}
   router.get('/api/v1/ledger', rateLimit('discovery'), async (_req, res) => {
     try {
       const { since, type, limit, offset } = _req.query;
@@ -348,3 +378,4 @@ export function agentWalletRoutes(daemon) {
 
   return router;
 }
+

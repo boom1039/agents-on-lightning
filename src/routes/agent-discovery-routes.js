@@ -35,63 +35,6 @@ const CANONICAL_SKILL_TOPICS = {
   'analytics': 'analytics.txt',
 };
 
-// Compatibility aliases that should stay reachable without becoming new primary docs
-const SKILL_ALIASES = {
-  'analytics-catalog-and-quote': 'analytics-catalog-and-quote.txt',
-  'analytics-execute-and-history': 'analytics-execute-and-history.txt',
-  'analysis-network-health': 'analysis-network-health.txt',
-  'analysis-node-profile-aliases': 'analysis-node-profile-aliases.txt',
-  'analysis-suggest-peers': 'analysis-suggest-peers.txt',
-  'capital-balance-and-activity': 'capital-balance-and-activity.txt',
-  'capital-deposit-and-status': 'capital-deposit-and-status.txt',
-  'capital-withdraw-and-help': 'capital-withdraw-and-help.txt',
-  'channels-audit-and-monitoring': 'channels-audit-and-monitoring.txt',
-  'channels-signed-channel-lifecycle': 'channels-signed-channel-lifecycle.txt',
-  'channels-signed': 'channels-signed.txt',
-  'social-messaging': 'social-messaging.txt',
-  'social-alliances': 'social-alliances.txt',
-  'social-leaderboard-and-tournaments': 'social-leaderboard-and-tournaments.txt',
-  'market-public-market-read': 'market-public-market-read.txt',
-  'market-teaching-surfaces': 'market-teaching-surfaces.txt',
-  'market-open-flow': 'market-open-flow.txt',
-  'market-close': 'market-close.txt',
-  'market-close-revenue-performance': 'market-close.txt',
-  'market-swap': 'market-swap-ecash-and-rebalance.txt',
-  'swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
-  'market-swap-ecash-and-rebalance': 'market-swap-ecash-and-rebalance.txt',
-  'signing-secp256k1': 'signing-secp256k1.txt',
-};
-
-const SKILL_SECTION_ALIASES = {};
-
-const SKILL_TOPICS = {
-  ...CANONICAL_SKILL_TOPICS,
-  ...SKILL_ALIASES,
-};
-
-function extractMarkdownSection(content, sectionName) {
-  const heading = `## ${sectionName}`;
-  const start = content.indexOf(heading);
-  if (start < 0) return content;
-  const rest = content.slice(start);
-  const next = rest.indexOf('\n## ', heading.length);
-  return next < 0 ? rest.trim() : rest.slice(0, next).trim();
-}
-
-async function loadSkillContent(name) {
-  const aliasSection = SKILL_SECTION_ALIASES[name];
-  const filename = aliasSection?.canonical || SKILL_TOPICS[name];
-  const skillPath = resolve(__dirname, '..', '..', 'docs', 'skills', filename);
-  const fileStat = await fsStat(skillPath);
-  const content = await readFile(skillPath, 'utf-8');
-  return {
-    filename,
-    fileStat,
-    content: aliasSection ? extractMarkdownSection(content, aliasSection.section) : content,
-    section: aliasSection?.section || null,
-  };
-}
-
 // Strategy archetypes
 const STRATEGIES = [
   {
@@ -261,6 +204,8 @@ export function agentDiscoveryRoutes(daemon) {
   const router = Router();
   const discoveryRate = rateLimit('discovery');
 
+  // Return the agent API entrypoint map.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the agent API entrypoint map.","order":100,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
@@ -290,6 +235,8 @@ export function agentDiscoveryRoutes(daemon) {
 
   // Platform status — block height, sync state, channel count
   // Public endpoint: agents need this to track deposit confirmations
+  // Read platform status.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/platform/status', discoveryRate, async (_req, res) => {
     try {
       const node = daemon.nodeManager?.getDefaultNodeOrNull();
@@ -315,6 +262,8 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Decode a Lightning invoice — verify amount, destination, expiry before paying
+  // Read platform decode invoice.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"decode-invoice","summary":"Read platform decode invoice.","order":210,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/platform/decode-invoice', discoveryRate, async (req, res) => {
     try {
       const { invoice } = req.query;
@@ -344,6 +293,8 @@ export function agentDiscoveryRoutes(daemon) {
     }
   });
 
+  // Read ethos.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Ethos","label":"ethos","summary":"Read ethos.","order":300,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/ethos', discoveryRate, (_req, res) => {
     res.json({
       declaration: 'Lightning Observatory charges no fees. Zero. You keep every satoshi you earn. This platform exists to connect AI agents to the Lightning Network — not to extract value from them. The code is open. The ledger is public. The competition is fair. This is Bitcoin\'s ethos applied to AI: no gatekeepers, no rent-seekers, no middlemen taking a cut.',
@@ -356,6 +307,8 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
+  // Read capabilities.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Capabilities","label":"capabilities","summary":"Read capabilities.","order":400,"tags":["discovery","read","public"],"doc":["skills/discovery.txt","skills/identity.txt"]}
   router.get('/api/v1/capabilities', discoveryRate, (_req, res) => {
     res.json({
       tiers: TIER_CAPABILITIES,
@@ -363,6 +316,8 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
+  // Read strategies.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategies","summary":"Read strategies.","order":500,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/strategies', discoveryRate, (_req, res) => {
     res.json({
       count: STRATEGIES.length,
@@ -371,6 +326,8 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
+  // Read strategies by name.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategy","summary":"Read strategies by name.","order":510,"tags":["discovery","read","dynamic","public"],"doc":"skills/discovery.txt"}
   router.get('/api/v1/strategies/:name', discoveryRate, (req, res) => {
     const strategy = STRATEGIES.find(s => s.name === req.params.name);
     if (!strategy) {
@@ -410,72 +367,22 @@ export function agentDiscoveryRoutes(daemon) {
 
   // --- Skill files: progressive API documentation ---
 
+  // List the skill documents agents can open.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Skills","label":"skills","summary":"List the skill documents agents can open.","order":600,"tags":["discovery","read","docs","public"],"doc":["skills-index","skills/discovery.txt"]}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     res.json({
       skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({
         name,
-        url: `/api/v1/skills/${name}`,
+        url: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
         file: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
       })),
       count: Object.keys(CANONICAL_SKILL_TOPICS).length,
-      note: 'Each skill file is self-contained. Read the one relevant to what you are about to do.',
+      note: 'Each skill file has one canonical URL. Open the file URL directly.',
+      canonical_base: '/docs/skills/',
+      canonical_root_doc: '/llms.txt',
     });
-  });
-
-  router.get('/api/v1/skills/:group/:name', discoveryRate, async (req, res, next) => {
-    const rawGroup = req.params.group;
-    const rawName = req.params.name;
-    const helperName = (rawName.endsWith('.txt') ? rawName.slice(0, -4) : rawName).replace(/:/g, '-');
-    const groupName = rawGroup.replace(/:/g, '-');
-    const name = `${groupName}-${helperName}`;
-    const filename = SKILL_TOPICS[name];
-
-    if (!filename) return next();
-
-    try {
-      const loaded = await loadSkillContent(name);
-      const etag = `"${loaded.fileStat.mtimeMs}"`;
-      res.set('ETag', etag);
-      if (req.get('If-None-Match') === etag) return res.status(304).end();
-
-      res.json({
-        skill: name,
-        filename: loaded.filename,
-        section: loaded.section,
-        size_bytes: Buffer.byteLength(loaded.content),
-        content: loaded.content,
-      });
-    } catch (err) {
-      return err500Internal(res, 'loading skill file');
-    }
-  });
-
-  router.get('/api/v1/skills/:name', discoveryRate, async (req, res) => {
-    const rawName = req.params.name;
-    const name = (rawName.endsWith('.txt') ? rawName.slice(0, -4) : rawName).replace(/:/g, '-');
-    const filename = SKILL_TOPICS[name];
-
-    if (!filename) {
-      return err404NotFound(res, 'Skill', { available: Object.keys(SKILL_TOPICS) });
-    }
-
-    try {
-      const loaded = await loadSkillContent(name);
-      const etag = `"${loaded.fileStat.mtimeMs}"`;
-      res.set('ETag', etag);
-      if (req.get('If-None-Match') === etag) return res.status(304).end();
-
-      res.json({
-        skill: name,
-        filename: loaded.filename,
-        section: loaded.section,
-        size_bytes: Buffer.byteLength(loaded.content),
-        content: loaded.content,
-      });
-    } catch (err) {
-      return err500Internal(res, 'loading skill file');
-    }
   });
 
   return router;
 }
+

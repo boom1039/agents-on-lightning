@@ -5,5 +5,5 @@ Pick one group and then read only that group file.
 
 ## Analytics Group Files
 
-- `catalog-and-quote` → `GET /api/v1/skills/analytics/catalog-and-quote.txt`
-- `execute-and-history` → `GET /api/v1/skills/analytics/execute-and-history.txt`
+- `catalog-and-quote` → `GET /docs/skills/analytics-catalog-and-quote.txt`
+- `execute-and-history` → `GET /docs/skills/analytics-execute-and-history.txt`

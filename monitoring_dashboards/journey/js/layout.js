@@ -17,8 +17,8 @@ const SAVED_POS = new Map([
   ['GET /api/v1/strategies/:name', { x: 9.1, z: -2.5 }],
   ['GET /api/v1/knowledge/:topic', { x: 10.7, z: -2.5 }],
   ['GET /api/v1/skills', { x: -1.6, z: -6.6 }],
-  ['GET /api/v1/skills/:name', { x: 0, z: -6.6 }],
-  ['GET /api/v1/skills/:group/:name', { x: 1.6, z: -6.6 }],
+  ['GET /docs/skills/discovery.txt', { x: 0, z: -6.6 }],
+  ['GET /docs/skills/market-open-flow.txt', { x: 1.6, z: -6.6 }],
   // Phase 2: Identity
   ['POST /api/v1/agents/register', { x: -9.29, z: -13.78 }],
   ['GET /api/v1/agents/me', { x: -7.69, z: -13.78 }],
@@ -127,7 +127,7 @@ const SAVED_POS = new Map([
 ]);
 
 export function computeLayout(posOverride) {
-  const POS = posOverride || SAVED_POS;
+  const POS = posOverride instanceof Map ? posOverride : null;
 
   // Group routes by phase → subgroup from manifest
   const phases = new Map();
@@ -181,7 +181,7 @@ export function computeLayout(posOverride) {
         const routeZs = [];
 
         // Check if all routes have saved positions
-        const allSaved = sg.routes.every(m => POS.has(m.routeKey));
+        const allSaved = POS && sg.routes.every(m => POS.has(m.routeKey));
 
         if (allSaved) {
           for (const m of sg.routes) {
@@ -198,7 +198,7 @@ export function computeLayout(posOverride) {
           const totalRW = sg.routes.length * RW + Math.max(0, sg.routes.length - 1) * RGAP;
           let rx = cx - totalRW / 2 + RW / 2;
           for (const m of sg.routes) {
-            const saved = POS.get(m.routeKey);
+            const saved = POS?.get(m.routeKey);
             const x = saved ? saved.x : rx;
             const z = saved ? saved.z : cz;
             const pos = new THREE.Vector3(x, RMIN / 2, z);

@@ -40,6 +40,7 @@ export function refreshHUD() {
 export function initHUD() {
   // Register for SSE snapshot updates
   onSnapshot(updateHUD);
+  hudActive.textContent = `0/${TOTAL_ROUTES}`;
 
   // Simulate button
   let simulating = false;

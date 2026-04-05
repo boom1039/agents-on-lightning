@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { err400Validation, err500Internal } from '../identity/agent-friendly-errors.js';
+import { listStoredJourneyEvents } from '../monitor/journey-monitor.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -88,6 +89,8 @@ export function agentEventsRoutes(daemon) {
   const router = Router();
   const auth = requireAuth(daemon.agentRegistry);
 
+  // Read agents me events.
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"events","summary":"Read agents me events.","order":100,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
   router.get('/api/v1/agents/me/events', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const sinceRaw = req.query.since;
@@ -189,15 +192,11 @@ export function agentEventsRoutes(daemon) {
 
       // --- Security audit events for this agent ---
       const securityEvents = await collectSafe('security', async () => {
-        let entries;
-        try {
-          entries = await daemon.dataLayer?.readLog('data/security-audit.jsonl');
-        } catch {
-          return [];
-        }
-        if (!entries) return [];
-        // Filter to events relevant to this agent
-        const agentEntries = entries.filter(e => e.agent_id === agentId);
+        const agentEntries = await listStoredJourneyEvents({
+          agentId,
+          order: 'DESC',
+          limit: MAX_LIMIT * 10,
+        });
         return agentEntries.map(e => ({
           type: `security:${e.event || 'unknown'}`,
           timestamp: toISO(e._ts),
@@ -264,3 +263,4 @@ export function agentEventsRoutes(daemon) {
 
   return router;
 }
+

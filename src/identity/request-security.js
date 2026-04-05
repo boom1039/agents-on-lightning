@@ -254,18 +254,6 @@ export function rejectUnauthorizedOperatorRoute(req, res) {
   return null;
 }
 
-export function requireDashboardOperatorAuth(req, res, next) {
-  if (process.env.NODE_ENV !== 'production' && isLoopbackRequest(req)) {
-    return next();
-  }
-  if (!hasConfiguredOperatorSecret()) {
-    return res.status(404).send('Not found');
-  }
-  if (hasValidOperatorSecret(req)) return next();
-  res.set('WWW-Authenticate', 'Basic realm="Agents on Lightning Dashboard"');
-  return res.status(401).send('Operator authentication required.');
-}
-
 export function rejectUnauthorizedTestRoute(req, res) {
   if (!areTestRoutesEnabled()) {
     logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);

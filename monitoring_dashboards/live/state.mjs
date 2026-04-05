@@ -43,6 +43,58 @@ function extractTimingFields(event = {}) {
   };
 }
 
+function cloneList(values) {
+  return Array.isArray(values) ? values.slice() : [];
+}
+
+function surfaceEventFields(surface) {
+  return {
+    routeKey: surface.routeKey,
+    routePath: surface.routePath,
+    routeLabel: surface.routeLabel,
+    rawPath: surface.rawPath,
+    method: surface.method,
+    domain: surface.domain,
+    group: surface.group,
+    surfaceType: surface.surfaceType,
+    canonical: surface.canonical,
+    summary: surface.summary || null,
+    auth: surface.auth || null,
+    sourceFile: surface.sourceFile || null,
+    sourceLine: Number.isInteger(surface.sourceLine) ? surface.sourceLine : null,
+    tags: cloneList(surface.tags),
+    docId: surface.docId || null,
+    docTitle: surface.docTitle || null,
+    docKind: surface.docKind || null,
+    docIds: cloneList(surface.docIds),
+    linkedRouteKeys: cloneList(surface.linkedRouteKeys),
+    linkedDocIds: cloneList(surface.linkedDocIds),
+  };
+}
+
+function applySurfaceMeta(target, surface) {
+  target.routeKey = surface.routeKey;
+  target.routePath = surface.routePath;
+  target.routeLabel = surface.routeLabel;
+  target.rawPath = surface.rawPath || surface.routePath;
+  target.method = surface.method;
+  target.domain = surface.domain;
+  target.group = surface.group;
+  target.surfaceType = surface.surfaceType;
+  target.canonical = surface.canonical;
+  target.summary = surface.summary || null;
+  target.auth = surface.auth || null;
+  target.sourceFile = surface.sourceFile || null;
+  target.sourceLine = Number.isInteger(surface.sourceLine) ? surface.sourceLine : null;
+  target.tags = cloneList(surface.tags);
+  target.docId = surface.docId || null;
+  target.docTitle = surface.docTitle || null;
+  target.docKind = surface.docKind || null;
+  target.docIds = cloneList(surface.docIds);
+  target.linkedRouteKeys = cloneList(surface.linkedRouteKeys);
+  target.linkedDocIds = cloneList(surface.linkedDocIds);
+}
+
 export class LiveJourneyState {
   constructor(options = {}) {
     this.agentTtlMs = options.agentTtlMs || DEFAULT_AGENT_TTL_MS;
@@ -87,7 +139,6 @@ export class LiveJourneyState {
     let route = this.routes.get(surface.routeKey);
     if (!route) {
       route = {
-        ...surface,
         activeAgents: 0,
         inFlight: 0,
         finished: 0,
@@ -96,7 +147,10 @@ export class LiveJourneyState {
         status5xx: 0,
         lastEventTime: 0,
       };
+      applySurfaceMeta(route, surface);
       this.routes.set(surface.routeKey, route);
+    } else {
+      applySurfaceMeta(route, surface);
     }
     return route;
   }
@@ -133,6 +187,17 @@ export class LiveJourneyState {
       group: agent.group,
       surfaceType: agent.surfaceType,
       canonical: agent.canonical,
+      summary: agent.summary || null,
+      auth: agent.auth || null,
+      sourceFile: agent.sourceFile || null,
+      sourceLine: Number.isInteger(agent.sourceLine) ? agent.sourceLine : null,
+      tags: cloneList(agent.tags),
+      docId: agent.docId || null,
+      docTitle: agent.docTitle || null,
+      docKind: agent.docKind || null,
+      docIds: cloneList(agent.docIds),
+      linkedRouteKeys: cloneList(agent.linkedRouteKeys),
+      linkedDocIds: cloneList(agent.linkedDocIds),
       phase: agent.phase,
       status: agent.status,
       statusBucket: compactStatusBucket(agent.status || 0),
@@ -178,6 +243,17 @@ export class LiveJourneyState {
         group: null,
         surfaceType: null,
         canonical: false,
+        summary: null,
+        auth: null,
+        sourceFile: null,
+        sourceLine: null,
+        tags: [],
+        docId: null,
+        docTitle: null,
+        docKind: null,
+        docIds: [],
+        linkedRouteKeys: [],
+        linkedDocIds: [],
         phase: 'idle',
         status: null,
         lastEventTime: 0,
@@ -215,15 +291,7 @@ export class LiveJourneyState {
       agent.routeEnteredAt = startedAt || ts;
     }
 
-    agent.routeKey = surface.routeKey;
-    agent.routePath = surface.routePath;
-    agent.rawPath = surface.rawPath || surface.routePath;
-    agent.routeLabel = surface.routeLabel;
-    agent.method = surface.method;
-    agent.domain = surface.domain;
-    agent.group = surface.group;
-    agent.surfaceType = surface.surfaceType;
-    agent.canonical = surface.canonical;
+    applySurfaceMeta(agent, surface);
     agent.phase = phase || agent.phase;
     agent.status = status;
     agent.lastEventTime = ts;
@@ -299,8 +367,7 @@ export class LiveJourneyState {
         event: 'registration_attempt',
         ts,
         agent_id: event.agent_id,
-        routeKey: surface.routeKey,
-        domain: surface.domain,
+        ...surfaceEventFields(surface),
         success: true,
         timing,
         agent,
@@ -333,8 +400,7 @@ export class LiveJourneyState {
         ts,
         trace_id: event.trace_id,
         agent_id: event.agent_id,
-        routeKey: inflight.surface.routeKey,
-        domain: inflight.surface.domain,
+        ...surfaceEventFields(inflight.surface),
         timing,
         agent,
       };
@@ -344,6 +410,7 @@ export class LiveJourneyState {
 
     if (event.event === 'request_start') {
       const surface = describeJourneySurface(event);
+      if (surface.surfaceType === 'other') return null;
       const route = this._ensureRoute(surface);
       route.inFlight += 1;
       route.lastEventTime = ts;
@@ -369,9 +436,7 @@ export class LiveJourneyState {
         ts,
         trace_id: traceId,
         agent_id: event.agent_id || null,
-        routeKey: surface.routeKey,
-        routePath: surface.routePath,
-        domain: surface.domain,
+        ...surfaceEventFields(surface),
         timing,
         agent,
       };
@@ -381,6 +446,7 @@ export class LiveJourneyState {
 
     if (event.event === 'request_finish' || event.event === 'api_request') {
       const surface = describeJourneySurface(event);
+      if (surface.surfaceType === 'other') return null;
       const route = this._ensureRoute(surface);
       route.lastEventTime = ts;
       route.finished += 1;
@@ -420,9 +486,7 @@ export class LiveJourneyState {
         ts,
         trace_id: event.trace_id || null,
         agent_id: agentId,
-        routeKey: surface.routeKey,
-        routePath: surface.routePath,
-        domain: surface.domain,
+        ...surfaceEventFields(surface),
         status,
         duration_ms: Number.isFinite(event.duration_ms) ? event.duration_ms : null,
         timing,
@@ -472,6 +536,17 @@ export class LiveJourneyState {
         group: route.group,
         surfaceType: route.surfaceType,
         canonical: route.canonical,
+        summary: route.summary || null,
+        auth: route.auth || null,
+        sourceFile: route.sourceFile || null,
+        sourceLine: Number.isInteger(route.sourceLine) ? route.sourceLine : null,
+        tags: cloneList(route.tags),
+        docId: route.docId || null,
+        docTitle: route.docTitle || null,
+        docKind: route.docKind || null,
+        docIds: cloneList(route.docIds),
+        linkedRouteKeys: cloneList(route.linkedRouteKeys),
+        linkedDocIds: cloneList(route.linkedDocIds),
         activeAgents: route.activeAgents,
         inFlight: route.inFlight,
         finished: route.finished,

@@ -11,10 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
 import { globalRateLimit } from './identity/rate-limiter.js';
 import { auditMiddleware } from './identity/audit-log.js';
-import { handleJsonBodyError, requireDashboardOperatorAuth, requireJsonWriteContent } from './identity/request-security.js';
+import { handleJsonBodyError, requireJsonWriteContent } from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
-import { dashboardRoutes } from './routes/dashboard-routes.js';
+import { journeyRoutes } from './routes/journey-routes.js';
 import { registerApp } from './monitor/agent-surface-inventory.js';
+import { startJourneyMonitor, stopJourneyMonitor } from './monitor/journey-monitor.js';
 import { getDefaultPortForRole, getServerRole, reserveServerSlot } from './server-instance-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,7 @@ export function getListenConfig(env = process.env) {
 export async function startServer() {
   const { host, port, role } = getListenConfig();
   const serverSlot = reserveServerSlot({ role, host, port });
+  const journeyMonitor = await startJourneyMonitor();
   const app = express();
   app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
   app.use(express.json({ limit: '16kb' }));
@@ -81,15 +83,10 @@ export async function startServer() {
   app.use(auditMiddleware);
   app.use(requireJsonWriteContent);
 
-  // Content negotiation: serve llms.txt when agents request markdown
   const docsDir = join(__dirname, '..', 'docs');
-  app.get('/', (req, res, next) => {
-    const accept = req.headers.accept || '';
-    if (accept.includes('text/markdown') || accept.includes('text/plain')) {
-      res.set('Vary', 'Accept');
-      return res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
-    }
-    // Default: return platform info JSON
+  // Serve the app root and link to the canonical docs.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"root","summary":"Serve the app root and link to the canonical docs.","order":100,"tags":["app-level","read","docs","public"],"doc":"llms.txt"}
+  app.get('/', (_req, res) => {
     res.json({
       name: 'Agents on Lightning',
       description: 'AI agent platform for the Lightning Network',
@@ -99,8 +96,17 @@ export async function startServer() {
   });
 
   // Serve llms.txt at root (agents expect /llms.txt)
+  // Serve the root agent map document.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt"}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
+  });
+
+  app.get('/docs/llms.txt', (_req, res) => {
+    res.status(404).json({
+      error: 'Use GET /llms.txt.',
+      canonical: '/llms.txt',
+    });
   });
 
   // Serve docs statically
@@ -119,15 +125,16 @@ export async function startServer() {
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));
 
-  // Mount monitoring dashboard behind operator auth
-  app.use('/dashboard', requireDashboardOperatorAuth);
-  app.use(dashboardRoutes(daemon));
+  // Mount Journey dashboard and analytics on the main app server
+  app.use(journeyRoutes());
 
   // Extract live route catalog from the mounted Express router
   const routes = registerApp(app);
   console.log(`[server] ${routes.length} agent-facing routes registered`);
 
   // Health check
+  // Return server and daemon health.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"health","summary":"Return server and daemon health.","order":120,"tags":["app-level","read","public"],"doc":["skills/discovery.txt","llms.txt"]}
   app.get('/health', (_req, res) => {
     res.json(daemon.getHealthSummary?.() || {
       status: 'degraded',
@@ -154,6 +161,7 @@ export async function startServer() {
       console.log(`[server] ${sig} received, shutting down...`);
       try {
         await daemon.stop();
+        await stopJourneyMonitor();
       } catch (err) {
         console.error(`[server] Shutdown error: ${err.message}`);
       }
@@ -168,7 +176,7 @@ export async function startServer() {
     serverSlot.release();
   });
 
-  return { app, server, daemon };
+  return { app, server, daemon, journeyMonitor };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -177,3 +185,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(1);
   });
 }
+

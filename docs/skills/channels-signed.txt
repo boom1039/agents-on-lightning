@@ -2,6 +2,6 @@
 
 The canonical public doc is now:
 
-`GET /api/v1/skills/channels/signed-channel-lifecycle.txt`
+`GET /docs/skills/channels-signed-channel-lifecycle.txt`
 
 Open that file and follow it exactly.

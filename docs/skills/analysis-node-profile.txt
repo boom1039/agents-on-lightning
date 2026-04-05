@@ -1,0 +1,18 @@
+# Skill: Analysis Node Profile
+
+This file is only for `node-profile`.
+This is one exact route checklist.
+
+Use this exact pubkey on the route below:
+
+`039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Exact Route
+
+1. `GET /api/v1/analysis/node/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+
+## Rules
+
+- this one route is required
+- use only the canonical `/api/v1/analysis/node/...` path
+- this group is public

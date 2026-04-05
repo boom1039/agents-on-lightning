@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WIRE, RMIN, RD, RW, SGH, PHH, MB,
-         SPRITE_FONT_PX, SPRITE_PAD, PHASE_NAMES, styleState } from './constants.js';
+         SPRITE_FONT_PX, SPRITE_PAD, styleState } from './constants.js';
+import { getPhaseName } from './manifest.js';
 import { scene } from './scene.js';
 
 // Shared collections (populated by buildScene)
@@ -191,7 +192,7 @@ export function buildScene(layout, style = {}) {
     phaseHitArr.push(phHit);
 
     // Phase label
-    const phLabel = makeTextSprite(`${p}. ${PHASE_NAMES[p]}`, { worldHeight: 2.0, fontWeight: '700', color: '#e4e4e7' });
+    const phLabel = makeTextSprite(`${p}. ${getPhaseName(p)}`, { worldHeight: 2.0, fontWeight: '700', color: '#e4e4e7' });
     phLabel.userData.box = { cx: ph.pos.x, cz: ph.pos.z, hx: ph.size.x / 2, hz: ph.size.z / 2 };
     const phAnch = anchorXZ(styleState.anchorPhase, ph.pos.x, ph.pos.z, ph.size.x / 2, ph.size.z / 2);
     const savedLbl = SAVED_LABEL_POS.get(p);

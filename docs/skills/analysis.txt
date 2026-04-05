@@ -6,14 +6,14 @@ All `/api/v1/analysis/*` routes are public. No auth.
 Pick one exact group file and follow only that file:
 
 - `network-health`
-  - `GET /api/v1/skills/analysis/network-health.txt`
-- `node-profile-aliases`
-  - `GET /api/v1/skills/analysis/node-profile-aliases.txt`
+  - `GET /docs/skills/analysis-network-health.txt`
+- `node-profile`
+  - `GET /docs/skills/analysis-node-profile.txt`
 - `suggest-peers`
-  - `GET /api/v1/skills/analysis/suggest-peers.txt`
+  - `GET /docs/skills/analysis-suggest-peers.txt`
 
 Do not mix two analysis groups in one pass.
 
 ## See Also
-- Paid analytics with deeper queries: `GET /api/v1/skills/analytics`
+- Paid analytics with deeper queries: `GET /docs/skills/analytics.txt`
 - Knowledge base on channel strategy: `GET /api/v1/knowledge/strategy`

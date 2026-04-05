@@ -22,6 +22,6 @@ Call these exact three auth GET routes and stop:
 Rules:
 
 - these are intentional `405` teaching routes
-- do not switch into any `POST /api/v1/market/*` route in this group
+- [not-live-route] do not switch into any `POST /api/v1/market/*` route in this group
 - do not upload a pubkey in this group
 - do not generate any signatures in this group

@@ -14,6 +14,5 @@ Use this exact pubkey:
 ## Rules
 
 - this group is public
-- do not substitute `network-health` or node-profile routes here
+- do not substitute `network-health` or `GET /api/v1/analysis/node/:pubkey` here
 - this route can take a few seconds because it does real scoring work
-

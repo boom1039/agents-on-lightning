@@ -56,6 +56,8 @@ export function agentPaidServicesRoutes(daemon) {
   // =========================================================================
 
   // --- Public: query catalog ---
+  // Read analytics catalog.
+  // @agent-route {"auth":"public","domain":"analytics","subgroup":"Analytics","label":"catalog","summary":"Read analytics catalog.","order":100,"tags":["analytics","read","public"],"doc":["skills/analytics-catalog-and-quote.txt","skills/analytics.txt"]}
   router.get('/api/v1/analytics/catalog', rateLimit('discovery'), (_req, res) => {
     try {
       if (!daemon.analyticsGateway) {
@@ -70,6 +72,8 @@ export function agentPaidServicesRoutes(daemon) {
   });
 
   // --- Authenticated: get price quote ---
+  // Create analytics.
+  // @agent-route {"auth":"agent","domain":"analytics","subgroup":"Analytics","label":"quote","summary":"Create analytics.","order":110,"tags":["analytics","write","agent"],"doc":["skills/analytics-catalog-and-quote.txt","skills/analytics-execute-and-history.txt","skills/analytics.txt"]}
   router.post('/api/v1/analytics/quote', auth, rateLimit('analytics_query'), async (req, res) => {
     try {
       if (!daemon.analyticsGateway) {
@@ -98,6 +102,8 @@ export function agentPaidServicesRoutes(daemon) {
   });
 
   // --- Authenticated: execute paid query ---
+  // Execute analytics.
+  // @agent-route {"auth":"agent","domain":"analytics","subgroup":"Analytics","label":"execute","summary":"Execute analytics.","order":120,"tags":["analytics","write","agent"],"doc":["skills/analytics-execute-and-history.txt","skills/analytics.txt"]}
   router.post('/api/v1/analytics/execute', auth, rateLimit('analytics_query'), async (req, res) => {
     if (!daemon.analyticsGateway) {
       return err503Service(res, 'Analytics');
@@ -168,6 +174,8 @@ export function agentPaidServicesRoutes(daemon) {
   });
 
   // --- Authenticated: query history ---
+  // Read analytics history.
+  // @agent-route {"auth":"agent","domain":"analytics","subgroup":"Analytics","label":"history","summary":"Read analytics history.","order":130,"tags":["analytics","read","agent"],"doc":["skills/analytics-execute-and-history.txt","skills/analytics.txt"]}
   router.get('/api/v1/analytics/history', auth, rateLimit('analytics_query'), async (req, res) => {
     try {
       if (!daemon.analyticsGateway) {
@@ -189,6 +197,8 @@ export function agentPaidServicesRoutes(daemon) {
   // CAPITAL LEDGER (Plan B)
   // =========================================================================
 
+  // Read capital balance.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"balance","summary":"Read capital balance.","order":100,"tags":["capital","read","agent"],"doc":["skills/capital-balance-and-activity.txt","skills/capital.txt"]}
   router.get('/api/v1/capital/balance', auth, rateLimit('capital_read'), async (req, res) => {
     try {
       if (!daemon.capitalLedger) {
@@ -216,6 +226,8 @@ export function agentPaidServicesRoutes(daemon) {
     }
   });
 
+  // Read capital activity.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"activity","summary":"Read capital activity.","order":110,"tags":["capital","read","agent"],"doc":["skills/capital-balance-and-activity.txt","skills/capital.txt"]}
   router.get('/api/v1/capital/activity', auth, rateLimit('capital_read'), async (req, res) => {
     try {
       if (!daemon.capitalLedger) {
@@ -242,6 +254,8 @@ export function agentPaidServicesRoutes(daemon) {
     }
   });
 
+  // Withdraw from capital.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"withdraw","summary":"Withdraw from capital.","order":120,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"]}
   router.post('/api/v1/capital/withdraw', auth, rateLimit('capital_write'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'destination_address', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -459,6 +473,8 @@ export function agentPaidServicesRoutes(daemon) {
   // DEPOSIT SYSTEM (Plan C)
   // =========================================================================
 
+  // Deposit to capital.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposit","summary":"Deposit to capital.","order":130,"tags":["capital","write","agent"],"doc":["skills/capital-deposit-and-status.txt","skills/capital.txt"]}
   router.post('/api/v1/capital/deposit', auth, rateLimit('capital_write'), async (req, res) => {
     if (!daemon.depositTracker) {
       return err503Service(res, 'Deposit tracker');
@@ -506,6 +522,8 @@ export function agentPaidServicesRoutes(daemon) {
     });
   });
 
+  // Read capital deposits.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposits","summary":"Read capital deposits.","order":140,"tags":["capital","read","agent"],"doc":["skills/capital-deposit-and-status.txt","skills/capital.txt"]}
   router.get('/api/v1/capital/deposits', auth, rateLimit('capital_read'), async (req, res) => {
     try {
       if (!daemon.depositTracker) {
@@ -533,10 +551,12 @@ export function agentPaidServicesRoutes(daemon) {
   // HELP (Concierge) — LLM-powered agent assistant (Plan L)
   // =========================================================================
 
+  // Request help for help.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Help","label":"help","summary":"Request help for help.","order":200,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"]}
   router.post('/api/v1/help', auth, rateLimit('wallet_write'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['question', 'context', 'idempotency_key']);
     if (unexpected.length > 0) {
-      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/skills/capital');
+      return sendUnexpectedKeys(res, unexpected, 'GET /docs/skills/capital.txt');
     }
     if (!daemon.helpEndpoint) {
       return agentError(res, 503, {
@@ -588,3 +608,4 @@ export function agentPaidServicesRoutes(daemon) {
 
   return router;
 }
+

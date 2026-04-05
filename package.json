@@ -5,19 +5,8 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "ENABLE_TEST_ROUTES=1 AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
-    "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 ENABLE_TEST_ROUTES=1 node src/index.js",
-    "test": "node --test src/**/*.test.js",
-    "test:walkthrough": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-nano",
-    "test:walkthrough:agent-coverage": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-mini --mode agent-coverage --suite all",
-    "test:walkthrough:agent-coverage:quick": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-mini --mode agent-coverage --quick",
-    "test:walkthrough:agent-coverage:terminal": "node test/walkthrough/test-runner.mjs --provider openai --model gpt-4.1-mini --mode agent-coverage --agent-runtime terminal --suite all",
-    "test:walkthrough:agent-feedback": "node test/walkthrough/agent-doc-feedback-loop.mjs",
-    "test:walkthrough:agent-feedback:parallel": "node test/walkthrough/parallel-agent-doc-feedback-loop.mjs",
-    "test:walkthrough:scoring": "node --test test/walkthrough/agent-coverage-scoring.test.mjs",
-    "test:walkthrough:local-tools": "node --test test/walkthrough/agent-local-tools.test.mjs",
-    "test:walkthrough:coverage": "node test/walkthrough/test-runner.mjs --mode coverage --suite all",
-    "test:walkthrough:verify": "node test/walkthrough/verify-suite-coverage.mjs"
+    "start": "AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
+    "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -31,8 +20,5 @@
     "node": ">=20.0.0"
   },
   "license": "UNLICENSED",
-  "private": true,
-  "devDependencies": {
-    "openai": "^6.33.0"
-  }
+  "private": true
 }

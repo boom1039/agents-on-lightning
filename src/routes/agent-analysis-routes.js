@@ -24,6 +24,8 @@ export function agentAnalysisRoutes(daemon) {
 
   // --- Network health (LND-direct) ---
 
+  // Read analysis network health.
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Network","label":"network-health","summary":"Read analysis network health.","order":100,"tags":["analysis","read","public"],"doc":["skills/analysis-network-health.txt","skills/analysis.txt"]}
   router.get('/api/v1/analysis/network-health', analysisRate, async (_req, res) => {
     try {
       const client = daemon.nodeManager?.getDefaultNode();
@@ -73,11 +75,9 @@ export function agentAnalysisRoutes(daemon) {
 
   // --- Node profile (LND-direct) ---
 
-  router.get([
-    '/api/v1/analysis/node/:pubkey',
-    '/api/v1/analysis/profile-node/:pubkey',
-    '/api/v1/analysis/node-profile/:pubkey',
-  ], analysisRate, async (req, res) => {
+  // Read analysis node by pubkey.
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Profiling","label":"node","summary":"Read analysis node by pubkey.","order":200,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-node-profile.txt","skills/analysis.txt"]}
+  router.get('/api/v1/analysis/node/:pubkey', analysisRate, async (req, res) => {
     const check = validatePubkey(req.params.pubkey);
     if (!check.valid) return err400Validation(res, check.reason, { see: 'GET /api/v1/analysis/network-health' });
 
@@ -104,6 +104,8 @@ export function agentAnalysisRoutes(daemon) {
 
   // --- Suggest peers (LND one-hop scan → Python scoring) ---
 
+  // Read analysis suggest peers by pubkey.
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Peers","label":"suggest-peers","summary":"Read analysis suggest peers by pubkey.","order":300,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-suggest-peers.txt","skills/analysis.txt"]}
   router.get('/api/v1/analysis/suggest-peers/:pubkey', analysisRate, async (req, res) => {
     const check = validatePubkey(req.params.pubkey);
     if (!check.valid) return err400Validation(res, check.reason);
@@ -174,3 +176,4 @@ export function agentAnalysisRoutes(daemon) {
 
   return router;
 }
+

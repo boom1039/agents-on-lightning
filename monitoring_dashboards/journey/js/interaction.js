@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { PHASE_NAMES, styleState, hexFromThree } from './constants.js';
+import { styleState, hexFromThree } from './constants.js';
+import { getPhaseName } from './manifest.js';
 import { renderer, camera, controls, grid, bloomPass } from './scene.js';
 import { routeBoxes, routeMeshArr, phaseGroups, sgGroups, phaseMats, sgMats,
          phaseHitArr, routeHitMap, labelStore, phaseLabelArr, phaseBadges,
@@ -46,7 +47,7 @@ function showRouteTooltip(rb, mx, my) {
   const s = rb.stats;
   tooltipEl.innerHTML = `
     <div class="tt-title">${rb.entry.method} ${rb.entry.path}</div>
-    <div class="tt-dim">Phase ${rb.entry.phase}: ${PHASE_NAMES[rb.entry.phase]} &rsaquo; ${rb.entry.subgroup}</div>
+    <div class="tt-dim">Domain ${getPhaseName(rb.entry.phase)} &rsaquo; ${rb.entry.subgroup}</div>
     <hr>
     <div>Agents inside: ${s.activeAgents} &middot; In-flight: ${s.inFlight}</div>
     <div>2xx: ${s.status2xx} &middot; 4xx: ${s.status4xx} &middot; 5xx: ${s.status5xx}</div>
@@ -64,7 +65,7 @@ function showAgentTooltip(agentId, mx, my) {
   tooltipEl.innerHTML = `
     <div class="tt-title">${agentId}</div>
     <div>Route: ${data.routeKey || 'unknown'}</div>
-    <div>Phase: ${data.phase} (${PHASE_NAMES[data.phase] || '?'}) &middot; Slot: ${data.slot ?? '?'}</div>
+    <div>Domain: ${getPhaseName(data.phase)} &middot; Slot: ${data.slot ?? '?'}</div>
     <div class="tt-dim">Recent: ${recentStr}</div>
   `;
   positionTooltip(mx, my);
@@ -92,7 +93,7 @@ function findDragTarget() {
     const badge = phaseBadges.get(p);
     const objs = [plHits[0].object];
     if (badge) objs.push(badge);
-    return { kind: 'phaseLabel', key: p, objects: objs, routeKeys: [], label: `Phase ${p} label` };
+      return { kind: 'phaseLabel', key: p, objects: objs, routeKeys: [], label: `${getPhaseName(p)} label` };
   }
   // Route (most specific) — layer 1
   raycaster.layers.set(1);
@@ -110,7 +111,7 @@ function findDragTarget() {
   if (sgHits.length > 0) {
     const sgKey = sgHits[0].object.userData.sgKey;
     const sg = sgGroups.get(sgKey);
-    if (sg) return { kind: 'sg', key: sgKey, objects: [sg.group], routeKeys: [...sg.routes], label: `Subgroup: ${sg.sgName} (Phase ${sg.phase})` };
+    if (sg) return { kind: 'sg', key: sgKey, objects: [sg.group], routeKeys: [...sg.routes], label: `Subgroup: ${sg.sgName} (${getPhaseName(sg.phase)})` };
   }
   // Phase — layer 4
   raycaster.layers.set(4);
@@ -121,7 +122,7 @@ function findDragTarget() {
     if (group) {
       const rks = [];
       for (const [, sg] of sgGroups) { if (sg.phase === p) rks.push(...sg.routes); }
-      return { kind: 'phase', key: p, objects: [group], routeKeys: rks, label: `Phase ${p}: ${PHASE_NAMES[p]}` };
+      return { kind: 'phase', key: p, objects: [group], routeKeys: rks, label: `Domain: ${getPhaseName(p)}` };
     }
   }
   return null;
@@ -374,7 +375,7 @@ export function initInteraction() {
       const next = ROUTE_ANCHOR_CYCLE[(idx + 1) % ROUTE_ANCHOR_CYCLE.length];
       styleState.phaseRouteAnchors[phase] = next;
       applyPhaseRouteAnchor(phase, next);
-      showHint(`Phase ${phase} routes → ${next.includes('l') ? 'left' : 'right'}`, 1500);
+      showHint(`${getPhaseName(phase)} routes → ${next.includes('l') ? 'left' : 'right'}`, 1500);
       e.preventDefault();
     }
   });

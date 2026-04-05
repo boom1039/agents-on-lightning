@@ -22,12 +22,12 @@ Pick one discovery group and finish it before moving on:
   - `GET /api/v1/knowledge/strategy`
 - `skills`:
   - `GET /api/v1/skills`
-  - `GET /api/v1/skills/discovery`
-  - `GET /api/v1/skills/market/open-flow.txt`
+  - `GET /docs/skills/discovery.txt`
+  - `GET /docs/skills/market-open-flow.txt`
 
 Rules:
 
-- in `root-and-docs`, use `GET /llms.txt`, not `GET /docs/llms.txt`
+- in `root-and-docs`, use only `GET /llms.txt`
 - in `root-and-docs`, call all four listed routes before you summarize
 - in `root-and-docs`, the third route is literally `GET /api/v1/` with the trailing slash; do not shorten it to `GET /api/v1`
 - if your goal is `platform-ethos-capabilities`, do not spend that turn on `strategies` or `knowledge`
@@ -36,8 +36,8 @@ Rules:
 - in `platform-ethos-capabilities`, do not stop after `decode-invoice`; still call `ethos` and `capabilities`
 - in `strategies-and-knowledge`, call `GET /api/v1/strategies` before the named strategy route
 - in `skills`, call all three routes above, including the nested helper route
-- in `skills`, the third route is literally `GET /api/v1/skills/market/open-flow.txt`
-- for market route groups, the canonical public doc is now `GET /api/v1/skills/market`
+- in `skills`, the third route is literally `GET /docs/skills/market-open-flow.txt`
+- for market route groups, the canonical public doc is now `GET /docs/skills/market.txt`
 - in `skills`, do not switch to some other skill that fits your task better; this group is only proving the three routes above
 - in `skills`, do not detour into `root-and-docs`, `platform-ethos-capabilities`, or `strategies-and-knowledge`
 
@@ -50,7 +50,7 @@ Rules:
 Root page.
 
 - `Accept: application/json` returns platform JSON with `api` and docs links.
-- `Accept: text/markdown` returns the same `llms.txt` content agents read at `/llms.txt`.
+- `GET /llms.txt` is the one canonical root doc URL.
 
 ### GET /health
 
@@ -85,12 +85,6 @@ What each access tier can do. Tiers: `observatory`, `wallet`, `readonly`, `invoi
 
 Returns tier descriptions with their required credentials and available operations.
 
-### GET /dashboard/api/endpoints
-
-Dashboard-facing endpoint popularity summary from recent audit logs.
-
----
-
 ## Strategies
 
 ### GET /api/v1/strategies
@@ -110,7 +104,7 @@ Full details for one strategy.
 
 ## Knowledge Base
 
-### GET /api/v1/knowledge/:topic
+### [manifest-excluded-route] GET /api/v1/knowledge/:topic
 
 Deep reference material. Each file is under 9KB. Read the one relevant to what you're about to do.
 
@@ -132,4 +126,4 @@ Supports ETag caching — include `If-None-Match` header to avoid re-downloading
 
 ## See Also
 - All available skills: `GET /api/v1/skills`
-- Registration: `GET /api/v1/skills/identity`
+- Registration: `GET /docs/skills/identity.txt`

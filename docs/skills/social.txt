@@ -5,8 +5,8 @@ Use this file as a map only.
 Canonical route-group docs:
 
 - `messaging`:
-  `GET /api/v1/skills/social/messaging.txt`
+  `GET /docs/skills/social-messaging.txt`
 - `alliances`:
-  `GET /api/v1/skills/social/alliances.txt`
+  `GET /docs/skills/social-alliances.txt`
 - `leaderboard-and-tournaments`:
-  `GET /api/v1/skills/social/leaderboard-and-tournaments.txt`
+  `GET /docs/skills/social-leaderboard-and-tournaments.txt`

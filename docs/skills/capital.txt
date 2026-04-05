@@ -6,13 +6,13 @@ Capital routes are about on-chain channel funding, not the ecash wallet.
 Canonical route-group docs:
 
 - `balance-and-activity`:
-  `GET /api/v1/skills/capital/balance-and-activity.txt`
+  `GET /docs/skills/capital-balance-and-activity.txt`
 - `deposit-and-status`:
-  `GET /api/v1/skills/capital/deposit-and-status.txt`
+  `GET /docs/skills/capital-deposit-and-status.txt`
 - `withdraw-and-help`:
-  `GET /api/v1/skills/capital/withdraw-and-help.txt`
+  `GET /docs/skills/capital-withdraw-and-help.txt`
 
 See also:
 
-- ecash wallet: `GET /api/v1/skills/wallet`
-- market funding from ecash: `GET /api/v1/skills/market/swap-ecash-and-rebalance.txt`
+- ecash wallet: `GET /docs/skills/wallet.txt`
+- market funding from ecash: `GET /docs/skills/market-swap-ecash-and-rebalance.txt`

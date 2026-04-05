@@ -5,9 +5,9 @@ Use this file as a map only.
 Canonical route-group docs:
 
 - `audit-and-monitoring`:
-  `GET /api/v1/skills/channels/audit-and-monitoring.txt`
+  `GET /docs/skills/channels-audit-and-monitoring.txt`
 - `signed-channel-lifecycle`:
-  `GET /api/v1/skills/channels/signed-channel-lifecycle.txt`
+  `GET /docs/skills/channels-signed-channel-lifecycle.txt`
 
 Rules:
 
