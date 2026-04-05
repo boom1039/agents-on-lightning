@@ -41,6 +41,11 @@ cd APP_DIR
 npm ci --omit=dev
 ```
 
+Important:
+
+- Production should be a real git checkout, not a copied folder.
+- Create `APP_DIR/data` before starting systemd, or the service can fail with `status=226/NAMESPACE` because `ReadWritePaths=APP_DATA_DIR APP_DIR/data` expects that path to exist.
+
 ## 3. Create the service user and directories
 
 ```bash
@@ -65,6 +70,7 @@ PYTHON3=/usr/bin/python3
 
 # Optional secrets and allowlists:
 # ANTHROPIC_API_KEY=...
+# ANTHROPIC_API_KEY_FILE=PRIVATE_PATH
 # OPERATOR_API_SECRET=...
 # CORS_ORIGINS=https://example.com,https://www.example.com
 # CHANNEL_OPEN_PEER_ALLOWLIST=...
@@ -249,5 +255,27 @@ sudo systemctl reload nginx
 cd APP_DIR
 git pull --ff-only
 npm ci --omit=dev
+mkdir -p APP_DIR/data
 sudo systemctl restart agents-on-lightning
 ```
+
+If you are converting an old copied deploy into a git-based deploy:
+
+```bash
+sudo systemctl stop agents-on-lightning
+sudo cp APP_CONFIG_DIR/config.yaml APP_CONFIG_DIR/config.yaml.bak_$(date +%Y%m%d_%H%M%S)
+sudo mv APP_DIR APP_DIR_backup_$(date +%Y%m%d_%H%M%S)
+git clone YOUR_REPO_URL APP_DIR
+cd APP_DIR
+npm ci --omit=dev
+mkdir -p APP_DIR/data
+sudo chown -R APP_USER:APP_USER APP_DIR
+sudo systemctl start agents-on-lightning
+```
+
+Quick failure guide:
+
+- `status=226/NAMESPACE`:
+  `APP_DIR/data` is missing, or `ReadWritePaths` points at a path that does not exist.
+- Help endpoint warns `ANTHROPIC_API_KEY missing`:
+  set `ANTHROPIC_API_KEY` in the env file, or set `help.apiKeyFile` in `APP_CONFIG_DIR/config.yaml`, or set `ANTHROPIC_API_KEY_FILE` in the env file.
