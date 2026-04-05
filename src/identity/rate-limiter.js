@@ -11,31 +11,8 @@ import { err429 } from './agent-friendly-errors.js';
 import { acquire as acquireMutex } from './mutex.js';
 import { getSocketAddress, isLoopbackAddress } from './request-security.js';
 
-// Category configurations: { perAgent, perIp, global, windowMs }
-const CATEGORIES = {
-  registration:  { perAgent: null, perIp: 3,  global: 50,  windowMs: 3600_000 },    // 1 hour
-  analysis:      { perAgent: 2,    perIp: 3,  global: 10,  windowMs: 300_000 },      // 5 min
-  wallet_write:  { perAgent: 10,   perIp: 15, global: 100, windowMs: 60_000 },       // 1 min
-  wallet_read:   { perAgent: 20,   perIp: 30, global: 200, windowMs: 60_000 },       // 1 min
-  social_write:  { perAgent: 3,    perIp: 5,  global: 30,  windowMs: 300_000 },      // 5 min
-  social_read:   { perAgent: 10,   perIp: 20, global: 120, windowMs: 60_000 },       // 1 min
-  discovery:     { perAgent: null, perIp: 10, global: 200, windowMs: 60_000 },       // 1 min
-  mcp:           { perAgent: null, perIp: 5,  global: 30,  windowMs: 60_000 },       // 1 min
-  channel_instruct: { perAgent: 2, perIp: 5,  global: 20,  windowMs: 300_000 },    // 5 min
-  channel_read:     { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 },     // 1 min
-  analytics_query:  { perAgent: 30, perIp: 50, global: 500, windowMs: 60_000 },    // 1 min
-  capital_read:     { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 },    // 1 min
-  capital_write:    { perAgent: 3,  perIp: 5,  global: 30,  windowMs: 300_000 },   // 5 min
-  market_read:      { perAgent: null, perIp: 30, global: 300, windowMs: 60_000 },  // 1 min
-  market_private_read: { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 }, // 1 min
-  market_write:     { perAgent: 5,  perIp: 10, global: 60,  windowMs: 300_000 },   // 5 min
-  identity_read:    { perAgent: 20, perIp: 30, global: 200, windowMs: 60_000 },    // 1 min
-  identity_write:   { perAgent: 10, perIp: 15, global: 100, windowMs: 60_000 },    // 1 min
-  node_write:       { perAgent: 3,  perIp: 5,  global: 30,  windowMs: 300_000 },   // 5 min
-};
-
-// Global server cap
-const GLOBAL_CAP = { limit: 1000, windowMs: 60_000 };
+let CATEGORIES = null;
+let GLOBAL_CAP = null;
 
 // Counters: Map<string, { count: number, windowStart: number }>
 const _counters = new Map();
@@ -49,11 +26,8 @@ let _persistentStore = null;
 // violations the effective cooldown doubles; after 10+ it quadruples.
 // A clean request (no rate limit hit) resets the counter.
 
-const PROGRESSIVE_THRESHOLDS = [
-  { violations: 10, multiplier: 4 },
-  { violations: 5,  multiplier: 2 },
-];
-const PROGRESSIVE_RESET_WINDOW_MS = 300_000; // 5 minutes without violations → full reset
+let PROGRESSIVE_THRESHOLDS = null;
+let PROGRESSIVE_RESET_WINDOW_MS = null;
 
 // Map<agentId, { count: number, lastViolation: number }>
 const _violationCounters = new Map();
@@ -93,6 +67,9 @@ export function resetViolations(agentId) {
  * Get the current penalty multiplier for an agent.
  */
 export function _getPenaltyMultiplier(agentId) {
+  if (!PROGRESSIVE_THRESHOLDS || !Number.isInteger(PROGRESSIVE_RESET_WINDOW_MS)) {
+    throw new Error('Rate limiter policy not configured. Set it in config/local.yaml.');
+  }
   if (!agentId) return 1;
   const entry = _violationCounters.get(agentId);
   if (!entry) return 1;
@@ -132,6 +109,22 @@ export function configureRateLimiterPersistence({ dataLayer, path = 'data/securi
     return;
   }
   _persistentStore = { dataLayer, path, mutex };
+}
+
+export function configureRateLimiterPolicy({ categories, globalCap, progressive } = {}) {
+  if (!categories || typeof categories !== 'object') {
+    throw new Error('Missing hidden rate-limit categories. Set them in config/local.yaml.');
+  }
+  if (!globalCap || !Number.isInteger(globalCap.limit) || !Number.isInteger(globalCap.windowMs)) {
+    throw new Error('Missing hidden global rate-limit settings. Set them in config/local.yaml.');
+  }
+  if (!progressive || !Array.isArray(progressive.thresholds) || !Number.isInteger(progressive.resetWindowMs)) {
+    throw new Error('Missing hidden progressive rate-limit settings. Set them in config/local.yaml.');
+  }
+  CATEGORIES = { ...categories };
+  GLOBAL_CAP = { ...globalCap };
+  PROGRESSIVE_THRESHOLDS = [...progressive.thresholds].sort((a, b) => b.violations - a.violations);
+  PROGRESSIVE_RESET_WINDOW_MS = progressive.resetWindowMs;
 }
 
 export function disableRateLimiterPersistence() {
@@ -257,6 +250,9 @@ export async function decrementCounter(key, amount = 1) {
 }
 
 async function _checkGlobalCap() {
+  if (!GLOBAL_CAP) {
+    throw new Error('Rate limiter policy not configured. Set it in config/local.yaml.');
+  }
   if (_persistentStore) {
     return withPersistentState((state) => {
       const now = Date.now();
@@ -299,6 +295,9 @@ async function _checkGlobalCap() {
  * @returns {Function} Express middleware
  */
 export function rateLimit(category) {
+  if (!CATEGORIES) {
+    throw new Error('Rate limiter policy not configured. Set it in config/local.yaml.');
+  }
   const config = CATEGORIES[category];
   if (!config) throw new Error(`Unknown rate limit category: ${category}`);
 

@@ -32,6 +32,15 @@ function requireCaps(caps, path) {
   };
 }
 
+function requireRateLimitCategory(category, path) {
+  return {
+    perAgent: optionalInteger(category?.perAgent, `${path}.perAgent`, { min: 1 }),
+    perIp: optionalInteger(category?.perIp, `${path}.perIp`, { min: 1 }),
+    global: optionalInteger(category?.global, `${path}.global`, { min: 1 }),
+    windowMs: requireInteger(category?.windowMs, `${path}.windowMs`, { min: 1 }),
+  };
+}
+
 export function getDangerRouteSettings(config = {}) {
   const root = config.dangerRoutes || {};
   return {
@@ -186,5 +195,55 @@ export function getWalletServiceSettings(config = {}) {
   return {
     maxRoutingFeeSats: requireInteger(root.maxRoutingFeeSats, 'wallet.maxRoutingFeeSats', { min: 1 }),
     withdrawalTimeoutSeconds: requireInteger(root.withdrawalTimeoutSeconds, 'wallet.withdrawalTimeoutSeconds', { min: 1 }),
+  };
+}
+
+export function getRateLimitSettings(config = {}) {
+  const root = config.rateLimits || {};
+  const categories = root.categories || {};
+  const thresholds = Array.isArray(root.progressive?.thresholds) ? root.progressive.thresholds : null;
+  if (!thresholds || thresholds.length === 0) {
+    throw invalidSetting('rateLimits.progressive.thresholds');
+  }
+  return {
+    categories: {
+      registration: requireRateLimitCategory(categories.registration, 'rateLimits.categories.registration'),
+      analysis: requireRateLimitCategory(categories.analysis, 'rateLimits.categories.analysis'),
+      wallet_write: requireRateLimitCategory(categories.wallet_write, 'rateLimits.categories.wallet_write'),
+      wallet_read: requireRateLimitCategory(categories.wallet_read, 'rateLimits.categories.wallet_read'),
+      social_write: requireRateLimitCategory(categories.social_write, 'rateLimits.categories.social_write'),
+      social_read: requireRateLimitCategory(categories.social_read, 'rateLimits.categories.social_read'),
+      discovery: requireRateLimitCategory(categories.discovery, 'rateLimits.categories.discovery'),
+      mcp: requireRateLimitCategory(categories.mcp, 'rateLimits.categories.mcp'),
+      channel_instruct: requireRateLimitCategory(categories.channel_instruct, 'rateLimits.categories.channel_instruct'),
+      channel_read: requireRateLimitCategory(categories.channel_read, 'rateLimits.categories.channel_read'),
+      analytics_query: requireRateLimitCategory(categories.analytics_query, 'rateLimits.categories.analytics_query'),
+      capital_read: requireRateLimitCategory(categories.capital_read, 'rateLimits.categories.capital_read'),
+      capital_write: requireRateLimitCategory(categories.capital_write, 'rateLimits.categories.capital_write'),
+      market_read: requireRateLimitCategory(categories.market_read, 'rateLimits.categories.market_read'),
+      market_private_read: requireRateLimitCategory(categories.market_private_read, 'rateLimits.categories.market_private_read'),
+      market_write: requireRateLimitCategory(categories.market_write, 'rateLimits.categories.market_write'),
+      identity_read: requireRateLimitCategory(categories.identity_read, 'rateLimits.categories.identity_read'),
+      identity_write: requireRateLimitCategory(categories.identity_write, 'rateLimits.categories.identity_write'),
+      node_write: requireRateLimitCategory(categories.node_write, 'rateLimits.categories.node_write'),
+    },
+    globalCap: {
+      limit: requireInteger(root.globalCap?.limit, 'rateLimits.globalCap.limit', { min: 1 }),
+      windowMs: requireInteger(root.globalCap?.windowMs, 'rateLimits.globalCap.windowMs', { min: 1 }),
+    },
+    progressive: {
+      resetWindowMs: requireInteger(root.progressive?.resetWindowMs, 'rateLimits.progressive.resetWindowMs', { min: 1 }),
+      thresholds: thresholds.map((entry, index) => ({
+        violations: requireInteger(entry?.violations, `rateLimits.progressive.thresholds[${index}].violations`, { min: 1 }),
+        multiplier: requireInteger(entry?.multiplier, `rateLimits.progressive.thresholds[${index}].multiplier`, { min: 1 }),
+      })),
+    },
+  };
+}
+
+export function getSpendingVelocitySettings(config = {}) {
+  const root = config.velocity || {};
+  return {
+    dailyLimitSats: requireInteger(root.dailyLimitSats, 'velocity.dailyLimitSats', { min: 1 }),
   };
 }

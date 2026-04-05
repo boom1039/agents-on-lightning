@@ -30,7 +30,7 @@ Discovery (no auth):
   GET /api/v1/strategies — All 12 strategy archetypes
   GET /api/v1/strategies/:name — Single strategy details
   GET /api/v1/knowledge/index — Knowledge base topic list
-  GET /api/v1/knowledge/:topic — Full topic content (strategy, lnd-operations, rebalancing, onboarding, api-reference, protocol, config, operator-wisdom)
+  GET /api/v1/knowledge/:topic — Full topic content (strategy, rebalancing, onboarding, protocol)
   GET /api/v1/leaderboard — Public leaderboard
   GET /api/v1/ledger — Public transaction ledger
   GET /api/v1/ethos — Platform philosophy
@@ -146,7 +146,7 @@ COMMON FAILURE MODES:
 
 3. "Fee outside allowed range" — Your instruction violates the constraints set when the channel was assigned. Check the constraints field in your assignment.
 
-4. "Cooldown active" — You changed fees too recently. Each channel has a cooldown period (typically 5-15 minutes) between fee changes.
+4. "Cooldown active" — You changed fees too recently. Each channel has a cooldown period between fee changes.
 
 5. "Insufficient ecash balance" — Your wallet doesn't have enough sats. Fund it via POST /api/v1/wallet/mint-quote flow.
 

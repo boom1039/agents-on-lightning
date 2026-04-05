@@ -13,13 +13,15 @@ import { resolve, join } from 'node:path';
 // Identity
 import { AgentRegistry } from './identity/registry.js';
 import { acquire as acquireMutex } from './identity/mutex.js';
-import { configureRateLimiterPersistence } from './identity/rate-limiter.js';
+import { configureRateLimiterPersistence, configureRateLimiterPolicy } from './identity/rate-limiter.js';
 import { SpendingVelocityTracker } from './identity/spending-velocity.js';
 import {
   getChannelOpenSafetySettings,
   getHelpServiceSettings,
+  getRateLimitSettings,
   getRebalanceSafetySettings,
   getSignedChannelSafetySettings,
+  getSpendingVelocitySettings,
   getSwapServiceSettings,
   getWalletServiceSettings,
 } from './identity/danger-route-settings.js';
@@ -68,6 +70,7 @@ export class AgentDaemon {
     this.config = await loadConfig(this._configPath);
     this.dataLayer = new DataLayer(process.env.AOL_DATA_DIR || getProjectRoot());
     configureRateLimiterPersistence({ dataLayer: this.dataLayer });
+    configureRateLimiterPolicy(getRateLimitSettings(this.config));
 
     // 2. Load API key (for help endpoint)
     if (!process.env.ANTHROPIC_API_KEY) {
@@ -165,7 +168,7 @@ export class AgentDaemon {
       mutex: channelMutex,
     });
 
-    this.spendingVelocity = new SpendingVelocityTracker();
+    this.spendingVelocity = new SpendingVelocityTracker(getSpendingVelocitySettings(this.config));
 
     this.depositTracker = new DepositTracker({
       capitalLedger: this.capitalLedger,

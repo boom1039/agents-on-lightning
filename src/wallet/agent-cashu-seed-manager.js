@@ -26,7 +26,7 @@ export class AgentCashuSeedManager {
       if (this._masterSeed.length !== 32) {
         throw new Error(`Invalid seed length: ${this._masterSeed.length} bytes (expected 32)`);
       }
-      console.log(`[AgentCashuWallet] Master seed loaded from ${this._seedPath}`);
+      console.log('[AgentCashuWallet] Master seed loaded');
     } catch (err) {
       if (err.code === 'ENOENT') {
         // First startup — generate new master seed
@@ -35,8 +35,8 @@ export class AgentCashuSeedManager {
         await writeFile(this._seedPath, this._masterSeed.toString('hex') + '\n', 'utf-8');
         await chmod(this._seedPath, 0o600);
         console.log(
-          `[AgentCashuWallet] \u26a0 MASTER SEED GENERATED \u2014 back up ${this._seedPath} ` +
-          `to a safe location. This seed is the ONLY way to recover agent ecash balances if data is lost.`,
+          '[AgentCashuWallet] \u26a0 MASTER SEED GENERATED — back it up to a safe location. ' +
+          'This seed is the ONLY way to recover agent ecash balances if data is lost.',
         );
       } else {
         throw err;

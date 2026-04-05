@@ -64,7 +64,7 @@ async function verifyExternalNodeConnection(daemon, agentId, hostCheck, macaroon
     return {
       ok: false,
       status: 400,
-      message: err.message || 'Node connection failed verification.',
+      message: 'Node connection failed verification.',
     };
   } finally {
     if (daemon.nodeManager?.removeNode) {
@@ -210,7 +210,7 @@ export function agentIdentityRoutes(daemon) {
             hint: 'Use a public routable host:port for node routes.',
           });
         }
-        return err400Validation(res, `host: ${hostCheck.reason}`);
+        return err400Validation(res, 'host must be a public routable host:port');
       }
       if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
       if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
@@ -230,7 +230,7 @@ export function agentIdentityRoutes(daemon) {
         if (verified.status >= 500) {
           return err500Internal(res, 'verifying node credentials');
         }
-        return err400Validation(res, verified.message, {
+        return err400Validation(res, 'Node credentials failed verification.', {
           hint: 'Verify your host, macaroon, and tls_cert are correct. Use POST /api/v1/node/test-connection first if you want a dry run.',
         });
       }
@@ -259,7 +259,7 @@ export function agentIdentityRoutes(daemon) {
         },
       });
     } catch (err) {
-      return err400Validation(res, err.message, {
+      return err400Validation(res, 'Node credentials failed verification.', {
         hint: 'Verify your host, macaroon, and tls_cert are correct. Use POST /api/v1/node/test-connection to verify first.',
       });
     }
@@ -288,7 +288,7 @@ export function agentIdentityRoutes(daemon) {
             hint: 'Use a public routable host:port for node routes.',
           });
         }
-        return err400Validation(res, `host: ${hostCheck.reason}`);
+        return err400Validation(res, 'host must be a public routable host:port');
       }
       if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
       if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
@@ -297,7 +297,7 @@ export function agentIdentityRoutes(daemon) {
         if (verified.status >= 500) {
           return err500Internal(res, 'verifying node connection');
         }
-        return err400Validation(res, verified.message, {
+        return err400Validation(res, 'Node credentials failed verification.', {
           hint: 'Double-check host, macaroon, and tls_cert, then try again.',
         });
       }

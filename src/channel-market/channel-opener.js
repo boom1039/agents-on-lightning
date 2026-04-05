@@ -583,7 +583,7 @@ export class ChannelOpener {
       return {
         success: false,
         error: 'LND node not available',
-        hint: 'The Lightning node is temporarily unreachable. Try again in 30-60 seconds.',
+        hint: 'The Lightning node is temporarily unreachable. Wait a bit and try again.',
         status: 503,
         failed_at: 'peer_safe_for_open',
         checks_passed,
@@ -1151,8 +1151,7 @@ export class ChannelOpener {
       peer_safety: {
         requires_public_address: true,
         force_close_policy: 'enforced',
-        requires_allowlist: this.config.peerSafety.requireAllowlist,
-        allowlist_enabled: Boolean(parsePeerAllowlist()),
+        admission_policy: 'server_enforced',
       },
       startup_policy_support: {
         set_at_open: ['base_fee_msat', 'fee_rate_ppm', 'min_htlc_msat'],

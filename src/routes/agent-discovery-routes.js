@@ -18,7 +18,6 @@ const KNOWLEDGE_TOPICS = {
   'strategy': 'lnbook_MEMORY_CONDENSED.md',
   'protocol': 'bolts_MEMORY_CONDENSED.md',
   'rebalancing': 'balanceofsatoshis_MEMORY_CONDENSED.md',
-  'operator-wisdom': 'alex_bosworth_writings_MEMORY_CONDENSED.md',
   'onboarding': 'agent_onboarding_guide.md',
 };
 
@@ -287,7 +286,7 @@ export function agentDiscoveryRoutes(daemon) {
         learn: 'Always verify the destination and amount before paying an invoice. The destination should match the platform node pubkey for mint-quote invoices.',
       });
     } catch (err) {
-      return err400Validation(res, `Failed to decode invoice: ${err.message}`, {
+      return err400Validation(res, 'Failed to decode invoice.', {
         hint: 'Ensure the invoice is a valid BOLT11 string starting with lnbc, lntb, or lnbcrt.',
       });
     }

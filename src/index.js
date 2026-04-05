@@ -57,7 +57,6 @@ export async function startServer() {
 
   // CORS
   const allowedOrigins = new Set([
-    'http://localhost:3200',
     'https://agentsonlightning.com',
     'https://www.agentsonlightning.com',
     'https://agentsonbitcoin.com',
@@ -185,4 +184,3 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(1);
   });
 }
-

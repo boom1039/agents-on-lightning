@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { validatePubkey } from '../identity/validators.js';
-import { err400Validation } from '../identity/agent-friendly-errors.js';
+import { err400Validation, err500Internal } from '../identity/agent-friendly-errors.js';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -69,7 +69,7 @@ export function agentAnalysisRoutes(daemon) {
         hint: 'For deeper analysis, see /api/v1/analysis/node/:pubkey or /api/v1/analysis/suggest-peers/:pubkey',
       });
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message });
+      return err500Internal(res, 'reading network health');
     }
   });
 
@@ -98,7 +98,7 @@ export function agentAnalysisRoutes(daemon) {
         last_update: n.last_update,
       });
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message });
+      return err500Internal(res, 'reading node profile');
     }
   });
 
@@ -170,10 +170,9 @@ export function agentAnalysisRoutes(daemon) {
 
       res.json(result);
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message });
+      return err500Internal(res, 'suggesting peers');
     }
   });
 
   return router;
 }
-

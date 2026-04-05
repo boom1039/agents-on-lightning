@@ -33,3 +33,9 @@ swap: {}
 
 # Keep real wallet-service guard values in config/local.yaml.
 wallet: {}
+
+# Keep real shared rate-limit settings in config/local.yaml.
+rateLimits: {}
+
+# Keep real velocity settings in config/local.yaml.
+velocity: {}

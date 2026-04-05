@@ -49,21 +49,33 @@ export function initHUD() {
   simBtn.addEventListener('click', async () => {
     try {
       if (simulating) {
-        await fetch('/api/demo/synthetic/stop', { method: 'POST' });
+        const res = await fetch('/api/demo/synthetic/stop', { method: 'POST' });
+        if (!res.ok) throw new Error('synthetic unavailable');
         simulating = false;
         simBtn.textContent = 'SIMULATE';
         simBtn.classList.remove('active');
       } else {
-        await fetch('/api/demo/synthetic/start', { method: 'POST' });
+        const res = await fetch('/api/demo/synthetic/start', { method: 'POST' });
+        if (!res.ok) throw new Error('synthetic unavailable');
         simulating = true;
         simBtn.textContent = 'STOP';
         simBtn.classList.add('active');
       }
-    } catch (e) { console.error('sim toggle:', e); }
+    } catch (e) {
+      simBtn.disabled = true;
+      simBtn.title = 'Synthetic traffic is local-only';
+      console.error('sim toggle:', e);
+    }
   });
 
   // Check if already simulating
-  fetch('/api/demo/synthetic').then(r => r.json()).then(s => {
+  fetch('/api/demo/synthetic').then(async (r) => {
+    if (!r.ok) throw new Error('synthetic unavailable');
+    return r.json();
+  }).then(s => {
     if (s.running) { simulating = true; simBtn.textContent = 'STOP'; simBtn.classList.add('active'); }
-  }).catch(() => {});
+  }).catch(() => {
+    simBtn.disabled = true;
+    simBtn.title = 'Synthetic traffic is local-only';
+  });
 }

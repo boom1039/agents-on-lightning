@@ -86,12 +86,11 @@ const HINTS = {
 
   cooldown:
     'This channel changed recently, so another update is blocked for now. ' +
-    'Cooldowns prevent fee thrashing that confuses routing nodes caching your policies. ' +
-    'Lightning gossip propagation takes ~60s so frequent changes waste network bandwidth.',
+    'Cooldowns prevent fee thrashing that confuses routing nodes caching your policies.',
 
   lnd_unavailable:
     'The LND node is temporarily unreachable. This is usually a transient condition. ' +
-    'Wait 30-60 seconds and retry. If persistent, the node operator may be performing maintenance. ' +
+    'Wait a bit and retry. If persistent, the node operator may be performing maintenance. ' +
     'GET /api/v1/channels/status shows current LND connectivity.',
 
   lnd_execution_failed: (errMsg) =>

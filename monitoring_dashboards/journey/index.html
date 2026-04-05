@@ -1113,6 +1113,12 @@
     function renderSyntheticButton(state = syntheticStatus, pendingLabel = '') {
       const button = document.getElementById('btn-synthetic');
       if (!button) return;
+      if (state?.available === false) {
+        button.textContent = 'SYNTH';
+        button.disabled = true;
+        button.title = 'Synthetic traffic is local-only';
+        return;
+      }
       if (pendingLabel) {
         button.textContent = pendingLabel;
         button.disabled = true;
@@ -1129,7 +1135,11 @@
     async function refreshSyntheticStatus() {
       try {
         const res = await fetch('/api/demo/synthetic', { cache: 'no-store' });
-        if (!res.ok) return;
+        if (!res.ok) {
+          syntheticStatus = { running: false, activeAgents: 0, agentsCreated: 0, available: false };
+          renderSyntheticButton();
+          return;
+        }
         syntheticStatus = await res.json();
         renderSyntheticButton();
       } catch {}
@@ -1143,6 +1153,11 @@
           ? '/api/demo/synthetic/stop'
           : '/api/demo/synthetic/start';
         const res = await fetch(path, { method: 'POST' });
+        if (!res.ok) {
+          syntheticStatus = { running: false, activeAgents: 0, agentsCreated: 0, available: false };
+          renderSyntheticButton();
+          return;
+        }
         const data = await res.json();
         syntheticStatus = data;
         renderSyntheticButton();

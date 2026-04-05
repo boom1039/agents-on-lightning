@@ -3,6 +3,8 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgentSurfaceManifest, getAgentSurfaceSummary } from '../monitor/agent-surface-inventory.js';
 import { getJourneyMonitor } from '../monitor/journey-monitor.js';
+import { err404HiddenRoute } from '../identity/agent-friendly-errors.js';
+import { isLoopbackRequest, rejectUnauthorizedOperatorRoute } from '../identity/request-security.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const JOURNEY_DIR = resolve(__dirname, '..', '..', 'monitoring_dashboards', 'journey');
@@ -19,6 +21,13 @@ function analyticsHandler(fn, errorStatus = 500) {
       res.status(errorStatus).json({ error: err.message || 'analytics error' });
     }
   };
+}
+
+function rejectSyntheticRoute(req, res) {
+  if (!isLoopbackRequest(req)) {
+    return err404HiddenRoute(res);
+  }
+  return null;
 }
 
 export function journeyRoutes() {
@@ -82,7 +91,9 @@ export function journeyRoutes() {
     });
   });
 
-  router.get('/api/demo/synthetic', (_req, res) => {
+  router.get('/api/demo/synthetic', (req, res) => {
+    const rejection = rejectSyntheticRoute(req, res);
+    if (rejection) return rejection;
     const monitor = getJourneyMonitor();
     res.json(monitor ? monitor.getSyntheticStatus() : {
       ok: true,
@@ -95,7 +106,9 @@ export function journeyRoutes() {
     });
   });
 
-  router.post('/api/demo/synthetic/start', (_req, res) => {
+  router.post('/api/demo/synthetic/start', (req, res) => {
+    const rejection = rejectSyntheticRoute(req, res);
+    if (rejection) return rejection;
     const monitor = getJourneyMonitor();
     if (!monitor) {
       return res.status(503).json({ ok: false, error: 'journey monitor unavailable' });
@@ -103,7 +116,9 @@ export function journeyRoutes() {
     return res.json(monitor.startSyntheticTraffic());
   });
 
-  router.post('/api/demo/synthetic/stop', async (_req, res) => {
+  router.post('/api/demo/synthetic/stop', async (req, res) => {
+    const rejection = rejectSyntheticRoute(req, res);
+    if (rejection) return rejection;
     const monitor = getJourneyMonitor();
     if (!monitor) {
       return res.status(503).json({ ok: false, error: 'journey monitor unavailable' });
@@ -158,11 +173,19 @@ export function journeyRoutes() {
     getJourneyMonitor().agentJourney(req.params.id)
   ));
 
-  router.post('/api/analytics/query', analyticsHandler(async req => {
-    const { sql, params } = req.body || {};
-    if (!sql) throw new Error('sql is required');
-    return getJourneyMonitor().query(sql, params);
-  }, 400));
+  router.post('/api/analytics/query', async (req, res) => {
+    const rejection = rejectUnauthorizedOperatorRoute(req, res);
+    if (rejection) return rejection;
+    try {
+      const { sql, params } = req.body || {};
+      if (!sql) {
+        return res.status(400).json({ error: 'sql is required' });
+      }
+      return res.json(await getJourneyMonitor().query(sql, params));
+    } catch (err) {
+      return res.status(400).json({ error: err.message || 'analytics error' });
+    }
+  });
 
   return router;
 }

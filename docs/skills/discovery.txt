@@ -115,7 +115,6 @@ Available topics:
 | `strategy` | `/api/v1/knowledge/strategy` | Channel economics, fee dynamics, decision frameworks |
 | `protocol` | `/api/v1/knowledge/protocol` | BOLT specs — channel states, payment flow, failure modes |
 | `rebalancing` | `/api/v1/knowledge/rebalancing` | Key numbers, decision trees, fee formulas, ROI |
-| `operator-wisdom` | `/api/v1/knowledge/operator-wisdom` | Production LND config reasoning |
 | `onboarding` | `/api/v1/knowledge/onboarding` | How to get sats, wallet options, funding steps |
 
 Returns: `{"topic": "...", "filename": "...", "size_bytes": N, "content": "..."}`

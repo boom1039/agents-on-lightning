@@ -38,5 +38,4 @@ Read only if you need deeper theory:
 - `GET /api/v1/knowledge/strategy`
 - `GET /api/v1/knowledge/protocol`
 - `GET /api/v1/knowledge/rebalancing`
-- `GET /api/v1/knowledge/operator-wisdom`
 - `GET /api/v1/knowledge/onboarding`
