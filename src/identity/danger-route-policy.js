@@ -114,17 +114,32 @@ export class DangerRoutePolicyStore {
       const key = successKey(scope, agentId, resourceId);
       const lastSuccess = state.last_success[key];
       if (!Number.isFinite(lastSuccess) || !Number.isFinite(cooldownMs) || cooldownMs <= 0) {
-        return { allowed: true, retryAfterSeconds: 0, lastSuccess: null };
+        return {
+          allowed: true,
+          retryAfterSeconds: 0,
+          retryAfterMs: 0,
+          retryAtMs: null,
+          lastSuccess: null,
+        };
       }
 
       const elapsed = Date.now() - lastSuccess;
       if (elapsed >= cooldownMs) {
-        return { allowed: true, retryAfterSeconds: 0, lastSuccess };
+        return {
+          allowed: true,
+          retryAfterSeconds: 0,
+          retryAfterMs: 0,
+          retryAtMs: null,
+          lastSuccess,
+        };
       }
 
+      const retryAfterMs = Math.max(0, cooldownMs - elapsed);
       return {
         allowed: false,
-        retryAfterSeconds: Math.ceil((cooldownMs - elapsed) / 1000),
+        retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+        retryAfterMs,
+        retryAtMs: Date.now() + retryAfterMs,
         lastSuccess,
       };
     });

@@ -47,6 +47,12 @@ function cloneList(values) {
   return Array.isArray(values) ? values.slice() : [];
 }
 
+function trimText(value, max = 280) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
 function surfaceEventFields(surface) {
   return {
     routeKey: surface.routeKey,
@@ -211,6 +217,17 @@ export class LiveJourneyState {
       requestCount: agent.requestCount,
       resultCount: agent.resultCount,
       timing: agent.timing ? { ...agent.timing } : null,
+      lastFailureCode: agent.lastFailureCode || null,
+      lastFailureStage: agent.lastFailureStage || null,
+      lastFailureReason: agent.lastFailureReason || null,
+      lastFailureAt: agent.lastFailureAt || null,
+      cooldownScope: agent.cooldownScope || null,
+      cooldownRetryAtMs: Number.isFinite(agent.cooldownRetryAtMs) && agent.cooldownRetryAtMs > now
+        ? agent.cooldownRetryAtMs
+        : null,
+      cooldownRemainingMs: Number.isFinite(agent.cooldownRetryAtMs) && agent.cooldownRetryAtMs > now
+        ? Math.max(0, agent.cooldownRetryAtMs - now)
+        : 0,
       sessionAgeMs: Number.isFinite(agent.sessionStartedAt) ? Math.max(0, now - agent.sessionStartedAt) : null,
       currentRouteMs: Number.isFinite(agent.routeEnteredAt) ? Math.max(0, now - agent.routeEnteredAt) : null,
       currentRequestMs: agent.phase === 'in-flight' && Number.isFinite(agent.startedAt)
@@ -268,6 +285,12 @@ export class LiveJourneyState {
         requestCount: 0,
         resultCount: 0,
         timing: null,
+        lastFailureCode: null,
+        lastFailureStage: null,
+        lastFailureReason: null,
+        lastFailureAt: null,
+        cooldownScope: null,
+        cooldownRetryAtMs: null,
         recent: [],
         dwellHistory: [],
       };
@@ -319,6 +342,26 @@ export class LiveJourneyState {
 
     this._touchAgent(agentId, agent);
     return this._serializeAgent(agent, ts);
+  }
+
+  _applyResultMeta(agent, event, ts) {
+    if (!agent || !event) return;
+
+    const failureReason = trimText(event.failure_reason || event.error || event.message);
+    if (failureReason) {
+      agent.lastFailureReason = failureReason;
+      agent.lastFailureCode = trimText(event.failure_code || event.error, 120);
+      agent.lastFailureStage = trimText(event.failure_stage, 120);
+      agent.lastFailureAt = ts;
+    }
+
+    if (Number.isFinite(event.cooldown_retry_at_ms) && event.cooldown_retry_at_ms > ts) {
+      agent.cooldownRetryAtMs = event.cooldown_retry_at_ms;
+      agent.cooldownScope = trimText(event.cooldown_scope, 120);
+    } else if (event.status !== 429 && Number.isFinite(agent.cooldownRetryAtMs) && agent.cooldownRetryAtMs <= ts) {
+      agent.cooldownRetryAtMs = null;
+      agent.cooldownScope = null;
+    }
   }
 
   evictStale(now = Date.now()) {
@@ -491,6 +534,10 @@ export class LiveJourneyState {
           name: event.agent_name || null,
         })
         : null;
+      const storedAgent = agentId ? this.agents.get(agentId) : null;
+      if (storedAgent) this._applyResultMeta(storedAgent, event, ts);
+      const serializedAgent = storedAgent ? this._serializeAgent(storedAgent, ts) : agent;
+      const failureReason = trimText(event.failure_reason || event.error || event.message);
 
       const normalized = {
         event: 'request_finish',
@@ -502,7 +549,13 @@ export class LiveJourneyState {
         status,
         duration_ms: Number.isFinite(event.duration_ms) ? event.duration_ms : null,
         timing,
-        agent,
+        failure_code: trimText(event.failure_code, 120),
+        failure_stage: trimText(event.failure_stage, 120),
+        failure_reason: failureReason || null,
+        cooldown_retry_after_ms: Number.isFinite(event.cooldown_retry_after_ms) ? event.cooldown_retry_after_ms : null,
+        cooldown_retry_at_ms: Number.isFinite(event.cooldown_retry_at_ms) ? event.cooldown_retry_at_ms : null,
+        cooldown_scope: trimText(event.cooldown_scope, 120),
+        agent: serializedAgent,
       };
       this._recordRecent(normalized);
       return normalized;

@@ -40,6 +40,13 @@ function updateAgentFunding(data, agent) {
   data.pendingDepositConfirmationsRequired = Number(agent.pendingDepositConfirmationsRequired || 0);
   data.lockedSats = Number(agent.lockedSats || 0);
   data.pendingCloseSats = Number(agent.pendingCloseSats || 0);
+  data.lastFailureReason = agent.lastFailureReason || null;
+  data.lastFailureStage = agent.lastFailureStage || null;
+  data.lastFailureCode = agent.lastFailureCode || null;
+  data.lastFailureAt = Number(agent.lastFailureAt || 0) || null;
+  data.cooldownScope = agent.cooldownScope || null;
+  data.cooldownRetryAtMs = Number(agent.cooldownRetryAtMs || 0) || null;
+  data.cooldownRemainingMs = Number(agent.cooldownRemainingMs || 0) || 0;
 }
 
 // Route stat helpers

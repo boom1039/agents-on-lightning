@@ -194,6 +194,7 @@ export class AgentDaemon {
     });
     await this.channelOpener.load();
     this.channelOpener.startPolling();
+    this.channelOpener.logStartupRules();
 
     this.ecashChannelFunder = new EcashChannelFunder({
       walletOps: this.agentCashuWallet,

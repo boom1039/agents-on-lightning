@@ -42,6 +42,35 @@ async function _append(event) {
   }
 }
 
+const DASHBOARD_RESULT_META_KEYS = new Set([
+  'failure_code',
+  'failure_stage',
+  'failure_reason',
+  'cooldown_retry_after_ms',
+  'cooldown_retry_at_ms',
+  'cooldown_scope',
+]);
+
+function sanitizeDashboardResultMeta(input = {}) {
+  const clean = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!DASHBOARD_RESULT_META_KEYS.has(key)) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) clean[key] = trimmed.slice(0, 280);
+      continue;
+    }
+    if (Number.isFinite(value)) {
+      clean[key] = value;
+      continue;
+    }
+    if (value === null) {
+      clean[key] = null;
+    }
+  }
+  return clean;
+}
+
 export function logRateLimitHit(category, ip, agentId) {
   return _append({
     event: 'rate_limit_hit',
@@ -159,6 +188,10 @@ export function auditMiddleware(req, res, next) {
     domain: trackedSurface.entry.domain || null,
   } : {};
   req.dashboardTraceId = traceId;
+  req.dashboardResultMeta = {};
+  req.dashboardSetResultMeta = (meta = {}) => {
+    Object.assign(req.dashboardResultMeta, sanitizeDashboardResultMeta(meta));
+  };
   req.dashboardBindAgent = (agentId, agentName = null) => {
     if (!agentId) return;
     void recordJourneyEvent({
@@ -200,6 +233,7 @@ export function auditMiddleware(req, res, next) {
       agent_name: req.agentProfile?.name || null,
       accept: accept || null,
       doc_kind,
+      ...req.dashboardResultMeta,
       ...surfaceMeta,
       ts: Date.now(),
     });

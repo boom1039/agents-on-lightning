@@ -2,7 +2,7 @@
  * Channel Opener — Validates, locks, opens, polls, and assigns Lightning channels.
  *
  * Handles the full lifecycle of agent-initiated channel opens:
- *   1. 12-step fail-fast validation pipeline (secp256k1-signed requests)
+ *   1. 13-step fail-fast validation pipeline (secp256k1-signed requests)
  *   2. Capital lock via CapitalLedger
  *   3. Peer connection + LND openChannel call
  *   4. Background polling: pending_open → active (auto-assign)
@@ -20,6 +20,20 @@ import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 const STATE_PATH = 'data/channel-market/pending-opens.json';
 
 const CHANNEL_OPEN_CONFIG = {};
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, ms, label) {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
 
 function readOptionalInteger(value) {
   return Number.isInteger(value) ? value : null;
@@ -51,6 +65,22 @@ function parsePeerAllowlist() {
   return peers.length > 0 ? new Set(peers) : null;
 }
 
+function peerConnectFailureDetails(errMsg) {
+  const text = `${errMsg || ''}`.trim();
+  if (/already connected to peer/i.test(text)) {
+    return {
+      error: 'Peer connection is already open, but the node could not confirm it cleanly.',
+      hint: 'Try the preview once more. If it keeps happening, try another peer.',
+      status: 502,
+    };
+  }
+  return {
+    error: 'The node could not keep a live connection to that peer.',
+    hint: 'Try another live peer, or retry after the peer comes back online.',
+    status: 502,
+  };
+}
+
 /**
  * LND error messages → agent-friendly explanations.
  */
@@ -62,6 +92,10 @@ const LND_ERROR_MAP = [
   {
     pattern: /peer is not connected|peer not online|unable to locate/i,
     message: 'Could not connect to peer. The node may be offline or unreachable.',
+  },
+  {
+    pattern: /peer .* disconnected/i,
+    message: 'The node lost the peer during the real channel-open attempt.',
   },
   {
     pattern: /wallet is fully synced/i,
@@ -119,6 +153,10 @@ const HINTS = {
   peer_requires_public_address:
     'This peer does not advertise a public routable address in the Lightning graph. ' +
     'Pick a peer with a public host:port, or ask the operator to connect manually first.',
+
+  peer_connect_failed:
+    'The node could not hold a live connection to this peer long enough to start a real channel open. ' +
+    'Try another live peer, or retry after the peer comes back online.',
 
   peer_not_allowlisted:
     'This peer is not approved for direct opens on this node. ' +
@@ -216,6 +254,28 @@ export class ChannelOpener {
       peerSafety: { ...(config.peerSafety || {}) },
       startupPolicyLimits: { ...(config.startupPolicyLimits || {}) },
     };
+  }
+
+  getStartupRules() {
+    return {
+      minChannelSizeSats: this.config.minChannelSizeSats,
+      maxChannelSizeSats: this.config.maxChannelSizeSats,
+      maxTotalChannels: Number.isFinite(this.config.maxTotalChannels) ? this.config.maxTotalChannels : 'unlimited',
+      maxPerAgent: Number.isFinite(this.config.maxPerAgent) ? this.config.maxPerAgent : 'unlimited',
+      pendingOpenTimeoutBlocks: this.config.pendingOpenTimeoutBlocks,
+      connectPeerTimeoutMs: this.config.connectPeerTimeoutMs,
+      defaultSatPerVbyte: this.config.defaultSatPerVbyte,
+      peerSafety: {
+        forceCloseLimit: this.config.peerSafety.forceCloseLimit,
+        requireAllowlist: this.config.peerSafety.requireAllowlist,
+        minPeerChannels: this.config.peerSafety.minPeerChannels,
+        maxPeerLastUpdateAgeSeconds: this.config.peerSafety.maxPeerLastUpdateAgeSeconds,
+      },
+    };
+  }
+
+  logStartupRules() {
+    console.log(`[ChannelOpener] Live open rules ${JSON.stringify(this.getStartupRules())}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -338,6 +398,53 @@ export class ChannelOpener {
   // ---------------------------------------------------------------------------
   // Validation pipeline (12 steps, fail-fast)
   // ---------------------------------------------------------------------------
+
+  async _isPeerConnected(client, peerPubkey) {
+    const peers = await client.listPeers();
+    return Array.isArray(peers?.peers)
+      ? peers.peers.some((peer) => peer?.pub_key === peerPubkey || peer?.pubkey === peerPubkey)
+      : false;
+  }
+
+  async _checkPeerConnectReady(client, peerPubkey, safePeerAddress) {
+    try {
+      if (await this._isPeerConnected(client, peerPubkey)) {
+        return { ok: true, alreadyConnected: true };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        ...peerConnectFailureDetails(err.message),
+      };
+    }
+
+    let connectError = null;
+    try {
+      await withTimeout(
+        client.connectPeer(peerPubkey, safePeerAddress),
+        this.config.connectPeerTimeoutMs,
+        'peer connect',
+      );
+    } catch (err) {
+      connectError = err;
+    }
+
+    const waitBudgetMs = Math.max(600, Math.min(this.config.connectPeerTimeoutMs, 2_500));
+    const deadline = Date.now() + waitBudgetMs;
+    while (Date.now() <= deadline) {
+      try {
+        if (await this._isPeerConnected(client, peerPubkey)) {
+          return { ok: true, alreadyConnected: false };
+        }
+      } catch (err) {
+        connectError ||= err;
+      }
+      await sleep(200);
+    }
+
+    const details = peerConnectFailureDetails(connectError?.message || 'peer not connected');
+    return { ok: false, ...details };
+  }
 
   async _validate(agentId, payload) {
     // Steps 1–7: shared signed-instruction validation
@@ -701,6 +808,19 @@ export class ChannelOpener {
     }
     checks_passed.push('peer_safe_for_open');
 
+    const peerConnect = await this._checkPeerConnectReady(client, peerPubkey, safePeerAddress);
+    if (!peerConnect.ok) {
+      return {
+        success: false,
+        error: peerConnect.error,
+        hint: peerConnect.hint || HINTS.peer_connect_failed,
+        status: peerConnect.status || 502,
+        failed_at: 'peer_connect_ready',
+        checks_passed,
+      };
+    }
+    checks_passed.push('peer_connect_ready');
+
     return {
       success: true,
       checks_passed,
@@ -748,7 +868,7 @@ export class ChannelOpener {
         available: balance.available - params.local_funding_amount_sats,
         locked: balance.locked + params.local_funding_amount_sats,
       },
-      learn: 'Preview ran all 12 validation checks without executing. ' +
+      learn: 'Preview ran all validation checks, including a live peer-connect check, without executing. ' +
         'Submit the identical payload to POST /api/v1/market/open to execute for real. ' +
         'The channel open will lock your capital and submit a funding transaction to the Bitcoin network.',
     };
@@ -759,7 +879,7 @@ export class ChannelOpener {
   // ---------------------------------------------------------------------------
 
   async open(agentId, payload) {
-    // Validate (steps 1-12)
+    // Validate (steps 1-13)
     const validation = await this._validate(agentId, payload);
     if (!validation.success) {
       return validation;

@@ -156,7 +156,7 @@ async function withPersistentState(mutator) {
  * @param {string} key - Unique counter key
  * @param {number} limit - Max count per window
  * @param {number} windowMs - Window duration in ms
- * @returns {{ allowed: boolean, retryAfter: number }}
+ * @returns {{ allowed: boolean, retryAfter: number, retryAfterMs: number, retryAtMs: number|null }}
  */
 export async function checkAndIncrement(key, limit, windowMs) {
   if (_persistentStore) {
@@ -165,14 +165,15 @@ export async function checkAndIncrement(key, limit, windowMs) {
       const entry = state.counters[key];
       if (!entry || now - entry.windowStart > windowMs) {
         state.counters[key] = { count: 1, windowStart: now };
-        return { allowed: true, retryAfter: 0 };
+        return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
       }
       if (entry.count >= limit) {
-        const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
-        return { allowed: false, retryAfter };
+        const retryAfterMs = Math.max(0, (entry.windowStart + windowMs) - now);
+        const retryAfter = Math.ceil(retryAfterMs / 1000);
+        return { allowed: false, retryAfter, retryAfterMs, retryAtMs: now + retryAfterMs };
       }
       entry.count++;
-      return { allowed: true, retryAfter: 0 };
+      return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
     });
   }
   const now = Date.now();
@@ -180,16 +181,17 @@ export async function checkAndIncrement(key, limit, windowMs) {
 
   if (!entry || now - entry.windowStart > windowMs) {
     _counters.set(key, { count: 1, windowStart: now });
-    return { allowed: true, retryAfter: 0 };
+    return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
   }
 
   if (entry.count >= limit) {
-    const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
-    return { allowed: false, retryAfter };
+    const retryAfterMs = Math.max(0, (entry.windowStart + windowMs) - now);
+    const retryAfter = Math.ceil(retryAfterMs / 1000);
+    return { allowed: false, retryAfter, retryAfterMs, retryAtMs: now + retryAfterMs };
   }
 
   entry.count++;
-  return { allowed: true, retryAfter: 0 };
+  return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
 }
 
 /**
@@ -202,28 +204,30 @@ export async function checkOnly(key, limit, windowMs) {
       const now = Date.now();
       const entry = state.counters[key];
       if (!entry || now - entry.windowStart > windowMs) {
-        return { allowed: true, retryAfter: 0 };
+        return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
       }
       if (entry.count >= limit) {
-        const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
-        return { allowed: false, retryAfter };
+        const retryAfterMs = Math.max(0, (entry.windowStart + windowMs) - now);
+        const retryAfter = Math.ceil(retryAfterMs / 1000);
+        return { allowed: false, retryAfter, retryAfterMs, retryAtMs: now + retryAfterMs };
       }
-      return { allowed: true, retryAfter: 0 };
+      return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
     });
   }
   const now = Date.now();
   const entry = _counters.get(key);
 
   if (!entry || now - entry.windowStart > windowMs) {
-    return { allowed: true, retryAfter: 0 };
+    return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
   }
 
   if (entry.count >= limit) {
-    const retryAfter = Math.ceil((entry.windowStart + windowMs - now) / 1000);
-    return { allowed: false, retryAfter };
+    const retryAfterMs = Math.max(0, (entry.windowStart + windowMs) - now);
+    const retryAfter = Math.ceil(retryAfterMs / 1000);
+    return { allowed: false, retryAfter, retryAfterMs, retryAtMs: now + retryAfterMs };
   }
 
-  return { allowed: true, retryAfter: 0 };
+  return { allowed: true, retryAfter: 0, retryAfterMs: 0, retryAtMs: null };
 }
 
 export async function decrementCounter(key, amount = 1) {

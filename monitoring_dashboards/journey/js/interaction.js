@@ -68,6 +68,11 @@ function showAgentTooltip(agentId, mx, my) {
     fundingRows.push(`<div>Confirmations: ${Number(data.pendingDepositConfirmations || 0)} / ${Number(data.pendingDepositConfirmationsRequired || 0)}</div>`);
   }
   if (Number(data.lockedSats || 0) > 0) fundingRows.push(`<div>Locked: ${Number(data.lockedSats || 0).toLocaleString()} sats</div>`);
+  if (data.lastFailureReason) fundingRows.push(`<div>Last failure: ${data.lastFailureReason}</div>`);
+  if (Number(data.cooldownRetryAtMs || 0) > Date.now()) {
+    const secondsLeft = Math.ceil((Number(data.cooldownRetryAtMs) - Date.now()) / 1000);
+    fundingRows.push(`<div>Retry in: ${secondsLeft}s</div>`);
+  }
   const recentStr = data.recent.length > 0
     ? data.recent.map(r => r.routePath || r.routeKey).slice(0, 3).join(' &rarr; ')
     : 'none';

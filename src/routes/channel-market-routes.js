@@ -136,13 +136,49 @@ function sendCapExceededResult({
   };
 }
 
-function buildCooldownBody(message, hint) {
+function buildCooldownBody(message, hint, cooldown = null, scope = null) {
+  const retryAfterMs = Number.isFinite(cooldown?.retryAfterMs)
+    ? Math.max(0, Math.floor(cooldown.retryAfterMs))
+    : Number.isFinite(cooldown?.retryAfter)
+      ? Math.max(0, Math.floor(cooldown.retryAfter * 1000))
+      : Number.isFinite(cooldown?.retryAfterSeconds)
+        ? Math.max(0, Math.floor(cooldown.retryAfterSeconds * 1000))
+        : 0;
+  const retryAtMs = Number.isFinite(cooldown?.retryAtMs)
+    ? cooldown.retryAtMs
+    : retryAfterMs > 0
+      ? Date.now() + retryAfterMs
+      : null;
   return {
     error: 'cooldown_active',
     message,
     retryable: true,
     hint,
+    retry_after_ms: retryAfterMs,
+    retry_after_seconds: retryAfterMs > 0 ? Math.ceil(retryAfterMs / 1000) : 0,
+    retry_at_ms: retryAtMs,
+    cooldown_scope: scope || null,
   };
+}
+
+function setJourneyResultMeta(req, {
+  failureCode = null,
+  failureStage = null,
+  failureReason = null,
+  cooldown = null,
+  cooldownScope = null,
+} = {}) {
+  if (typeof req?.dashboardSetResultMeta !== 'function') return;
+  const meta = {};
+  if (typeof failureCode === 'string' && failureCode.trim()) meta.failure_code = failureCode.trim();
+  if (typeof failureStage === 'string' && failureStage.trim()) meta.failure_stage = failureStage.trim();
+  if (typeof failureReason === 'string' && failureReason.trim()) meta.failure_reason = failureReason.trim();
+  if (cooldown) {
+    if (Number.isFinite(cooldown.retry_after_ms)) meta.cooldown_retry_after_ms = cooldown.retry_after_ms;
+    if (Number.isFinite(cooldown.retry_at_ms)) meta.cooldown_retry_at_ms = cooldown.retry_at_ms;
+  }
+  if (typeof cooldownScope === 'string' && cooldownScope.trim()) meta.cooldown_scope = cooldownScope.trim();
+  req.dashboardSetResultMeta(meta);
 }
 
 async function applyMoneyPolicy({ dangerPolicy, caps, agentId, amountSats }) {
@@ -281,10 +317,20 @@ export function channelMarketRoutes(daemon) {
         safety.market.preview.attemptWindowMs,
       );
       if (!attempts.allowed) {
-        return res.status(429).json(buildCooldownBody(
+        const body = buildCooldownBody(
           'Too many market preview attempts in a short window.',
           'Wait a bit before running another preview.',
-        ));
+          attempts,
+          'market_preview_attempts',
+        );
+        setJourneyResultMeta(req, {
+          failureCode: body.error,
+          failureStage: 'market_preview_cooldown',
+          failureReason: body.message,
+          cooldown: body,
+          cooldownScope: body.cooldown_scope,
+        });
+        return res.status(429).json(body);
       }
       const sharedAttempts = await checkAndIncrement(
         'danger:market_preview:attempt:__shared__',
@@ -292,10 +338,20 @@ export function channelMarketRoutes(daemon) {
         safety.market.preview.attemptWindowMs,
       );
       if (!sharedAttempts.allowed) {
-        return res.status(429).json(buildCooldownBody(
+        const body = buildCooldownBody(
           'The node is handling too many market previews right now.',
           'Wait a bit, then try your preview again.',
-        ));
+          sharedAttempts,
+          'market_preview_shared_attempts',
+        );
+        setJourneyResultMeta(req, {
+          failureCode: body.error,
+          failureStage: 'market_preview_cooldown',
+          failureReason: body.message,
+          cooldown: body,
+          cooldownScope: body.cooldown_scope,
+        });
+        return res.status(429).json(body);
       }
       const amountSats = parseFundingAmount(req.body);
       if (Number.isInteger(amountSats) && amountSats > 0) {
@@ -306,6 +362,11 @@ export function channelMarketRoutes(daemon) {
           amountSats,
         });
         if (policy) {
+          setJourneyResultMeta(req, {
+            failureCode: policy.body?.error || 'market_preview_policy',
+            failureStage: 'market_preview_policy',
+            failureReason: policy.body?.message || policy.body?.hint || 'Market preview policy blocked this request.',
+          });
           return res.status(policy.statusCode).json(policy.body);
         }
       }
@@ -316,6 +377,13 @@ export function channelMarketRoutes(daemon) {
           body: result,
         };
       });
+      if (!response.body?.valid) {
+        setJourneyResultMeta(req, {
+          failureCode: response.body?.error || 'preview_failed',
+          failureStage: response.body?.failed_at || 'market_preview',
+          failureReason: response.body?.error || 'Market preview failed.',
+        });
+      }
       res.status(response.statusCode).json(response.body);
     } catch (err) {
       console.error(`[market/preview] Error: ${err.message}`);
@@ -362,12 +430,22 @@ export function channelMarketRoutes(daemon) {
           safety.market.open.attemptWindowMs,
         );
         if (!attempts.allowed) {
+          const body = buildCooldownBody(
+            'Too many channel-open attempts right now.',
+            'Wait before trying another channel open.',
+            attempts,
+            'market_open_attempts',
+          );
+          setJourneyResultMeta(req, {
+            failureCode: body.error,
+            failureStage: 'market_open_cooldown',
+            failureReason: body.message,
+            cooldown: body,
+            cooldownScope: body.cooldown_scope,
+          });
           return {
             statusCode: 429,
-            body: buildCooldownBody(
-              'Too many channel-open attempts right now.',
-              'Wait before trying another channel open.',
-            ),
+            body,
           };
         }
         const sharedAttempts = await checkAndIncrement(
@@ -376,12 +454,22 @@ export function channelMarketRoutes(daemon) {
           safety.market.open.attemptWindowMs,
         );
         if (!sharedAttempts.allowed) {
+          const body = buildCooldownBody(
+            'The node is handling too many channel-open attempts right now.',
+            'Wait a bit, then try another channel open.',
+            sharedAttempts,
+            'market_open_shared_attempts',
+          );
+          setJourneyResultMeta(req, {
+            failureCode: body.error,
+            failureStage: 'market_open_cooldown',
+            failureReason: body.message,
+            cooldown: body,
+            cooldownScope: body.cooldown_scope,
+          });
           return {
             statusCode: 429,
-            body: buildCooldownBody(
-              'The node is handling too many channel-open attempts right now.',
-              'Wait a bit, then try another channel open.',
-            ),
+            body,
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
@@ -390,12 +478,22 @@ export function channelMarketRoutes(daemon) {
           cooldownMs: safety.market.open.cooldownMs,
         });
         if (!cooldown.allowed) {
+          const body = buildCooldownBody(
+            'A recent channel open is still cooling down.',
+            'Wait for the cooldown window to pass before opening another channel.',
+            cooldown,
+            'market_open_success',
+          );
+          setJourneyResultMeta(req, {
+            failureCode: body.error,
+            failureStage: 'market_open_cooldown',
+            failureReason: body.message,
+            cooldown: body,
+            cooldownScope: body.cooldown_scope,
+          });
           return {
             statusCode: 429,
-            body: buildCooldownBody(
-              'A recent channel open is still cooling down.',
-              'Wait for the cooldown window to pass before opening another channel.',
-            ),
+            body,
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
@@ -404,15 +502,30 @@ export function channelMarketRoutes(daemon) {
           cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
+          const body = buildCooldownBody(
+            'The node is cooling down after a recent channel open.',
+            'Wait a bit before another agent opens a new channel on this node.',
+            sharedCooldown,
+            'market_open_shared_success',
+          );
+          setJourneyResultMeta(req, {
+            failureCode: body.error,
+            failureStage: 'market_open_cooldown',
+            failureReason: body.message,
+            cooldown: body,
+            cooldownScope: body.cooldown_scope,
+          });
           return {
             statusCode: 429,
-            body: buildCooldownBody(
-              'The node is cooling down after a recent channel open.',
-              'Wait a bit before another agent opens a new channel on this node.',
-            ),
+            body,
           };
         }
         if (getPendingItems(daemon.channelOpener, req.agentId).length >= safety.market.maxPendingOperations) {
+          setJourneyResultMeta(req, {
+            failureCode: 'too_many_pending_operations',
+            failureStage: 'market_open_pending_limit',
+            failureReason: 'You already have too many pending market actions.',
+          });
           return {
             statusCode: 429,
             body: {
@@ -429,9 +542,23 @@ export function channelMarketRoutes(daemon) {
             agentId: req.agentId,
             amountSats,
           });
-          if (policy) return policy;
+          if (policy) {
+            setJourneyResultMeta(req, {
+              failureCode: policy.body?.error || 'market_open_policy',
+              failureStage: 'market_open_policy',
+              failureReason: policy.body?.message || policy.body?.hint || 'Channel-open policy blocked this request.',
+            });
+            return policy;
+          }
         }
         const result = await daemon.channelOpener.open(req.agentId, req.body);
+        if (!result?.success) {
+          setJourneyResultMeta(req, {
+            failureCode: result?.error || 'market_open_failed',
+            failureStage: result?.failed_at || 'market_open',
+            failureReason: result?.error || 'Channel open failed.',
+          });
+        }
         if (result?.success && Number.isInteger(amountSats) && amountSats > 0) {
           await dangerPolicy.recordSuccess({
             scope: OPEN_CAPS.scope,
