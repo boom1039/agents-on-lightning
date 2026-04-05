@@ -37,10 +37,10 @@ export function journeyRoutes() {
   router.get('/journey', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'index.html')));
   router.get('/journey/three', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'three.html')));
 
-  router.get('/api/journey', (_req, res) => {
+  router.get('/api/journey', async (_req, res) => {
     const monitor = getJourneyMonitor();
     const catalog = getAgentSurfaceSummary();
-    res.json(monitor ? monitor.buildSnapshot() : {
+    res.json(monitor ? await monitor.buildSnapshot() : {
       builtAt: Date.now(),
       stats: {
         agents: 0,
@@ -68,7 +68,7 @@ export function journeyRoutes() {
     res.json(getAgentSurfaceManifest());
   });
 
-  router.get('/api/journey/events', (req, res) => {
+  router.get('/api/journey/events', async (req, res) => {
     const monitor = getJourneyMonitor();
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -79,7 +79,7 @@ export function journeyRoutes() {
 
     res.write(`data: ${JSON.stringify({
       type: 'snapshot',
-      snapshot: monitor ? monitor.buildSnapshot() : null,
+      snapshot: monitor ? await monitor.buildSnapshot() : null,
     })}\n\n`);
 
     if (!monitor) return res.end();

@@ -120,6 +120,7 @@ export async function startServer() {
     console.error(`[server] Daemon startup failed: ${err.message}`);
     console.error('[server] Continuing in limited mode');
   }
+  journeyMonitor?.setDaemon?.(daemon);
 
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));

@@ -29,6 +29,17 @@ function emitConnection(connected, label) {
   if (onConnectionHUD) onConnectionHUD({ connected, label });
 }
 
+function updateAgentFunding(data, agent) {
+  if (!data || !agent) return;
+  data.fundingState = agent.fundingState || 'empty';
+  data.fundingLabel = agent.fundingLabel || null;
+  data.walletBalanceSats = Number(agent.walletBalanceSats || 0);
+  data.capitalAvailableSats = Number(agent.capitalAvailableSats || 0);
+  data.pendingDepositSats = Number(agent.pendingDepositSats || 0);
+  data.lockedSats = Number(agent.lockedSats || 0);
+  data.pendingCloseSats = Number(agent.pendingCloseSats || 0);
+}
+
 // Route stat helpers
 
 function getStats(rk) {
@@ -143,6 +154,11 @@ export function repositionAllAgents() {
 
 export function connectSSE() {
   emitConnection(false, 'CONNECTING');
+  const pullSnapshot = async () => {
+    const res = await fetch('/api/journey', { cache: 'no-store' });
+    if (!res.ok) return;
+    applySnapshot(await res.json());
+  };
   const es = new EventSource('/api/journey/events');
   es.onopen = () => {
     emitConnection(true, 'LIVE');
@@ -157,6 +173,9 @@ export function connectSSE() {
   es.onerror = () => {
     emitConnection(false, 'RETRYING');
   };
+  setInterval(() => {
+    pullSnapshot().catch(() => {});
+  }, 15000);
 }
 
 function applySnapshot(snap) {
@@ -190,6 +209,7 @@ function applySnapshot(snap) {
     data.routeKey = agent.routeKey;
     data.phase = entry.phase;
     if (agent.recent) data.recent = agent.recent.slice(0, 5);
+    updateAgentFunding(data, agent);
     moveAgentToRoute(agent.id, agent.routeKey);
 
     positionAgentAtSlot(agent.id, agent.routeKey, existing);
@@ -214,6 +234,7 @@ function applyEvent(ev) {
     data.name = ev.agent?.name || ev.agent_name || data.name || null;
     data.routeKey = rk;
     data.phase = entry.phase;
+    updateAgentFunding(data, ev.agent);
     moveAgentToRoute(ev.agent_id, rk);
 
     positionAgentAtSlot(ev.agent_id, rk);
@@ -243,6 +264,7 @@ function applyEvent(ev) {
     data.name = ev.agent?.name || ev.agent_name || data.name || null;
     data.routeKey = toKey;
     data.phase = toEntry.phase;
+    updateAgentFunding(data, ev.agent);
     moveAgentToRoute(ev.agent_id, toKey);
     agentMgr.setColor(ev.agent_id, toEntry.phase);
 
@@ -282,6 +304,7 @@ function applyEvent(ev) {
       data.name = ev.agent?.name || ev.agent_name || data.name || null;
       data.routeKey = rk;
       data.phase = entry.phase;
+      updateAgentFunding(data, ev.agent);
       moveAgentToRoute(ev.agent_id, rk);
       agentMgr.setColor(ev.agent_id, entry.phase);
 
@@ -307,6 +330,7 @@ function applyEvent(ev) {
       data.name = ev.agent?.name || ev.agent_name || data.name || null;
       data.routeKey = ev.routeKey;
       data.phase = entry.phase;
+      updateAgentFunding(data, ev.agent);
       moveAgentToRoute(ev.agent_id, ev.routeKey);
       positionAgentAtSlot(ev.agent_id, ev.routeKey);
       agentMgr.setColor(ev.agent_id, entry.phase);

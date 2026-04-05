@@ -406,6 +406,24 @@
       return '#3fb950';
     }
 
+    function fundingRingColor(agent) {
+      switch (agent?.fundingState) {
+        case 'pending':
+          return '#d29922';
+        case 'funded':
+          return '#3fb950';
+        case 'locked':
+          return '#58a6ff';
+        default:
+          return null;
+      }
+    }
+
+    function formatSats(value) {
+      if (!Number.isFinite(value)) return '-';
+      return `${Math.round(value).toLocaleString()} sats`;
+    }
+
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
@@ -1320,7 +1338,17 @@
           ctx.globalAlpha = 0.95;
           ctx.fill();
           ctx.globalAlpha = 1;
+          const fundingStroke = fundingRingColor(dot.agent);
+          if (fundingStroke) {
+            ctx.beginPath();
+            ctx.arc(dot.x, dot.y, dot.r + 1.6, 0, Math.PI * 2);
+            ctx.strokeStyle = fundingStroke;
+            ctx.lineWidth = 1.3;
+            ctx.stroke();
+          }
           if (dot.inFlight) {
+            ctx.beginPath();
+            ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
             ctx.strokeStyle = '#9ecbff';
             ctx.lineWidth = 0.8;
             ctx.stroke();
@@ -1392,6 +1420,12 @@
           (Array.isArray(agent.docIds) && agent.docIds.length > 0) ? tooltipRow('linked docs', formatDocList(agent.docIds)) : '',
           tooltipRow('tags', formatTagList(agent.tags)),
           tooltipRow('source', formatSourceRef(agent)),
+          agent.fundingLabel ? tooltipRow('funding', agent.fundingLabel) : '',
+          Number.isFinite(agent.walletBalanceSats) ? tooltipRow('wallet', formatSats(agent.walletBalanceSats)) : '',
+          Number.isFinite(agent.capitalAvailableSats) ? tooltipRow('capital available', formatSats(agent.capitalAvailableSats)) : '',
+          Number(agent.pendingDepositSats || 0) > 0 ? tooltipRow('pending deposit', formatSats(agent.pendingDepositSats)) : '',
+          Number(agent.lockedSats || 0) > 0 ? tooltipRow('locked', formatSats(agent.lockedSats)) : '',
+          Number(agent.pendingCloseSats || 0) > 0 ? tooltipRow('pending close', formatSats(agent.pendingCloseSats)) : '',
           tooltipRow('phase', agent.phase),
           tooltipRow('status', formatStatus(agent)),
           tooltipRow('session', formatDurationLong(sessionAgeMs)),
@@ -1523,7 +1557,7 @@
     }
 
     async function loadSnapshot() {
-      const res = await fetch('/api/journey');
+      const res = await fetch('/api/journey', { cache: 'no-store' });
       const snapshot = await res.json();
       applySnapshot(snapshot);
     }
@@ -1567,7 +1601,7 @@
       await refreshSyntheticStatus();
       connectSse();
       setInterval(() => {
-        if (!liveConnected) loadSnapshot().catch(() => {});
+        loadSnapshot().catch(() => {});
       }, 15000);
       setInterval(() => {
         refreshSyntheticStatus().catch(() => {});

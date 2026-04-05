@@ -19,6 +19,7 @@ class JourneyMonitor {
   constructor(options = {}) {
     this.analyticsDb = new AnalyticsDB(options.dbPath);
     this.journeyState = new LiveJourneyState();
+    this.daemon = options.daemon || null;
     this.clients = new Set();
     this.totalEvents = 0;
     this.agentIds = new Set();
@@ -27,6 +28,12 @@ class JourneyMonitor {
     this.ready = false;
     this.syntheticController = null;
     this.syntheticTimer = null;
+    this.fundingCache = new Map();
+    this.fundingTtlMs = Number.isFinite(options.fundingTtlMs) ? options.fundingTtlMs : 15_000;
+  }
+
+  setDaemon(daemon) {
+    this.daemon = daemon || null;
   }
 
   async open() {
@@ -101,11 +108,116 @@ class JourneyMonitor {
     };
   }
 
-  buildSnapshot() {
+  _emptyFunding() {
+    return {
+      walletBalanceSats: 0,
+      walletEcashSats: 0,
+      walletHubSats: 0,
+      capitalAvailableSats: 0,
+      pendingDepositSats: 0,
+      lockedSats: 0,
+      pendingCloseSats: 0,
+      totalTrackedSats: 0,
+      fundingState: 'empty',
+      fundingLabel: 'Empty',
+      fundingUpdatedAt: Date.now(),
+    };
+  }
+
+  _deriveFunding(payload = {}) {
+    const walletEcashSats = Math.max(0, Number(payload.walletEcashSats || 0));
+    const walletHubSats = Math.max(0, Number(payload.walletHubSats || 0));
+    const walletBalanceSats = walletEcashSats + walletHubSats;
+    const capitalAvailableSats = Math.max(0, Number(payload.capitalAvailableSats || 0));
+    const pendingDepositSats = Math.max(0, Number(payload.pendingDepositSats || 0));
+    const lockedSats = Math.max(0, Number(payload.lockedSats || 0));
+    const pendingCloseSats = Math.max(0, Number(payload.pendingCloseSats || 0));
+    const totalTrackedSats =
+      walletBalanceSats + capitalAvailableSats + pendingDepositSats + lockedSats + pendingCloseSats;
+
+    let fundingState = 'empty';
+    let fundingLabel = 'Empty';
+    if (pendingDepositSats > 0) {
+      fundingState = 'pending';
+      fundingLabel = `Pending ${pendingDepositSats.toLocaleString()} sats`;
+    } else if (lockedSats > 0 || pendingCloseSats > 0) {
+      fundingState = 'locked';
+      fundingLabel = `Locked ${Math.max(lockedSats, pendingCloseSats).toLocaleString()} sats`;
+    } else if (capitalAvailableSats > 0 || walletBalanceSats > 0) {
+      fundingState = 'funded';
+      fundingLabel = `Funded ${Math.max(capitalAvailableSats + walletBalanceSats, 0).toLocaleString()} sats`;
+    }
+
+    return {
+      walletBalanceSats,
+      walletEcashSats,
+      walletHubSats,
+      capitalAvailableSats,
+      pendingDepositSats,
+      lockedSats,
+      pendingCloseSats,
+      totalTrackedSats,
+      fundingState,
+      fundingLabel,
+      fundingUpdatedAt: Date.now(),
+    };
+  }
+
+  async _loadFunding(agentId, { force = false } = {}) {
+    if (!agentId) return this._emptyFunding();
+    const cached = this.fundingCache.get(agentId);
+    const now = Date.now();
+    if (!force && cached && (now - cached.fundingUpdatedAt) <= this.fundingTtlMs) {
+      return { ...cached };
+    }
+
+    if (!this.daemon) {
+      if (cached) return { ...cached };
+      const empty = this._emptyFunding();
+      this.fundingCache.set(agentId, empty);
+      return { ...empty };
+    }
+
+    const walletEcashPromise = this.daemon.agentCashuWallet?.getBalance
+      ? this.daemon.agentCashuWallet.getBalance(agentId).catch(() => 0)
+      : Promise.resolve(0);
+    const walletHubPromise = this.daemon.hubWallet?.getBalance
+      ? this.daemon.hubWallet.getBalance(agentId).catch(() => 0)
+      : Promise.resolve(0);
+    const capitalPromise = this.daemon.capitalLedger?.getBalance
+      ? this.daemon.capitalLedger.getBalance(agentId).catch(() => null)
+      : Promise.resolve(null);
+
+    const [walletEcashSats, walletHubSats, capital] = await Promise.all([
+      walletEcashPromise,
+      walletHubPromise,
+      capitalPromise,
+    ]);
+
+    const next = this._deriveFunding({
+      walletEcashSats,
+      walletHubSats,
+      capitalAvailableSats: capital?.available || 0,
+      pendingDepositSats: capital?.pending_deposit || 0,
+      lockedSats: capital?.locked || 0,
+      pendingCloseSats: capital?.pending_close || 0,
+    });
+    this.fundingCache.set(agentId, next);
+    return { ...next };
+  }
+
+  async _enrichAgent(agent) {
+    if (!agent?.id) return agent;
+    const funding = await this._loadFunding(agent.id);
+    return { ...agent, ...funding };
+  }
+
+  async buildSnapshot() {
     const catalog = getAgentSurfaceSummary();
     const rawSnapshot = this.journeyState.buildSnapshot({
       log: this.getStatus(),
     });
+    const agents = await Promise.all((rawSnapshot.agents || []).map((agent) => this._enrichAgent(agent)));
     const canonicalRoutes = getCanonicalJourneyRouteCatalog();
     const liveRouteByKey = new Map((rawSnapshot.routes || []).map((route) => [route.routeKey, route]));
     const routes = canonicalRoutes.map((route) => {
@@ -153,6 +265,7 @@ class JourneyMonitor {
 
     const snapshot = {
       ...rawSnapshot,
+      agents,
       routes,
       domains: [...domains.values()],
     };
@@ -193,10 +306,10 @@ class JourneyMonitor {
     }
   }
 
-  broadcastSnapshot() {
+  async broadcastSnapshot() {
     this._broadcast({
       type: 'snapshot',
-      snapshot: this.buildSnapshot(),
+      snapshot: await this.buildSnapshot(),
     });
   }
 
@@ -249,11 +362,11 @@ class JourneyMonitor {
     this.syntheticController = null;
     await this.analyticsDb.flush();
     await this._hydrateFromDb();
-    this.broadcastSnapshot();
+    await this.broadcastSnapshot();
     return this.getSyntheticStatus();
   }
 
-  record(event) {
+  async record(event) {
     if (shouldIgnoreAgentSurfacePath(`${event?.path || ''}`)) return null;
     const storedEvent = {
       ...event,
@@ -266,6 +379,9 @@ class JourneyMonitor {
 
     if (!LIVE_STATE_EVENT_TYPES.has(storedEvent.event)) return null;
     const applied = this.journeyState.applyEvent(storedEvent);
+    if (applied?.agent) {
+      applied.agent = await this._enrichAgent(applied.agent);
+    }
     if (applied) this._broadcast(applied);
     return applied;
   }
