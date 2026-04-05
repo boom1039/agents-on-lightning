@@ -120,6 +120,11 @@ class JourneyMonitor {
       totalTrackedSats: 0,
       fundingState: 'empty',
       fundingLabel: 'Empty',
+      depositStatus: null,
+      pendingDepositConfirmations: 0,
+      pendingDepositConfirmationsRequired: 0,
+      pendingDepositTxid: null,
+      pendingDepositAddress: null,
       fundingUpdatedAt: Date.now(),
     };
   }
@@ -132,6 +137,8 @@ class JourneyMonitor {
     const pendingDepositSats = Math.max(0, Number(payload.pendingDepositSats || 0));
     const lockedSats = Math.max(0, Number(payload.lockedSats || 0));
     const pendingCloseSats = Math.max(0, Number(payload.pendingCloseSats || 0));
+    const pendingDepositConfirmations = Math.max(0, Number(payload.pendingDepositConfirmations || 0));
+    const pendingDepositConfirmationsRequired = Math.max(0, Number(payload.pendingDepositConfirmationsRequired || 0));
     const totalTrackedSats =
       walletBalanceSats + capitalAvailableSats + pendingDepositSats + lockedSats + pendingCloseSats;
 
@@ -139,7 +146,10 @@ class JourneyMonitor {
     let fundingLabel = 'Empty';
     if (pendingDepositSats > 0) {
       fundingState = 'pending';
-      fundingLabel = `Pending ${pendingDepositSats.toLocaleString()} sats`;
+      const confText = pendingDepositConfirmationsRequired > 0
+        ? ` (${pendingDepositConfirmations}/${pendingDepositConfirmationsRequired} conf)`
+        : '';
+      fundingLabel = `Pending ${pendingDepositSats.toLocaleString()} sats${confText}`;
     } else if (lockedSats > 0 || pendingCloseSats > 0) {
       fundingState = 'locked';
       fundingLabel = `Locked ${Math.max(lockedSats, pendingCloseSats).toLocaleString()} sats`;
@@ -159,6 +169,11 @@ class JourneyMonitor {
       totalTrackedSats,
       fundingState,
       fundingLabel,
+      depositStatus: payload.depositStatus || null,
+      pendingDepositConfirmations,
+      pendingDepositConfirmationsRequired,
+      pendingDepositTxid: payload.pendingDepositTxid || null,
+      pendingDepositAddress: payload.pendingDepositAddress || null,
       fundingUpdatedAt: Date.now(),
     };
   }
@@ -188,11 +203,22 @@ class JourneyMonitor {
       ? this.daemon.capitalLedger.getBalance(agentId).catch(() => null)
       : Promise.resolve(null);
 
-    const [walletEcashSats, walletHubSats, capital] = await Promise.all([
+    const depositPromise = this.daemon.depositTracker?.getDepositStatus
+      ? Promise.resolve(this.daemon.depositTracker.getDepositStatus(agentId)).catch(() => ({ deposits: [] }))
+      : Promise.resolve({ deposits: [] });
+
+    const [walletEcashSats, walletHubSats, capital, depositStatus] = await Promise.all([
       walletEcashPromise,
       walletHubPromise,
       capitalPromise,
+      depositPromise,
     ]);
+
+    const pendingDeposit = Array.isArray(depositStatus?.deposits)
+      ? [...depositStatus.deposits]
+        .filter((entry) => entry?.status === 'pending_deposit')
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]
+      : null;
 
     const next = this._deriveFunding({
       walletEcashSats,
@@ -201,6 +227,11 @@ class JourneyMonitor {
       pendingDepositSats: capital?.pending_deposit || 0,
       lockedSats: capital?.locked || 0,
       pendingCloseSats: capital?.pending_close || 0,
+      depositStatus: pendingDeposit?.status || null,
+      pendingDepositConfirmations: pendingDeposit?.confirmations || 0,
+      pendingDepositConfirmationsRequired: pendingDeposit?.confirmations_required || 0,
+      pendingDepositTxid: pendingDeposit?.txid || null,
+      pendingDepositAddress: pendingDeposit?.address || null,
     });
     this.fundingCache.set(agentId, next);
     return { ...next };

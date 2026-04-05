@@ -64,6 +64,9 @@ function showAgentTooltip(agentId, mx, my) {
   if (Number.isFinite(data.walletBalanceSats)) fundingRows.push(`<div>Wallet: ${data.walletBalanceSats.toLocaleString()} sats</div>`);
   if (Number(data.capitalAvailableSats || 0) > 0) fundingRows.push(`<div>Capital: ${Number(data.capitalAvailableSats || 0).toLocaleString()} sats</div>`);
   if (Number(data.pendingDepositSats || 0) > 0) fundingRows.push(`<div>Pending deposit: ${Number(data.pendingDepositSats || 0).toLocaleString()} sats</div>`);
+  if (Number(data.pendingDepositSats || 0) > 0 && Number(data.pendingDepositConfirmationsRequired || 0) > 0) {
+    fundingRows.push(`<div>Confirmations: ${Number(data.pendingDepositConfirmations || 0)} / ${Number(data.pendingDepositConfirmationsRequired || 0)}</div>`);
+  }
   if (Number(data.lockedSats || 0) > 0) fundingRows.push(`<div>Locked: ${Number(data.lockedSats || 0).toLocaleString()} sats</div>`);
   const recentStr = data.recent.length > 0
     ? data.recent.map(r => r.routePath || r.routeKey).slice(0, 3).join(' &rarr; ')

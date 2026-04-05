@@ -36,6 +36,8 @@ function updateAgentFunding(data, agent) {
   data.walletBalanceSats = Number(agent.walletBalanceSats || 0);
   data.capitalAvailableSats = Number(agent.capitalAvailableSats || 0);
   data.pendingDepositSats = Number(agent.pendingDepositSats || 0);
+  data.pendingDepositConfirmations = Number(agent.pendingDepositConfirmations || 0);
+  data.pendingDepositConfirmationsRequired = Number(agent.pendingDepositConfirmationsRequired || 0);
   data.lockedSats = Number(agent.lockedSats || 0);
   data.pendingCloseSats = Number(agent.pendingCloseSats || 0);
 }

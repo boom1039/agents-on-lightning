@@ -1424,6 +1424,9 @@
           Number.isFinite(agent.walletBalanceSats) ? tooltipRow('wallet', formatSats(agent.walletBalanceSats)) : '',
           Number.isFinite(agent.capitalAvailableSats) ? tooltipRow('capital available', formatSats(agent.capitalAvailableSats)) : '',
           Number(agent.pendingDepositSats || 0) > 0 ? tooltipRow('pending deposit', formatSats(agent.pendingDepositSats)) : '',
+          Number(agent.pendingDepositSats || 0) > 0 && Number(agent.pendingDepositConfirmationsRequired || 0) > 0
+            ? tooltipRow('confirmations', `${Number(agent.pendingDepositConfirmations || 0)} / ${Number(agent.pendingDepositConfirmationsRequired || 0)}`)
+            : '',
           Number(agent.lockedSats || 0) > 0 ? tooltipRow('locked', formatSats(agent.lockedSats)) : '',
           Number(agent.pendingCloseSats || 0) > 0 ? tooltipRow('pending close', formatSats(agent.pendingCloseSats)) : '',
           tooltipRow('phase', agent.phase),
