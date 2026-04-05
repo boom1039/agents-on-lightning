@@ -31,6 +31,8 @@ Replace these placeholders on the box:
 - `APP_USER` — service user
 - `APP_HOST` — local bind host
 - `APP_PORT` — app port
+- `DOCS_RATE_LIMIT`, `API_RATE_LIMIT`, `DANGER_RATE_LIMIT` — your NGINX rate strings
+- `DOCS_BURST`, `API_BURST`, `APP_BURST`, `DANGER_BURST` — your NGINX burst values
 - `LND_REST_HOST` — your node REST host
 - `LND_REST_PORT` — your node REST port
 - `LND_MACAROON_PATH` — path to the macaroon you want this app to use
