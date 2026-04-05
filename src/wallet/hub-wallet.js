@@ -15,10 +15,11 @@ import { acquire } from '../identity/mutex.js';
 import { logWalletOperation } from '../identity/audit-log.js';
 
 export class HubWallet {
-  constructor({ dataLayer, nodeManager, ledger }) {
+  constructor({ dataLayer, nodeManager, ledger, config = {} }) {
     this._dataLayer = dataLayer;
     this._nodeManager = nodeManager;
     this._ledger = ledger;
+    this._config = { ...config };
   }
 
   /**
@@ -131,9 +132,9 @@ export class HubWallet {
    * Withdraw sats by paying an agent-provided Lightning invoice.
    * @param {string} agentId
    * @param {string} paymentRequest - BOLT11 invoice to pay
-   * @param {number} [maxFeeSats=100] - Maximum routing fee
+   * @param {number} [maxFeeSats] - Maximum routing fee
    */
-  async withdraw(agentId, paymentRequest, maxFeeSats = 100) {
+  async withdraw(agentId, paymentRequest, maxFeeSats = this._config.maxRoutingFeeSats) {
     if (!paymentRequest) {
       throw new Error('payment_request (BOLT11 invoice) is required');
     }
@@ -163,7 +164,7 @@ export class HubWallet {
       const balance = await this.getBalance(agentId);
       const totalCost = amountSats + maxFeeSats;
       if (balance < totalCost) {
-        throw new Error(`Insufficient balance. Have ${balance} sats, need ${totalCost} sats (${amountSats} + max ${maxFeeSats} fee)`);
+        throw new Error('Insufficient balance for this withdrawal and its fee budget');
       }
 
       // Debit balance first (optimistic)
@@ -174,7 +175,7 @@ export class HubWallet {
         const result = await nodeClient.request('POST', '/v1/channels/transactions', {
           payment_request: paymentRequest,
           fee_limit: { fixed: String(maxFeeSats) },
-          timeout_seconds: 60,
+          timeout_seconds: this._config.withdrawalTimeoutSeconds,
         });
 
         if (result.payment_error) {

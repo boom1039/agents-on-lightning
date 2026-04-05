@@ -293,7 +293,6 @@ export function agentWalletRoutes(daemon) {
         error: 'internal_error',
         message: 'Something went wrong while restoring wallet from seed.',
         retryable: true,
-        retry_after_seconds: 5,
         hint: 'Wait a few seconds and retry. Your deterministic seed is safe — restoration can always be retried.',
         see: 'GET /api/v1/wallet/balance',
         extra: { recovery: buildRecovery('safe', 'Your seed and any existing proofs are safe. Restoration can be retried.', [
@@ -324,7 +323,6 @@ export function agentWalletRoutes(daemon) {
         error: 'internal_error',
         message: 'Something went wrong while reclaiming pending sends.',
         retryable: true,
-        retry_after_seconds: 5,
         hint: 'Wait a few seconds and retry. Pending tokens are still tracked and can be reclaimed later.',
         see: 'GET /api/v1/wallet/balance',
         extra: { recovery: buildRecovery('safe', 'Pending tokens are still tracked. No funds were lost — reclaim can be retried.', [
@@ -378,4 +376,3 @@ export function agentWalletRoutes(daemon) {
 
   return router;
 }
-

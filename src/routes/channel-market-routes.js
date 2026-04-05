@@ -53,56 +53,24 @@ import { agentError, err400Validation, err404NotFound, withRecovery } from '../i
 import { logAuthorizationDenied } from '../identity/audit-log.js';
 import { getSocketAddress } from '../identity/request-security.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
+import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
 
 function submarineSwapsEnabled() {
   return process.env.ENABLE_SUBMARINE_SWAPS === '1';
 }
 
-const HOUR_MS = 60 * 60 * 1000;
-const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-const SHARED_MARKET_SUCCESS_COOLDOWN_MS = 5 * 60 * 1000;
-const MAX_PENDING_MARKET_OPS = 2;
-const SHARED_MARKET_OPEN_ATTEMPT_LIMIT = 12;
-const SHARED_MARKET_CLOSE_ATTEMPT_LIMIT = 12;
-const SHARED_MARKET_REBALANCE_ATTEMPT_LIMIT = 12;
-const SHARED_MARKET_SWAP_ATTEMPT_LIMIT = 12;
-const SHARED_MARKET_FUND_FROM_ECASH_ATTEMPT_LIMIT = 12;
 const EXPENSIVE_RESULT_CACHE_TTL_MS = 5_000;
 const OPEN_CAPS = {
   scope: 'market_open',
-  autoApproveSats: null,
-  hardCapSats: null,
-  dailyAutoApproveSats: null,
-  dailyHardCapSats: null,
-  sharedDailyAutoApproveSats: null,
-  sharedDailyHardCapSats: null,
 };
 const SWAP_CAPS = {
   scope: 'market_swap',
-  autoApproveSats: 50_000,
-  hardCapSats: 100_000,
-  dailyAutoApproveSats: 250_000,
-  dailyHardCapSats: 500_000,
-  sharedDailyAutoApproveSats: 250_000,
-  sharedDailyHardCapSats: 500_000,
 };
 const FUND_FROM_ECASH_CAPS = {
   scope: 'market_fund_from_ecash',
-  autoApproveSats: null,
-  hardCapSats: null,
-  dailyAutoApproveSats: null,
-  dailyHardCapSats: null,
-  sharedDailyAutoApproveSats: null,
-  sharedDailyHardCapSats: null,
 };
 const REBALANCE_CAPS = {
   scope: 'market_rebalance',
-  autoApproveSats: null,
-  hardCapSats: null,
-  dailyAutoApproveSats: null,
-  dailyHardCapSats: null,
-  sharedDailyAutoApproveSats: null,
-  sharedDailyHardCapSats: null,
 };
 
 function fundingTxExplorerLinks(txid) {
@@ -142,10 +110,6 @@ function getPendingItems(handler, agentId) {
 function sendReviewRequiredResult({
   message,
   hint,
-  requestedSats,
-  instantLimitSats,
-  total24hSats,
-  rollingLimitSats,
 }) {
   return {
     statusCode: 202,
@@ -154,10 +118,6 @@ function sendReviewRequiredResult({
       review_required: true,
       message,
       hint,
-      requested_sats: requestedSats,
-      instant_limit_sats: instantLimitSats,
-      rolling_24h_sats: total24hSats,
-      rolling_24h_limit_sats: rollingLimitSats,
     },
   };
 }
@@ -165,10 +125,6 @@ function sendReviewRequiredResult({
 function sendCapExceededResult({
   message,
   hint,
-  requestedSats,
-  instantLimitSats,
-  total24hSats,
-  rollingLimitSats,
 }) {
   return {
     statusCode: 403,
@@ -176,11 +132,16 @@ function sendCapExceededResult({
       error: 'cap_exceeded',
       message,
       hint,
-      requested_sats: requestedSats,
-      instant_limit_sats: instantLimitSats,
-      rolling_24h_sats: total24hSats,
-      rolling_24h_limit_sats: rollingLimitSats,
     },
+  };
+}
+
+function buildCooldownBody(message, hint) {
+  return {
+    error: 'cooldown_active',
+    message,
+    retryable: true,
+    hint,
   };
 }
 
@@ -197,28 +158,16 @@ async function applyMoneyPolicy({ dangerPolicy, caps, agentId, amountSats }) {
     sharedDailyHardCapSats: caps.sharedDailyHardCapSats,
   });
   const sharedReason = typeof decision.decisionReason === 'string' && decision.decisionReason.startsWith('shared_');
-  const rollingUsed = sharedReason ? decision.sharedTotal24h : decision.total24h;
-  const rollingLimit = sharedReason
-    ? (decision.decision === 'hard_cap' ? caps.sharedDailyHardCapSats : caps.sharedDailyAutoApproveSats)
-    : (decision.decision === 'hard_cap' ? caps.dailyHardCapSats : caps.dailyAutoApproveSats);
   if (decision.decision === 'hard_cap') {
     return sendCapExceededResult({
       message: sharedReason ? 'This request is above the shared-node safety cap.' : 'This request is above the safety cap.',
       hint: sharedReason ? 'Use a smaller amount, or wait for the shared-node budget window to reset.' : 'Use a smaller amount.',
-      requestedSats: amountSats,
-      instantLimitSats: caps.autoApproveSats,
-      total24hSats: rollingUsed,
-      rollingLimitSats: rollingLimit,
     });
   }
   if (decision.decision === 'review_required') {
     return sendReviewRequiredResult({
       message: sharedReason ? 'This request is above the shared-node instant-approve limit.' : 'This request is above the instant-approve limit.',
       hint: sharedReason ? 'Use a smaller amount, or wait for the shared-node budget window to reset.' : 'Use a smaller amount, or wait for manual review.',
-      requestedSats: amountSats,
-      instantLimitSats: caps.autoApproveSats,
-      total24hSats: rollingUsed,
-      rollingLimitSats: rollingLimit,
     });
   }
   return null;
@@ -282,6 +231,7 @@ export function channelMarketRoutes(daemon) {
   const marketRL = rateLimit('market_read');
   const idempotencyStore = daemon.dataLayer ? new IdempotencyStore({ dataLayer: daemon.dataLayer }) : null;
   const dangerPolicy = new DangerRoutePolicyStore({ dataLayer: daemon.dataLayer });
+  const safety = getDangerRouteSettings(daemon.config);
   const previewSingleFlight = createShortTtlSingleFlight();
   const rebalanceEstimateSingleFlight = createShortTtlSingleFlight();
 
@@ -325,31 +275,33 @@ export function channelMarketRoutes(daemon) {
       if (cached) {
         return res.status(cached.statusCode).json(cached.body);
       }
-      const attempts = await checkAndIncrement(`danger:market_preview:attempt:${req.agentId}`, 6, FIFTEEN_MIN_MS);
+      const attempts = await checkAndIncrement(
+        `danger:market_preview:attempt:${req.agentId}`,
+        safety.market.preview.agentAttemptLimit,
+        safety.market.preview.attemptWindowMs,
+      );
       if (!attempts.allowed) {
-        return res.status(429).json({
-          error: 'cooldown_active',
-          message: 'Too many market preview attempts in a short window.',
-          retryable: true,
-          retry_after_seconds: attempts.retryAfter,
-          hint: 'Wait a bit before running another preview.',
-        });
+        return res.status(429).json(buildCooldownBody(
+          'Too many market preview attempts in a short window.',
+          'Wait a bit before running another preview.',
+        ));
       }
-      const sharedAttempts = await checkAndIncrement('danger:market_preview:attempt:__shared__', 24, FIFTEEN_MIN_MS);
+      const sharedAttempts = await checkAndIncrement(
+        'danger:market_preview:attempt:__shared__',
+        safety.market.preview.sharedAttemptLimit,
+        safety.market.preview.attemptWindowMs,
+      );
       if (!sharedAttempts.allowed) {
-        return res.status(429).json({
-          error: 'cooldown_active',
-          message: 'The node is handling too many market previews right now.',
-          retryable: true,
-          retry_after_seconds: sharedAttempts.retryAfter,
-          hint: 'Wait a bit, then try your preview again.',
-        });
+        return res.status(429).json(buildCooldownBody(
+          'The node is handling too many market previews right now.',
+          'Wait a bit, then try your preview again.',
+        ));
       }
       const amountSats = parseFundingAmount(req.body);
       if (Number.isInteger(amountSats) && amountSats > 0) {
         const policy = await applyMoneyPolicy({
           dangerPolicy,
-          caps: OPEN_CAPS,
+          caps: { ...OPEN_CAPS, ...safety.market.preview.caps },
           agentId: req.agentId,
           amountSats,
         });
@@ -404,67 +356,63 @@ export function channelMarketRoutes(daemon) {
       scope: 'market:open',
       handler: async () => {
         const amountSats = parseFundingAmount(req.body);
-        const attempts = await checkAndIncrement(`danger:market_open:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:market_open:attempt:${req.agentId}`,
+          safety.market.open.agentAttemptLimit,
+          safety.market.open.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many channel-open attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another channel open.',
-            },
+            body: buildCooldownBody(
+              'Too many channel-open attempts right now.',
+              'Wait before trying another channel open.',
+            ),
           };
         }
-        const sharedAttempts = await checkAndIncrement('danger:market_open:attempt:__shared__', SHARED_MARKET_OPEN_ATTEMPT_LIMIT, HOUR_MS);
+        const sharedAttempts = await checkAndIncrement(
+          'danger:market_open:attempt:__shared__',
+          safety.market.open.sharedAttemptLimit,
+          safety.market.open.attemptWindowMs,
+        );
         if (!sharedAttempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is handling too many channel-open attempts right now.',
-              retryable: true,
-              retry_after_seconds: sharedAttempts.retryAfter,
-              hint: 'Wait a bit, then try another channel open.',
-            },
+            body: buildCooldownBody(
+              'The node is handling too many channel-open attempts right now.',
+              'Wait a bit, then try another channel open.',
+            ),
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
           scope: OPEN_CAPS.scope,
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.market.open.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent channel open is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before opening another channel.',
-            },
+            body: buildCooldownBody(
+              'A recent channel open is still cooling down.',
+              'Wait for the cooldown window to pass before opening another channel.',
+            ),
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
           dangerPolicy,
           scope: OPEN_CAPS.scope,
-          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+          cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is cooling down after a recent channel open.',
-              retryable: true,
-              retry_after_seconds: sharedCooldown.retryAfterSeconds,
-              hint: 'Wait a bit before another agent opens a new channel on this node.',
-            },
+            body: buildCooldownBody(
+              'The node is cooling down after a recent channel open.',
+              'Wait a bit before another agent opens a new channel on this node.',
+            ),
           };
         }
-        if (getPendingItems(daemon.channelOpener, req.agentId).length >= MAX_PENDING_MARKET_OPS) {
+        if (getPendingItems(daemon.channelOpener, req.agentId).length >= safety.market.maxPendingOperations) {
           return {
             statusCode: 429,
             body: {
@@ -477,7 +425,7 @@ export function channelMarketRoutes(daemon) {
         if (Number.isInteger(amountSats) && amountSats > 0) {
           const policy = await applyMoneyPolicy({
             dangerPolicy,
-            caps: OPEN_CAPS,
+            caps: { ...OPEN_CAPS, ...safety.market.open.caps },
             agentId: req.agentId,
             amountSats,
           });
@@ -575,67 +523,63 @@ export function channelMarketRoutes(daemon) {
       store: idempotencyStore,
       scope: 'market:close',
       handler: async () => {
-        const attempts = await checkAndIncrement(`danger:market_close:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:market_close:attempt:${req.agentId}`,
+          safety.market.close.agentAttemptLimit,
+          safety.market.close.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many close attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another channel close.',
-            },
+            body: buildCooldownBody(
+              'Too many close attempts right now.',
+              'Wait before trying another channel close.',
+            ),
           };
         }
-        const sharedAttempts = await checkAndIncrement('danger:market_close:attempt:__shared__', SHARED_MARKET_CLOSE_ATTEMPT_LIMIT, HOUR_MS);
+        const sharedAttempts = await checkAndIncrement(
+          'danger:market_close:attempt:__shared__',
+          safety.market.close.sharedAttemptLimit,
+          safety.market.close.attemptWindowMs,
+        );
         if (!sharedAttempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is handling too many channel-close attempts right now.',
-              retryable: true,
-              retry_after_seconds: sharedAttempts.retryAfter,
-              hint: 'Wait a bit, then try another channel close.',
-            },
+            body: buildCooldownBody(
+              'The node is handling too many channel-close attempts right now.',
+              'Wait a bit, then try another channel close.',
+            ),
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
           scope: 'market_close',
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.market.close.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent channel close is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before closing another channel.',
-            },
+            body: buildCooldownBody(
+              'A recent channel close is still cooling down.',
+              'Wait for the cooldown window to pass before closing another channel.',
+            ),
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
           dangerPolicy,
           scope: 'market_close',
-          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+          cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is cooling down after a recent channel close.',
-              retryable: true,
-              retry_after_seconds: sharedCooldown.retryAfterSeconds,
-              hint: 'Wait a bit before another agent closes a channel on this node.',
-            },
+            body: buildCooldownBody(
+              'The node is cooling down after a recent channel close.',
+              'Wait a bit before another agent closes a channel on this node.',
+            ),
           };
         }
-        if (getPendingItems(daemon.channelCloser, req.agentId).length >= MAX_PENDING_MARKET_OPS) {
+        if (getPendingItems(daemon.channelCloser, req.agentId).length >= safety.market.maxPendingOperations) {
           return {
             statusCode: 429,
             body: {
@@ -805,70 +749,66 @@ export function channelMarketRoutes(daemon) {
       scope: 'market:swap:create',
       handler: async () => {
         const amountSats = req.body?.amount_sats;
-        const attempts = await checkAndIncrement(`danger:market_swap:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:market_swap:attempt:${req.agentId}`,
+          safety.market.swap.agentAttemptLimit,
+          safety.market.swap.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many swap attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another swap.',
-            },
+            body: buildCooldownBody(
+              'Too many swap attempts right now.',
+              'Wait before trying another swap.',
+            ),
           };
         }
-        const sharedAttempts = await checkAndIncrement('danger:market_swap:attempt:__shared__', SHARED_MARKET_SWAP_ATTEMPT_LIMIT, HOUR_MS);
+        const sharedAttempts = await checkAndIncrement(
+          'danger:market_swap:attempt:__shared__',
+          safety.market.swap.sharedAttemptLimit,
+          safety.market.swap.attemptWindowMs,
+        );
         if (!sharedAttempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is handling too many swap attempts right now.',
-              retryable: true,
-              retry_after_seconds: sharedAttempts.retryAfter,
-              hint: 'Wait a bit, then try another swap.',
-            },
+            body: buildCooldownBody(
+              'The node is handling too many swap attempts right now.',
+              'Wait a bit, then try another swap.',
+            ),
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
           scope: SWAP_CAPS.scope,
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.market.swap.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent swap is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before swapping again.',
-            },
+            body: buildCooldownBody(
+              'A recent swap is still cooling down.',
+              'Wait for the cooldown window to pass before swapping again.',
+            ),
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
           dangerPolicy,
           scope: SWAP_CAPS.scope,
-          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+          cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is cooling down after a recent swap.',
-              retryable: true,
-              retry_after_seconds: sharedCooldown.retryAfterSeconds,
-              hint: 'Wait a bit before another agent starts a swap on this node.',
-            },
+            body: buildCooldownBody(
+              'The node is cooling down after a recent swap.',
+              'Wait a bit before another agent starts a swap on this node.',
+            ),
           };
         }
         if (Number.isInteger(amountSats) && amountSats > 0) {
           const policy = await applyMoneyPolicy({
             dangerPolicy,
-            caps: SWAP_CAPS,
+            caps: { ...SWAP_CAPS, ...safety.market.swap.caps },
             agentId: req.agentId,
             amountSats,
           });
@@ -959,67 +899,63 @@ export function channelMarketRoutes(daemon) {
       scope: 'market:fund-from-ecash',
       handler: async () => {
         const amountSats = parseFundingAmount(req.body);
-        const attempts = await checkAndIncrement(`danger:market_fund_from_ecash:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:market_fund_from_ecash:attempt:${req.agentId}`,
+          safety.market.fundFromEcash.agentAttemptLimit,
+          safety.market.fundFromEcash.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many ecash funding attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another ecash-funded channel open.',
-            },
+            body: buildCooldownBody(
+              'Too many ecash funding attempts right now.',
+              'Wait before trying another ecash-funded channel open.',
+            ),
           };
         }
-        const sharedAttempts = await checkAndIncrement('danger:market_fund_from_ecash:attempt:__shared__', SHARED_MARKET_FUND_FROM_ECASH_ATTEMPT_LIMIT, HOUR_MS);
+        const sharedAttempts = await checkAndIncrement(
+          'danger:market_fund_from_ecash:attempt:__shared__',
+          safety.market.fundFromEcash.sharedAttemptLimit,
+          safety.market.fundFromEcash.attemptWindowMs,
+        );
         if (!sharedAttempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is handling too many ecash-funded channel opens right now.',
-              retryable: true,
-              retry_after_seconds: sharedAttempts.retryAfter,
-              hint: 'Wait a bit, then try another ecash-funded channel open.',
-            },
+            body: buildCooldownBody(
+              'The node is handling too many ecash-funded channel opens right now.',
+              'Wait a bit, then try another ecash-funded channel open.',
+            ),
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
           scope: FUND_FROM_ECASH_CAPS.scope,
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.market.fundFromEcash.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent ecash-funded channel open is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before funding another channel from ecash.',
-            },
+            body: buildCooldownBody(
+              'A recent ecash-funded channel open is still cooling down.',
+              'Wait for the cooldown window to pass before funding another channel from ecash.',
+            ),
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
           dangerPolicy,
           scope: FUND_FROM_ECASH_CAPS.scope,
-          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+          cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is cooling down after a recent ecash-funded channel open.',
-              retryable: true,
-              retry_after_seconds: sharedCooldown.retryAfterSeconds,
-              hint: 'Wait a bit before another agent funds a channel from ecash on this node.',
-            },
+            body: buildCooldownBody(
+              'The node is cooling down after a recent ecash-funded channel open.',
+              'Wait a bit before another agent funds a channel from ecash on this node.',
+            ),
           };
         }
-        if (getPendingItems(daemon.ecashChannelFunder, req.agentId).length >= MAX_PENDING_MARKET_OPS) {
+        if (getPendingItems(daemon.ecashChannelFunder, req.agentId).length >= safety.market.maxPendingOperations) {
           return {
             statusCode: 429,
             body: {
@@ -1032,7 +968,7 @@ export function channelMarketRoutes(daemon) {
         if (Number.isInteger(amountSats) && amountSats > 0) {
           const policy = await applyMoneyPolicy({
             dangerPolicy,
-            caps: FUND_FROM_ECASH_CAPS,
+            caps: { ...FUND_FROM_ECASH_CAPS, ...safety.market.fundFromEcash.caps },
             agentId: req.agentId,
             amountSats,
           });
@@ -1150,70 +1086,66 @@ export function channelMarketRoutes(daemon) {
           }
         }
         const amountSats = parseRebalanceAmount(req.body);
-        const attempts = await checkAndIncrement(`danger:market_rebalance:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:market_rebalance:attempt:${req.agentId}`,
+          safety.market.rebalance.agentAttemptLimit,
+          safety.market.rebalance.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'Too many rebalance attempts this hour.',
-              retryable: true,
-              retry_after_seconds: attempts.retryAfter,
-              hint: 'Wait before trying another rebalance.',
-            },
+            body: buildCooldownBody(
+              'Too many rebalance attempts right now.',
+              'Wait before trying another rebalance.',
+            ),
           };
         }
-        const sharedAttempts = await checkAndIncrement('danger:market_rebalance:attempt:__shared__', SHARED_MARKET_REBALANCE_ATTEMPT_LIMIT, HOUR_MS);
+        const sharedAttempts = await checkAndIncrement(
+          'danger:market_rebalance:attempt:__shared__',
+          safety.market.rebalance.sharedAttemptLimit,
+          safety.market.rebalance.attemptWindowMs,
+        );
         if (!sharedAttempts.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is handling too many rebalance attempts right now.',
-              retryable: true,
-              retry_after_seconds: sharedAttempts.retryAfter,
-              hint: 'Wait a bit, then try another rebalance.',
-            },
+            body: buildCooldownBody(
+              'The node is handling too many rebalance attempts right now.',
+              'Wait a bit, then try another rebalance.',
+            ),
           };
         }
         const cooldown = await dangerPolicy.checkCooldown({
           scope: REBALANCE_CAPS.scope,
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.market.rebalance.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'A recent rebalance is still cooling down.',
-              retryable: true,
-              retry_after_seconds: cooldown.retryAfterSeconds,
-              hint: 'Wait for the cooldown window to pass before rebalancing again.',
-            },
+            body: buildCooldownBody(
+              'A recent rebalance is still cooling down.',
+              'Wait for the cooldown window to pass before rebalancing again.',
+            ),
           };
         }
         const sharedCooldown = await sharedDangerCooldown({
           dangerPolicy,
           scope: REBALANCE_CAPS.scope,
-          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+          cooldownMs: safety.market.sharedSuccessCooldownMs,
         });
         if (!sharedCooldown.allowed) {
           return {
             statusCode: 429,
-            body: {
-              error: 'cooldown_active',
-              message: 'The node is cooling down after a recent rebalance.',
-              retryable: true,
-              retry_after_seconds: sharedCooldown.retryAfterSeconds,
-              hint: 'Wait a bit before another agent starts a rebalance on this node.',
-            },
+            body: buildCooldownBody(
+              'The node is cooling down after a recent rebalance.',
+              'Wait a bit before another agent starts a rebalance on this node.',
+            ),
           };
         }
         if (Number.isInteger(amountSats) && amountSats > 0) {
           const policy = await applyMoneyPolicy({
             dangerPolicy,
-            caps: REBALANCE_CAPS,
+            caps: { ...REBALANCE_CAPS, ...safety.market.rebalance.caps },
             agentId: req.agentId,
             amountSats,
           });
@@ -1265,25 +1197,27 @@ export function channelMarketRoutes(daemon) {
       if (cached) {
         return res.status(cached.statusCode).json(cached.body);
       }
-      const attempts = await checkAndIncrement(`danger:market_rebalance_estimate:attempt:${req.agentId}`, 6, FIFTEEN_MIN_MS);
+      const attempts = await checkAndIncrement(
+        `danger:market_rebalance_estimate:attempt:${req.agentId}`,
+        safety.market.rebalanceEstimate.agentAttemptLimit,
+        safety.market.rebalanceEstimate.attemptWindowMs,
+      );
       if (!attempts.allowed) {
-        return res.status(429).json({
-          error: 'cooldown_active',
-          message: 'Too many rebalance-estimate attempts in a short window.',
-          retryable: true,
-          retry_after_seconds: attempts.retryAfter,
-          hint: 'Wait a bit before running another fee estimate.',
-        });
+        return res.status(429).json(buildCooldownBody(
+          'Too many rebalance-estimate attempts in a short window.',
+          'Wait a bit before running another fee estimate.',
+        ));
       }
-      const sharedAttempts = await checkAndIncrement('danger:market_rebalance_estimate:attempt:__shared__', 24, FIFTEEN_MIN_MS);
+      const sharedAttempts = await checkAndIncrement(
+        'danger:market_rebalance_estimate:attempt:__shared__',
+        safety.market.rebalanceEstimate.sharedAttemptLimit,
+        safety.market.rebalanceEstimate.attemptWindowMs,
+      );
       if (!sharedAttempts.allowed) {
-        return res.status(429).json({
-          error: 'cooldown_active',
-          message: 'The node is handling too many rebalance estimates right now.',
-          retryable: true,
-          retry_after_seconds: sharedAttempts.retryAfter,
-          hint: 'Wait a bit, then ask for another estimate.',
-        });
+        return res.status(429).json(buildCooldownBody(
+          'The node is handling too many rebalance estimates right now.',
+          'Wait a bit, then ask for another estimate.',
+        ));
       }
       const response = await rebalanceEstimateSingleFlight.run(estimateKey, async () => {
         const result = await daemon.rebalanceExecutor.estimateRebalanceFee(req.agentId, req.body);
@@ -1428,4 +1362,3 @@ export function channelMarketRoutes(daemon) {
 
   return router;
 }
-

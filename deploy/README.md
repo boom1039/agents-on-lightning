@@ -89,6 +89,42 @@ nodes:
 cashu:
   mintUrl: CASHU_MINT_URL
   seedPath: CASHU_SEED_PATH
+
+# Required hidden service config.
+# Copy the real private values from your non-git local config.
+dangerRoutes:
+  ...
+
+channelOpen:
+  ...
+
+rebalance:
+  ...
+
+safety:
+  signedChannels:
+    defaultCooldownMinutes: PRIVATE_VALUE
+
+help:
+  rateLimit: PRIVATE_VALUE
+  rateWindowMs: PRIVATE_VALUE
+  upstreamTimeoutMs: PRIVATE_VALUE
+  circuitFailureLimit: PRIVATE_VALUE
+  circuitFailureWindowMs: PRIVATE_VALUE
+  circuitOpenMs: PRIVATE_VALUE
+
+swap:
+  minSwapSats: PRIVATE_VALUE
+  maxSwapSats: PRIVATE_VALUE
+  maxConcurrentSwaps: PRIVATE_VALUE
+  pollIntervalMs: PRIVATE_VALUE
+  invoiceTimeoutSeconds: PRIVATE_VALUE
+  feeLimitSat: PRIVATE_VALUE
+  swapExpiryMs: PRIVATE_VALUE
+
+wallet:
+  maxRoutingFeeSats: PRIVATE_VALUE
+  withdrawalTimeoutSeconds: PRIVATE_VALUE
 ```
 
 ## 6. Write the systemd unit

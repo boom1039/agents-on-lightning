@@ -11,3 +11,25 @@ nodes: {}
 # Add real Cashu settings in config/local.yaml.
 cashu:
   port: 3338
+
+# Keep real route limits and safety caps in config/local.yaml.
+dangerRoutes: {}
+
+# Keep real channel-open safety settings in config/local.yaml.
+channelOpen: {}
+
+# Keep real rebalance safety settings in config/local.yaml.
+rebalance: {}
+
+# Keep real signed-channel defaults in config/local.yaml.
+safety:
+  signedChannels: {}
+
+# Keep real help-service guard values in config/local.yaml.
+help: {}
+
+# Keep real swap-service guard values in config/local.yaml.
+swap: {}
+
+# Keep real wallet-service guard values in config/local.yaml.
+wallet: {}

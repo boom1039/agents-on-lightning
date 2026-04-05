@@ -21,15 +21,7 @@ const STATE_PATH = 'data/channel-market/submarine-swaps.json';
 
 const BOLTZ_API_BASE = 'https://api.boltz.exchange/v2';
 
-const SWAP_CONFIG = {
-  minSwapSats: 50_000,
-  maxSwapSats: 5_000_000,
-  maxConcurrentSwaps: 3,
-  pollIntervalMs: 30_000,           // 30s — swaps are time-sensitive
-  invoiceTimeoutSeconds: 120,       // 2 minutes to pay invoice
-  feeLimitSat: 5_000,              // max routing fee for paying Boltz invoice
-  swapExpiryMs: 4 * 3600 * 1000,  // 4 hours max for entire swap
-};
+const SWAP_CONFIG = {};
 
 /**
  * State machine:
@@ -46,7 +38,7 @@ export class SubmarineSwapProvider {
    * @param {import('../channel-accountability/hash-chain-audit-log.js').HashChainAuditLog} opts.auditLog
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, mutex }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, mutex, config = {} }) {
     if (!capitalLedger) throw new Error('SubmarineSwapProvider requires capitalLedger');
     if (!nodeManager) throw new Error('SubmarineSwapProvider requires nodeManager');
     if (!dataLayer) throw new Error('SubmarineSwapProvider requires dataLayer');
@@ -64,7 +56,7 @@ export class SubmarineSwapProvider {
     this._pollTimer = null;
     this._stopping = false;
 
-    this.config = { ...SWAP_CONFIG };
+    this.config = { ...SWAP_CONFIG, ...config };
   }
 
   // ---------------------------------------------------------------------------
@@ -130,7 +122,7 @@ export class SubmarineSwapProvider {
     if (!amountSats || amountSats < this.config.minSwapSats || amountSats > this.config.maxSwapSats) {
       return {
         success: false,
-        error: `Amount must be between ${this.config.minSwapSats.toLocaleString()} and ${this.config.maxSwapSats.toLocaleString()} sats`,
+        error: 'Amount is outside this node’s current allowed swap range',
       };
     }
 
@@ -162,8 +154,7 @@ export class SubmarineSwapProvider {
         miner_fee_sats: minerFeeSats,
         total_fee_sats: totalFee,
         receive_amount_sats: receiveAmount,
-        min_amount: data.limits?.minimal || this.config.minSwapSats,
-        max_amount: data.limits?.maximal || this.config.maxSwapSats,
+        amount_policy: 'server_enforced',
         learn: `Reverse submarine swap: you pay ${amountSats.toLocaleString()} sats Lightning, ` +
           `receive ~${receiveAmount.toLocaleString()} sats on-chain. ` +
           `Boltz service fee: ${serviceFeePercent}% (${serviceFee} sats). ` +
@@ -184,7 +175,7 @@ export class SubmarineSwapProvider {
     if (!amount_sats || amount_sats < this.config.minSwapSats || amount_sats > this.config.maxSwapSats) {
       return {
         success: false,
-        error: `Amount must be between ${this.config.minSwapSats.toLocaleString()} and ${this.config.maxSwapSats.toLocaleString()} sats`,
+        error: 'Amount is outside this node’s current allowed swap range',
         status: 400,
       };
     }
@@ -206,7 +197,7 @@ export class SubmarineSwapProvider {
     if (activeCount >= this.config.maxConcurrentSwaps) {
       return {
         success: false,
-        error: `Maximum ${this.config.maxConcurrentSwaps} concurrent swaps per agent`,
+        error: 'Too many concurrent swaps for this agent right now',
         status: 429,
       };
     }

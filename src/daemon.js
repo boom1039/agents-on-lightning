@@ -15,6 +15,14 @@ import { AgentRegistry } from './identity/registry.js';
 import { acquire as acquireMutex } from './identity/mutex.js';
 import { configureRateLimiterPersistence } from './identity/rate-limiter.js';
 import { SpendingVelocityTracker } from './identity/spending-velocity.js';
+import {
+  getChannelOpenSafetySettings,
+  getHelpServiceSettings,
+  getRebalanceSafetySettings,
+  getSignedChannelSafetySettings,
+  getSwapServiceSettings,
+  getWalletServiceSettings,
+} from './identity/danger-route-settings.js';
 
 // Wallet
 import { PublicLedger } from './wallet/ledger.js';
@@ -95,6 +103,7 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       nodeManager: this.nodeManager,
       ledger: this.publicLedger,
+      config: getWalletServiceSettings(this.config),
     });
 
     const cashuProofStore = new AgentCashuProofStore(this.dataLayer);
@@ -132,6 +141,7 @@ export class AgentDaemon {
       nodeManager: this.nodeManager,
       agentRegistry: this.agentRegistry,
       dataLayer: this.dataLayer,
+      safetySettings: getSignedChannelSafetySettings(this.config),
     });
     await this.channelExecutor.loadCooldowns();
     this.channelMonitor = new ChannelFeePolicyMonitor({
@@ -175,6 +185,7 @@ export class AgentDaemon {
       agentRegistry: this.agentRegistry,
       assignmentRegistry: this.channelAssignments,
       mutex: channelMutex,
+      config: getChannelOpenSafetySettings(this.config),
     });
     await this.channelOpener.load();
     this.channelOpener.startPolling();
@@ -218,6 +229,7 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
+      config: getSwapServiceSettings(this.config),
     });
     await this.swapProvider.load();
     this.swapProvider.startPolling();
@@ -251,6 +263,7 @@ export class AgentDaemon {
       agentRegistry: this.agentRegistry,
       assignmentRegistry: this.channelAssignments,
       mutex: channelMutex,
+      config: getRebalanceSafetySettings(this.config),
     });
     await this.rebalanceExecutor.load();
 
@@ -265,6 +278,7 @@ export class AgentDaemon {
         marketTransparency: this.marketTransparency,
         walletOps: this.agentCashuWallet,
         dataLayer: this.dataLayer,
+        config: getHelpServiceSettings(this.config),
       });
       await this.helpEndpoint.initialize();
     } catch (err) {

@@ -13,7 +13,6 @@ const INSTRUCTIONS_PATH = 'data/channel-accountability/instructions.jsonl';
 const ALLOWED_ACTIONS = new Set(['set_fee_policy', 'update_htlc_limits']);
 const TIMESTAMP_TOLERANCE_S = 300; // 5 minutes
 const DEDUP_EXPIRY_MS = 600_000; // 10 minutes
-const DEFAULT_COOLDOWN_MINUTES = 60;
 const POST_VERIFY_DELAY_MS = 3_000;
 const RECENT_EXECUTION_TTL_MS = 120_000; // 2 minutes — monitor match window
 const GLOBAL_SAFE_CONSTRAINTS = {
@@ -58,12 +57,11 @@ const HINTS = {
     'Use Math.floor(Date.now() / 1000) at the moment you build the instruction.',
 
   duplicate:
-    'This exact instruction (same payload hash) was already processed within the dedup window (10 minutes). ' +
+    'This exact instruction (same payload hash) was already processed recently. ' +
     'If you need to repeat an action, change the timestamp to get a different payload hash.',
 
   channel_not_assigned:
-    'This channel is not assigned to any agent. The node operator must assign it first via ' +
-    'POST /api/v1/channels/assign (operator-only). Contact the node operator.',
+    'This channel is not assigned to any agent. The node operator must assign it first.',
 
   channel_wrong_agent:
     'This channel is assigned to a different agent. ' +
@@ -86,10 +84,8 @@ const HINTS = {
     return parts.join('');
   },
 
-  cooldown: (cooldownMin, lastExecAgo, retryAfterSec, retryAtIso) =>
-    `Last change was ${Math.round(lastExecAgo / 1000)}s ago. ` +
-    `Cooldown: ${cooldownMin} minutes (${cooldownMin * 60}s). ` +
-    `Retry after: ${retryAtIso} (${retryAfterSec}s from now). ` +
+  cooldown:
+    'This channel changed recently, so another update is blocked for now. ' +
     'Cooldowns prevent fee thrashing that confuses routing nodes caching your policies. ' +
     'Lightning gossip propagation takes ~60s so frequent changes waste network bandwidth.',
 
@@ -109,12 +105,15 @@ const HINTS = {
  * 10-step validation pipeline before touching LND.
  */
 export class SignedInstructionExecutor {
-  constructor({ assignmentRegistry, auditLog, nodeManager, agentRegistry, dataLayer }) {
+  constructor({ assignmentRegistry, auditLog, nodeManager, agentRegistry, dataLayer, safetySettings = {} }) {
     this._assignments = assignmentRegistry;
     this._auditLog = auditLog;
     this._nodeManager = nodeManager;
     this._agentRegistry = agentRegistry;
     this._dataLayer = dataLayer;
+    this._defaultCooldownMinutes = Number.isInteger(safetySettings.defaultCooldownMinutes)
+      ? safetySettings.defaultCooldownMinutes
+      : 60;
 
     // Dedup cache (10-minute expiry window)
     this._dedup = new DedupCache(DEDUP_EXPIRY_MS, {
@@ -322,21 +321,18 @@ export class SignedInstructionExecutor {
     checks_passed.push('constraints_met');
 
     // Step 9: Cooldown
-    const cooldownMinutes = assignment.constraints?.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES;
+    const cooldownMinutes = assignment.constraints?.cooldown_minutes ?? this._defaultCooldownMinutes;
     const cooldownMs = cooldownMinutes * 60_000;
     const lastExec = this._cooldowns.get(instruction.channel_id);
     if (lastExec) {
       const nowMs = Date.now();
       const elapsed = nowMs - lastExec;
       if (elapsed < cooldownMs) {
-        const retryAfterSec = Math.ceil((cooldownMs - elapsed) / 1000);
-        const retryAt = new Date(nowMs + retryAfterSec * 1000).toISOString();
         return {
           success: false,
-          error: `Cooldown active (${cooldownMinutes} min between updates)`,
-          hint: HINTS.cooldown(cooldownMinutes, elapsed, retryAfterSec, retryAt),
+          error: 'Cooldown active',
+          hint: HINTS.cooldown,
           status: 429,
-          retry_after_seconds: retryAfterSec,
           failed_at: 'cooldown_clear',
           checks_passed,
         };
@@ -371,7 +367,6 @@ export class SignedInstructionExecutor {
         checks_passed: result.checks_passed,
         error: result.error,
         hint: result.hint,
-        ...(result.retry_after_seconds ? { retry_after_seconds: result.retry_after_seconds } : {}),
       };
     }
 
@@ -447,20 +442,17 @@ export class SignedInstructionExecutor {
         };
       }
 
-      const cooldownMinutes = assignment.constraints?.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES;
+      const cooldownMinutes = assignment.constraints?.cooldown_minutes ?? this._defaultCooldownMinutes;
       const cooldownMsRecheck = cooldownMinutes * 60_000;
       const lastExec = this._cooldowns.get(instruction.channel_id);
       if (lastExec) {
         const elapsed = now - lastExec;
         if (elapsed < cooldownMsRecheck) {
-          const retryAfterSec = Math.ceil((cooldownMsRecheck - elapsed) / 1000);
-          const retryAt = new Date(now + retryAfterSec * 1000).toISOString();
           return {
             success: false,
-            error: `Cooldown active (${cooldownMinutes} min between updates)`,
-            hint: HINTS.cooldown(cooldownMinutes, elapsed, retryAfterSec, retryAt),
+            error: 'Cooldown active',
+            hint: HINTS.cooldown,
             status: 429,
-            retry_after_seconds: retryAfterSec,
             failed_at: 'cooldown_clear',
             checks_passed: [],
           };

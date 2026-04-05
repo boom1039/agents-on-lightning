@@ -13,7 +13,6 @@
  *   - hint: what the agent should do to recover
  *
  * Optional fields:
- *   - retry_after_seconds: how long to wait before retrying (429s)
  *   - see: URL/endpoint with more info
  *   - available: list of valid options (404s)
  */
@@ -45,7 +44,6 @@ function setCompactText(target, key, value, maxChars) {
  * @param {string} opts.message - Human-readable explanation
  * @param {boolean} [opts.retryable=false] - Whether the agent should retry
  * @param {string} [opts.hint] - Recovery instructions
- * @param {number} [opts.retry_after_seconds] - Seconds to wait before retry
  * @param {string} [opts.see] - Endpoint or URL with more info
  * @param {string[]} [opts.available] - Valid options (for 404s)
  * @param {object} [opts.extra] - Any additional fields to merge
@@ -59,10 +57,6 @@ export function agentError(res, status, opts) {
   };
 
   setCompactText(body, 'hint', opts.hint, MAX_HINT_CHARS);
-  if (opts.retry_after_seconds != null) {
-    body.retry_after_seconds = opts.retry_after_seconds;
-    res.set('Retry-After', String(opts.retry_after_seconds));
-  }
   setCompactText(body, 'see', opts.see, MAX_HINT_CHARS);
   if (opts.available) body.available = opts.available;
   if (opts.extra) Object.assign(body, opts.extra);
@@ -121,8 +115,7 @@ export function err429(res, { category, retryAfter }) {
     error: 'rate_limit_exceeded',
     message: `Rate limit exceeded${category ? ` for ${category}` : ''}. Wait and retry.`,
     retryable: true,
-    retry_after_seconds: retryAfter,
-    hint: `Wait ${retryAfter} seconds, then retry. If rate-limited again, double the wait time.`,
+    hint: 'Wait a bit, then retry. If rate-limited again, wait longer.',
   });
 }
 
@@ -131,8 +124,7 @@ export function err503Service(res, serviceName) {
     error: 'service_unavailable',
     message: `${serviceName} is temporarily unavailable.`,
     retryable: true,
-    retry_after_seconds: 30,
-    hint: 'This is usually temporary. Wait 30 seconds and try again. If it persists, the platform may be restarting.',
+    hint: 'This is usually temporary. Wait a bit and try again. If it persists, the platform may be restarting.',
     see: 'GET /api/v1/platform/status',
   });
 }
@@ -248,7 +240,6 @@ export function err500Internal(res, context) {
     error: 'internal_error',
     message: `Something went wrong${context ? ` while ${context}` : ''}.`,
     retryable: true,
-    retry_after_seconds: 5,
     hint: 'This is a server error. Wait a few seconds and retry. If it persists, try GET /api/v1/platform/status to check platform health.',
     see: 'GET /api/v1/platform/status',
   });

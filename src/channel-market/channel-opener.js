@@ -19,28 +19,7 @@ import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
 
-const CHANNEL_OPEN_CONFIG = {
-  minChannelSizeSats: 100_000,
-  maxChannelSizeSats: 500_000_000,     // 5 BTC — wumbo channels enabled
-  maxTotalChannels: Infinity,
-  maxPerAgent: Infinity,
-  pendingOpenTimeoutBlocks: 2016,      // ~2 weeks
-  connectPeerTimeoutMs: 15_000,
-  defaultSatPerVbyte: null,            // null = let LND estimate
-};
-
-const DEFAULT_PEER_FORCE_CLOSE_LIMIT = 0;
-const DEFAULT_REQUIRE_PEER_ALLOWLIST = true;
-const DEFAULT_MIN_PEER_CHANNELS = 3;
-const DEFAULT_MAX_PEER_LAST_UPDATE_AGE_S = 86_400; // 24 hours
-const STARTUP_POLICY_LIMITS = {
-  minBaseFeeMsat: 0,
-  maxBaseFeeMsat: 10_000,
-  minFeeRatePpm: 0,
-  maxFeeRatePpm: 2_000,
-  minTimeLockDelta: 1,
-  maxTimeLockDelta: 2_016,
-};
+const CHANNEL_OPEN_CONFIG = {};
 
 function readOptionalInteger(value) {
   return Number.isInteger(value) ? value : null;
@@ -72,20 +51,6 @@ function parsePeerAllowlist() {
   return peers.length > 0 ? new Set(peers) : null;
 }
 
-function getPeerForceCloseLimit() {
-  const parsed = Number.parseInt(process.env.CHANNEL_OPEN_PEER_FORCE_CLOSE_LIMIT || '', 10);
-  if (Number.isInteger(parsed) && parsed >= 0) return parsed;
-  return DEFAULT_PEER_FORCE_CLOSE_LIMIT;
-}
-
-function requirePeerAllowlist() {
-  const raw = (process.env.CHANNEL_OPEN_REQUIRE_PEER_ALLOWLIST || '').trim().toLowerCase();
-  if (!raw) return DEFAULT_REQUIRE_PEER_ALLOWLIST;
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-  return DEFAULT_REQUIRE_PEER_ALLOWLIST;
-}
-
 /**
  * LND error messages → agent-friendly explanations.
  */
@@ -108,7 +73,7 @@ const LND_ERROR_MAP = [
   },
   {
     pattern: /chan size.*below min chan size/i,
-    message: `Channel too small. Minimum: ${CHANNEL_OPEN_CONFIG.minChannelSizeSats} sats.`,
+    message: 'Channel too small for this node’s current policy.',
   },
 ];
 
@@ -136,15 +101,15 @@ const HINTS = {
     'push_amount_sats gifts sats to the remote peer irrevocably the moment the channel opens. ' +
     'This is almost never what you want — it gives away your capital. Set to 0 or omit entirely.',
 
-  amount_out_of_bounds: (min, max) =>
-    `Channel size must be between ${min.toLocaleString()} and ${max.toLocaleString()} sats.`,
+  amount_out_of_bounds:
+    'Channel size is outside this node’s current allowed range.',
 
   insufficient_balance: (available, requested) =>
     `Your available capital is ${available.toLocaleString()} sats, but you requested ${requested.toLocaleString()} sats. ` +
     'Deposit more Bitcoin via POST /api/v1/capital/deposit-address.',
 
-  channel_count_limit: (current, limit, scope) =>
-    `${scope} channel limit: ${current}/${limit}. ` +
+  channel_count_limit: (scope) =>
+    `${scope} channel limit reached. ` +
     'Close an existing channel or wait for the operator to raise the limit.',
 
   peer_not_in_graph:
@@ -163,21 +128,21 @@ const HINTS = {
     'This node only opens channels to operator-approved peers. ' +
     'Use GET /api/v1/market/peer-safety/:pubkey, then choose an approved peer or ask the operator to approve one.',
 
-  peer_force_closes: (count, limit) =>
-    `This peer has ${count} recorded force close(s), above the current safety limit of ${limit}. ` +
+  peer_force_closes:
+    'This peer has too much force-close history for this node’s current safety policy. ' +
     'Use GET /api/v1/market/peer-safety/:pubkey and choose a cleaner peer.',
 
   peer_force_close_history_unavailable:
     'Peer safety history is temporarily unavailable, so this open needs review before it can proceed. ' +
     'Try again later or choose another approved peer.',
 
-  peer_too_few_channels: (count, min) =>
-    `This peer has only ${count} channel(s), below the minimum of ${min}. ` +
+  peer_too_few_channels:
+    'This peer has too few channels for this node’s current safety policy. ' +
     'Nodes with very few channels are risky — they may be ephemeral or poorly connected. ' +
     'Use GET /api/v1/analysis/suggest-peers/:pubkey to find better-connected peers.',
 
-  peer_stale_graph_update: (ageHours) =>
-    `This peer was last seen in the network graph ${ageHours.toFixed(1)} hours ago. ` +
+  peer_stale_graph_update:
+    'This peer looks stale in the network graph. ' +
     'Nodes that have not updated recently may be offline or abandoned. ' +
     'Try connecting to a peer that has been active more recently.',
 
@@ -185,13 +150,13 @@ const HINTS = {
     'Startup policy fields must use whole numbers. Supported fields: base_fee_msat, fee_rate_ppm, min_htlc_msat, max_htlc_msat, time_lock_delta.',
 
   startup_policy_base_fee:
-    `base_fee_msat must be between ${STARTUP_POLICY_LIMITS.minBaseFeeMsat} and ${STARTUP_POLICY_LIMITS.maxBaseFeeMsat}.`,
+    'base_fee_msat is outside this node’s current safe range.',
 
   startup_policy_fee_rate:
-    `fee_rate_ppm must be between ${STARTUP_POLICY_LIMITS.minFeeRatePpm} and ${STARTUP_POLICY_LIMITS.maxFeeRatePpm}.`,
+    'fee_rate_ppm is outside this node’s current safe range.',
 
   startup_policy_time_lock:
-    `time_lock_delta must be between ${STARTUP_POLICY_LIMITS.minTimeLockDelta} and ${STARTUP_POLICY_LIMITS.maxTimeLockDelta}.`,
+    'time_lock_delta is outside this node’s current safe range.',
 
   startup_policy_min_htlc:
     'min_htlc_msat must be a non-negative whole number and cannot exceed the channel capacity.',
@@ -214,7 +179,7 @@ export class ChannelOpener {
    * @param {import('../channel-accountability/channel-assignment-registry.js').ChannelAssignmentRegistry} opts.assignmentRegistry
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, config = {} }) {
     if (!capitalLedger) throw new Error('ChannelOpener requires capitalLedger');
     if (!nodeManager) throw new Error('ChannelOpener requires nodeManager');
     if (!dataLayer) throw new Error('ChannelOpener requires dataLayer');
@@ -243,7 +208,14 @@ export class ChannelOpener {
       path: 'data/channel-market/channel-open-dedup.json',
     });
 
-    this.config = { ...CHANNEL_OPEN_CONFIG };
+    this.config = {
+      ...CHANNEL_OPEN_CONFIG,
+      ...config,
+      maxTotalChannels: Number.isInteger(config.maxTotalChannels) ? config.maxTotalChannels : Infinity,
+      maxPerAgent: Number.isInteger(config.maxPerAgent) ? config.maxPerAgent : Infinity,
+      peerSafety: { ...(config.peerSafety || {}) },
+      startupPolicyLimits: { ...(config.startupPolicyLimits || {}) },
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -405,7 +377,7 @@ export class ChannelOpener {
       return {
         success: false,
         error: 'local_funding_amount_sats must be a positive integer',
-        hint: HINTS.amount_out_of_bounds(this.config.minChannelSizeSats, this.config.maxChannelSizeSats),
+        hint: HINTS.amount_out_of_bounds,
         status: 400,
         failed_at: 'amount_in_bounds',
         checks_passed,
@@ -414,8 +386,8 @@ export class ChannelOpener {
     if (amount < this.config.minChannelSizeSats || amount > this.config.maxChannelSizeSats) {
       return {
         success: false,
-        error: `Channel size ${amount} sats outside allowed range [${this.config.minChannelSizeSats}, ${this.config.maxChannelSizeSats}]`,
-        hint: HINTS.amount_out_of_bounds(this.config.minChannelSizeSats, this.config.maxChannelSizeSats),
+        error: 'Channel size outside allowed range',
+        hint: HINTS.amount_out_of_bounds,
         status: 400,
         failed_at: 'amount_in_bounds',
         checks_passed,
@@ -475,9 +447,10 @@ export class ChannelOpener {
         checks_passed,
       };
     }
+    const startupPolicyLimits = this.config.startupPolicyLimits;
     if (params.base_fee_msat !== undefined &&
-        (params.base_fee_msat < STARTUP_POLICY_LIMITS.minBaseFeeMsat ||
-         params.base_fee_msat > STARTUP_POLICY_LIMITS.maxBaseFeeMsat)) {
+        (params.base_fee_msat < startupPolicyLimits.minBaseFeeMsat ||
+         params.base_fee_msat > startupPolicyLimits.maxBaseFeeMsat)) {
       return {
         success: false,
         error: 'base_fee_msat outside safe range',
@@ -488,8 +461,8 @@ export class ChannelOpener {
       };
     }
     if (params.fee_rate_ppm !== undefined &&
-        (params.fee_rate_ppm < STARTUP_POLICY_LIMITS.minFeeRatePpm ||
-         params.fee_rate_ppm > STARTUP_POLICY_LIMITS.maxFeeRatePpm)) {
+        (params.fee_rate_ppm < startupPolicyLimits.minFeeRatePpm ||
+         params.fee_rate_ppm > startupPolicyLimits.maxFeeRatePpm)) {
       return {
         success: false,
         error: 'fee_rate_ppm outside safe range',
@@ -500,8 +473,8 @@ export class ChannelOpener {
       };
     }
     if (params.time_lock_delta !== undefined &&
-        (params.time_lock_delta < STARTUP_POLICY_LIMITS.minTimeLockDelta ||
-         params.time_lock_delta > STARTUP_POLICY_LIMITS.maxTimeLockDelta)) {
+        (params.time_lock_delta < startupPolicyLimits.minTimeLockDelta ||
+         params.time_lock_delta > startupPolicyLimits.maxTimeLockDelta)) {
       return {
         success: false,
         error: 'time_lock_delta outside safe range',
@@ -570,8 +543,8 @@ export class ChannelOpener {
     if (agentTotal >= this.config.maxPerAgent) {
       return {
         success: false,
-        error: `Per-agent channel limit reached: ${agentTotal}/${this.config.maxPerAgent}`,
-        hint: HINTS.channel_count_limit(agentTotal, this.config.maxPerAgent, 'Per-agent'),
+        error: 'Per-agent channel limit reached',
+        hint: HINTS.channel_count_limit('Per-agent'),
         status: 400,
         failed_at: 'channel_count_under_limit',
         checks_passed,
@@ -583,8 +556,8 @@ export class ChannelOpener {
     if (globalTotal >= this.config.maxTotalChannels) {
       return {
         success: false,
-        error: `Global channel limit reached: ${globalTotal}/${this.config.maxTotalChannels}`,
-        hint: HINTS.channel_count_limit(globalTotal, this.config.maxTotalChannels, 'Global'),
+        error: 'Global channel limit reached',
+        hint: HINTS.channel_count_limit('Global'),
         status: 400,
         failed_at: 'channel_count_under_limit',
         checks_passed,
@@ -643,13 +616,13 @@ export class ChannelOpener {
     }
 
     // Peer quality: minimum channel count
-    const minPeerChannels = this.config.minPeerChannels ?? DEFAULT_MIN_PEER_CHANNELS;
+    const minPeerChannels = this.config.peerSafety.minPeerChannels;
     const peerNumChannels = peerInfo.num_channels ?? peerInfo.node?.num_channels ?? 0;
     if (minPeerChannels > 0 && peerNumChannels < minPeerChannels) {
       return {
         success: false,
-        error: `Peer has ${peerNumChannels} channel(s), minimum required is ${minPeerChannels}`,
-        hint: HINTS.peer_too_few_channels(peerNumChannels, minPeerChannels),
+        error: 'Peer has too few channels for this node',
+        hint: HINTS.peer_too_few_channels,
         status: 400,
         failed_at: 'peer_safe_for_open',
         checks_passed,
@@ -657,7 +630,7 @@ export class ChannelOpener {
     }
 
     // Peer quality: last update freshness (reject stale/dead nodes)
-    const maxPeerLastUpdateAgeS = this.config.maxPeerLastUpdateAgeS ?? DEFAULT_MAX_PEER_LAST_UPDATE_AGE_S;
+    const maxPeerLastUpdateAgeS = this.config.peerSafety.maxPeerLastUpdateAgeSeconds;
     const peerLastUpdate = peerInfo.node?.last_update;
     if (maxPeerLastUpdateAgeS > 0 && peerLastUpdate) {
       const now = Math.floor(Date.now() / 1000);
@@ -665,8 +638,8 @@ export class ChannelOpener {
       if (ageS > maxPeerLastUpdateAgeS) {
         return {
           success: false,
-          error: `Peer last seen ${(ageS / 3600).toFixed(1)} hours ago, exceeds ${(maxPeerLastUpdateAgeS / 3600).toFixed(1)}-hour limit`,
-          hint: HINTS.peer_stale_graph_update(ageS / 3600),
+          error: 'Peer looks stale in the network graph',
+          hint: HINTS.peer_stale_graph_update,
           status: 400,
           failed_at: 'peer_safe_for_open',
           checks_passed,
@@ -674,7 +647,7 @@ export class ChannelOpener {
       }
     }
 
-    const peerForceCloseLimit = getPeerForceCloseLimit();
+    const peerForceCloseLimit = this.config.peerSafety.forceCloseLimit;
     if (Number.isInteger(peerForceCloseLimit) && peerForceCloseLimit >= 0) {
       try {
         const closedResp = await client.closedChannels();
@@ -686,8 +659,8 @@ export class ChannelOpener {
         if (peerForceCloses > peerForceCloseLimit) {
           return {
             success: false,
-            error: `Peer exceeds force-close safety limit (${peerForceCloses} > ${peerForceCloseLimit})`,
-            hint: HINTS.peer_force_closes(peerForceCloses, peerForceCloseLimit),
+            error: 'Peer exceeds this node’s force-close safety policy',
+            hint: HINTS.peer_force_closes,
             status: 403,
             failed_at: 'peer_safe_for_open',
             checks_passed,
@@ -706,7 +679,7 @@ export class ChannelOpener {
     }
 
     const allowlist = parsePeerAllowlist();
-    if (requirePeerAllowlist() && !allowlist) {
+    if (this.config.peerSafety.requireAllowlist && !allowlist) {
       return {
         success: false,
         error: 'Direct channel opens are paused until approved peers are configured on this node',
@@ -1171,16 +1144,14 @@ export class ChannelOpener {
    */
   getConfig() {
     return {
-      min_channel_size_sats: this.config.minChannelSizeSats,
-      max_channel_size_sats: this.config.maxChannelSizeSats,
-      max_channels_per_agent: this.config.maxPerAgent,
-      max_total_channels: this.config.maxTotalChannels,
+      channel_size_policy: 'server_enforced',
+      channel_count_policy: 'server_enforced',
       activation_source: 'lnd_active',
       operator_subsidizes_on_chain_fee: true,
       peer_safety: {
         requires_public_address: true,
-        force_close_limit: getPeerForceCloseLimit(),
-        requires_allowlist: requirePeerAllowlist(),
+        force_close_policy: 'enforced',
+        requires_allowlist: this.config.peerSafety.requireAllowlist,
         allowlist_enabled: Boolean(parsePeerAllowlist()),
       },
       startup_policy_support: {

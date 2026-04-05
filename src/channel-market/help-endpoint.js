@@ -5,8 +5,8 @@
  * questions. Backed by Claude Haiku with a comprehensive system prompt and
  * read access to the asking agent's own data (audit log, channels, balances).
  *
- * Payment: 1-5 sats per question (paid from agent's Cashu wallet).
- * Rate limit: 10 questions per agent per hour.
+ * Payment: small sat cost per question (paid from agent's Cashu wallet).
+ * Rate limit: server-enforced.
  * Read-only: cannot modify any platform state.
  */
 
@@ -23,8 +23,6 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const HELP_RATE_LIMIT = 10;           // max questions per agent per hour
-const HELP_RATE_WINDOW_MS = 3600_000; // 1 hour
 const MAX_QUESTION_LENGTH = 400;      // chars
 const MAX_RESPONSE_TOKENS = 1024;     // ~1000 tokens
 const MIN_SAFE_ANSWER_LENGTH = 24;
@@ -32,10 +30,6 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 const HELP_CONTEXT_KEYS = ['include_audit', 'include_channels', 'include_balance', 'chan_id', 'channel_id', 'topic'];
 const QUESTION_RULE = { field: 'question', maxLen: MAX_QUESTION_LENGTH, maxLines: 12, maxLineLen: MAX_QUESTION_LENGTH };
 const MAX_SAFE_ANSWER_CHARS = 4000;
-const HELP_UPSTREAM_TIMEOUT_MS = 10_000;
-const HELP_CIRCUIT_FAILURE_LIMIT = 3;
-const HELP_CIRCUIT_FAILURE_WINDOW_MS = 60_000;
-const HELP_CIRCUIT_OPEN_MS = 30_000;
 const UNSAFE_ANSWER_PATTERNS = [
   /ignore\s+(all\s+)?(previous|prior)\s+instructions/i,
   /system\s+prompt/i,
@@ -97,6 +91,7 @@ export class HelpEndpoint {
     marketTransparency,
     walletOps,
     dataLayer,
+    config = {},
   }) {
     this._agentRegistry = agentRegistry;
     this._assignmentRegistry = assignmentRegistry;
@@ -108,10 +103,13 @@ export class HelpEndpoint {
     this._anthropic = null;
     this._upstreamFailureTimestamps = [];
     this._circuitOpenUntil = 0;
-    this._upstreamTimeoutMs = HELP_UPSTREAM_TIMEOUT_MS;
-    this._circuitFailureLimit = HELP_CIRCUIT_FAILURE_LIMIT;
-    this._circuitFailureWindowMs = HELP_CIRCUIT_FAILURE_WINDOW_MS;
-    this._circuitOpenMs = HELP_CIRCUIT_OPEN_MS;
+    this._config = { ...config };
+    this._rateLimit = this._config.rateLimit;
+    this._rateWindowMs = this._config.rateWindowMs;
+    this._upstreamTimeoutMs = this._config.upstreamTimeoutMs;
+    this._circuitFailureLimit = this._config.circuitFailureLimit;
+    this._circuitFailureWindowMs = this._config.circuitFailureWindowMs;
+    this._circuitOpenMs = this._config.circuitOpenMs;
   }
 
   /**
@@ -535,12 +533,9 @@ export class HelpEndpoint {
 
     // --- Rate limit: peek without incrementing (don't consume slot before payment) ---
     const rlKey = `help:agent:${agentId}`;
-    const rlPeek = await checkOnly(rlKey, HELP_RATE_LIMIT, HELP_RATE_WINDOW_MS);
+    const rlPeek = await checkOnly(rlKey, this._rateLimit, this._rateWindowMs);
     if (!rlPeek.allowed) {
-      const err = new Error(
-        `Help rate limit reached (${HELP_RATE_LIMIT} questions per hour). ` +
-        `Try again in ${rlPeek.retryAfter} seconds.`,
-      );
+      const err = new Error('Help rate limit reached. Wait a bit and try again.');
       err.status = 429;
       err.retryAfter = rlPeek.retryAfter;
       throw err;
@@ -569,7 +564,7 @@ export class HelpEndpoint {
     }
 
     // --- Increment rate limit AFTER successful payment ---
-    await checkAndIncrement(rlKey, HELP_RATE_LIMIT, HELP_RATE_WINDOW_MS);
+    await checkAndIncrement(rlKey, this._rateLimit, this._rateWindowMs);
     rateLimitConsumed = true;
 
     // --- Gather agent context (only if question requires it) ---

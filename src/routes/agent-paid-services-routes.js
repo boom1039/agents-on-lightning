@@ -12,21 +12,11 @@ import { IdempotencyStore } from '../identity/idempotency-store.js';
 import { runIdempotentRoute } from '../identity/idempotency-route.js';
 import { err503Service, err400MissingField, err400Validation, err500Internal, agentError, buildRecovery, withRecovery } from '../identity/agent-friendly-errors.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
+import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
 
 function capitalWithdrawalsEnabled() {
   return process.env.ENABLE_CAPITAL_WITHDRAWALS === '1';
 }
-
-const HOUR_MS = 60 * 60 * 1000;
-const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-const WITHDRAW_CAPS = {
-  autoApproveSats: 100_000,
-  hardCapSats: 250_000,
-  dailyAutoApproveSats: 250_000,
-  dailyHardCapSats: 500_000,
-  sharedDailyAutoApproveSats: 500_000,
-  sharedDailyHardCapSats: 1_000_000,
-};
 
 function depositExplorerLinks(address) {
   return {
@@ -45,11 +35,21 @@ function sendUnexpectedKeys(res, unexpected, see) {
   });
 }
 
+function buildCooldownError(message, hint) {
+  return {
+    error: 'cooldown_active',
+    message,
+    retryable: true,
+    hint,
+  };
+}
+
 export function agentPaidServicesRoutes(daemon) {
   const router = Router();
   const auth = requireAuth(daemon.agentRegistry);
   const idempotencyStore = daemon.dataLayer ? new IdempotencyStore({ dataLayer: daemon.dataLayer }) : null;
   const dangerPolicy = new DangerRoutePolicyStore({ dataLayer: daemon.dataLayer });
+  const safety = getDangerRouteSettings(daemon.config);
 
   // =========================================================================
   // PAID ANALYTICS API (Plan K)
@@ -324,20 +324,18 @@ export function agentPaidServicesRoutes(daemon) {
           };
         }
 
-        const attempts = await checkAndIncrement(`danger:capital_withdraw:attempt:${req.agentId}`, 3, HOUR_MS);
+        const attempts = await checkAndIncrement(
+          `danger:capital_withdraw:attempt:${req.agentId}`,
+          safety.capitalWithdraw.attemptLimit,
+          safety.capitalWithdraw.attemptWindowMs,
+        );
         if (!attempts.allowed) {
           return {
             statusCode: 429,
             body: withRecovery(
-              {
-                error: 'cooldown_active',
-                message: 'Too many withdrawal attempts this hour.',
-                retryable: true,
-                retry_after_seconds: attempts.retryAfter,
-                hint: 'Wait before trying another withdrawal.',
-              },
+              buildCooldownError('Too many withdrawal attempts right now.', 'Wait before trying another withdrawal.'),
               'safe', 'No funds were moved. You hit a rate limit.', [
-                `Wait ${attempts.retryAfter} seconds and retry POST /api/v1/capital/withdraw`,
+                'Wait a bit and retry POST /api/v1/capital/withdraw',
               ],
             ),
           };
@@ -346,21 +344,18 @@ export function agentPaidServicesRoutes(daemon) {
         const cooldown = await dangerPolicy.checkCooldown({
           scope: 'capital_withdraw',
           agentId: req.agentId,
-          cooldownMs: FIFTEEN_MIN_MS,
+          cooldownMs: safety.capitalWithdraw.cooldownMs,
         });
         if (!cooldown.allowed) {
           return {
             statusCode: 429,
             body: withRecovery(
-              {
-                error: 'cooldown_active',
-                message: 'A recent withdrawal is still cooling down.',
-                retryable: true,
-                retry_after_seconds: cooldown.retryAfterSeconds,
-                hint: 'Wait for the cooldown window to pass before sending another withdrawal.',
-              },
+              buildCooldownError(
+                'A recent withdrawal is still cooling down.',
+                'Wait for the cooldown window to pass before sending another withdrawal.',
+              ),
               'safe', 'No funds were moved. A cooldown is active from a recent withdrawal.', [
-                `Wait ${cooldown.retryAfterSeconds} seconds and retry POST /api/v1/capital/withdraw`,
+                'Wait a bit and retry POST /api/v1/capital/withdraw',
               ],
             ),
           };
@@ -370,13 +365,9 @@ export function agentPaidServicesRoutes(daemon) {
           scope: 'capital_withdraw',
           agentId: req.agentId,
           amountSats: amount_sats,
-          ...WITHDRAW_CAPS,
+          ...safety.capitalWithdraw.caps,
         });
         const sharedReason = typeof decision.decisionReason === 'string' && decision.decisionReason.startsWith('shared_');
-        const rolling24h = sharedReason ? decision.sharedTotal24h : decision.total24h;
-        const rollingLimit = sharedReason
-          ? (decision.decision === 'hard_cap' ? WITHDRAW_CAPS.sharedDailyHardCapSats : WITHDRAW_CAPS.sharedDailyAutoApproveSats)
-          : (decision.decision === 'hard_cap' ? WITHDRAW_CAPS.dailyHardCapSats : WITHDRAW_CAPS.dailyAutoApproveSats);
         if (decision.decision === 'hard_cap') {
           return {
             statusCode: 403,
@@ -385,10 +376,6 @@ export function agentPaidServicesRoutes(daemon) {
                 error: 'cap_exceeded',
                 message: sharedReason ? 'This withdrawal is above the shared-node safety cap.' : 'This withdrawal is above the safety cap.',
                 hint: sharedReason ? 'Use a smaller withdrawal amount, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal amount.',
-                requested_sats: amount_sats,
-                instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
-                rolling_24h_sats: rolling24h,
-                rolling_24h_limit_sats: rollingLimit,
               },
               'safe', 'No funds were moved. The amount exceeds the safety cap.', [
                 'Reduce amount_sats and retry POST /api/v1/capital/withdraw',
@@ -405,10 +392,6 @@ export function agentPaidServicesRoutes(daemon) {
                 review_required: true,
                 message: sharedReason ? 'This withdrawal is above the shared-node instant-approve limit.' : 'This withdrawal is above the instant-approve limit.',
                 hint: sharedReason ? 'Use a smaller withdrawal, or wait for the shared-node budget window to reset.' : 'Use a smaller withdrawal, or wait for manual review.',
-                requested_sats: amount_sats,
-                instant_limit_sats: WITHDRAW_CAPS.autoApproveSats,
-                rolling_24h_sats: rolling24h,
-                rolling_24h_limit_sats: rollingLimit,
               },
               'safe', 'No funds were moved yet. The withdrawal requires manual review.', [
                 'Use a smaller amount for instant approval',
@@ -563,7 +546,6 @@ export function agentPaidServicesRoutes(daemon) {
         error: 'service_unavailable',
         message: 'Help service is temporarily unavailable.',
         retryable: true,
-        retry_after_seconds: 30,
         hint: 'Self-serve alternatives: GET /llms.txt or GET /api/v1/knowledge/onboarding.',
         see: 'GET /api/v1/knowledge/onboarding',
       });
@@ -597,7 +579,6 @@ export function agentPaidServicesRoutes(daemon) {
             error: 'help_error',
             message: err.message,
             retryable: !!err.retryAfter,
-            retry_after_seconds: err.retryAfter,
             hint: 'Try GET /llms.txt or GET /api/v1/knowledge/onboarding for self-serve answers.',
             ...(err.refunded ? { refunded: true } : {}),
           },
@@ -608,4 +589,3 @@ export function agentPaidServicesRoutes(daemon) {
 
   return router;
 }
-

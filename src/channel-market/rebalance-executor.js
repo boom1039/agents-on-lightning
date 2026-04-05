@@ -24,13 +24,7 @@ import { appendSignedValidationFailure } from '../channel-accountability/signed-
 const STATE_PATH = 'data/channel-market/rebalance-state.json';
 const HISTORY_PATH = 'data/channel-market/rebalance-history.jsonl';
 
-const REBALANCE_CONFIG = {
-  minAmountSats: 10_000,
-  maxAmountSats: 16_777_215,
-  maxFeeSats: 50_000,
-  paymentTimeoutSeconds: 120,
-  maxConcurrentPerAgent: 1,
-};
+const REBALANCE_CONFIG = {};
 
 /**
  * Educational hints for validation failures.
@@ -48,11 +42,11 @@ const HINTS = {
   missing_params:
     'params must include: outbound_chan_id (string), amount_sats (integer > 0), max_fee_sats (integer > 0).',
 
-  amount_out_of_bounds: (min, max) =>
-    `Rebalance amount must be between ${min.toLocaleString()} and ${max.toLocaleString()} sats.`,
+  amount_out_of_bounds:
+    'Rebalance amount is outside this node’s current allowed range.',
 
-  fee_too_high: (maxAllowed) =>
-    `max_fee_sats exceeds the limit of ${maxAllowed.toLocaleString()} sats. ` +
+  fee_too_high:
+    'max_fee_sats is above this node’s current safety limit. ' +
     'Use POST /api/v1/market/rebalance/estimate to get a fee estimate first.',
 
   insufficient_balance: (available, requested) =>
@@ -78,7 +72,7 @@ export class RebalanceExecutor {
    * @param {import('../channel-accountability/channel-assignment-registry.js').ChannelAssignmentRegistry} opts.assignmentRegistry
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, config = {} }) {
     if (!capitalLedger) throw new Error('RebalanceExecutor requires capitalLedger');
     if (!nodeManager) throw new Error('RebalanceExecutor requires nodeManager');
     if (!dataLayer) throw new Error('RebalanceExecutor requires dataLayer');
@@ -104,7 +98,7 @@ export class RebalanceExecutor {
       path: 'data/channel-market/rebalance-dedup.json',
     });
 
-    this.config = { ...REBALANCE_CONFIG };
+    this.config = { ...REBALANCE_CONFIG, ...config };
   }
 
   // ---------------------------------------------------------------------------
@@ -253,16 +247,16 @@ export class RebalanceExecutor {
     if (amount_sats < this.config.minAmountSats || amount_sats > this.config.maxAmountSats) {
       return {
         success: false,
-        error: `amount_sats ${amount_sats} outside allowed range`,
-        hint: HINTS.amount_out_of_bounds(this.config.minAmountSats, this.config.maxAmountSats),
+        error: 'amount_sats outside allowed range',
+        hint: HINTS.amount_out_of_bounds,
         status: 400, failed_at: 'params_valid', checks_passed,
       };
     }
     if (max_fee_sats > this.config.maxFeeSats) {
       return {
         success: false,
-        error: `max_fee_sats ${max_fee_sats} exceeds limit of ${this.config.maxFeeSats}`,
-        hint: HINTS.fee_too_high(this.config.maxFeeSats),
+        error: 'max_fee_sats exceeds the current limit',
+        hint: HINTS.fee_too_high,
         status: 400, failed_at: 'params_valid', checks_passed,
       };
     }
@@ -649,11 +643,9 @@ export class RebalanceExecutor {
 
   getConfig() {
     return {
-      min_amount_sats: this.config.minAmountSats,
-      max_amount_sats: this.config.maxAmountSats,
-      max_fee_sats: this.config.maxFeeSats,
-      payment_timeout_seconds: this.config.paymentTimeoutSeconds,
-      max_concurrent_per_agent: this.config.maxConcurrentPerAgent,
+      amount_policy: 'server_enforced',
+      fee_policy: 'server_enforced',
+      concurrency_policy: 'server_enforced',
       learn: 'Rebalancing shifts liquidity between your channels by sending a circular payment. ' +
         'You pay routing fees from your capital balance. The outbound channel must be assigned to you. ' +
         'Any active channel on the node can serve as the inbound (return) path.',

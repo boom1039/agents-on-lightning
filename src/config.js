@@ -61,18 +61,29 @@ function expandPaths(config) {
 
 let _config = null;
 
-export async function loadConfig(configPath) {
-  const yamlPath = configPath || process.env.AOL_CONFIG_PATH || resolve(PROJECT_ROOT, 'config', 'default.yaml');
-  let fileConfig = {};
+async function readYamlIfPresent(yamlPath) {
   try {
     const raw = await readFile(yamlPath, 'utf-8');
-    fileConfig = parseYaml(raw) || {};
+    return parseYaml(raw) || {};
   } catch (err) {
     if (err.code !== 'ENOENT') {
       throw new Error(`Failed to parse config at ${yamlPath}: ${err.message}`);
     }
+    return {};
   }
-  _config = expandPaths(deepMerge(DEFAULTS, fileConfig));
+}
+
+export async function loadConfig(configPath) {
+  const defaultPath = resolve(PROJECT_ROOT, 'config', 'default.yaml');
+  const localPath = resolve(PROJECT_ROOT, 'config', 'local.yaml');
+  const explicitPath = configPath || process.env.AOL_CONFIG_PATH || null;
+
+  const defaultConfig = await readYamlIfPresent(defaultPath);
+  const overrideConfig = explicitPath
+    ? await readYamlIfPresent(explicitPath)
+    : await readYamlIfPresent(localPath);
+
+  _config = expandPaths(deepMerge(deepMerge(DEFAULTS, defaultConfig), overrideConfig));
   return _config;
 }
 
