@@ -232,6 +232,8 @@ sudo htpasswd -c /etc/nginx/.htpasswd-agents-dashboard YOUR_USERNAME
 Use your own domain names and certificate paths.
 Proxy the public site to `APP_HOST:APP_PORT`.
 If you want dashboard auth, protect `/journey/` and `/journey/three` in NGINX.
+There is no separate Journey server now.
+`/journey`, `/journey/three`, `/api/journey`, `/api/journey/events`, and `/api/journey/manifest` must all proxy to the main app on `APP_HOST:APP_PORT`, not an old `3308` monitor upstream.
 
 Minimal upstream block:
 
