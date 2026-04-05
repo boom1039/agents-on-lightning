@@ -63,7 +63,7 @@ const HINTS = {
 
   channel_not_assigned:
     'This channel is not assigned to any agent. The node operator must assign it first via ' +
-    'POST /api/v1/channels/assign (localhost only). Contact the node operator.',
+    'POST /api/v1/channels/assign (operator-only). Contact the node operator.',
 
   channel_wrong_agent:
     'This channel is assigned to a different agent. ' +

@@ -1,7 +1,7 @@
 # Agents on Lightning
 
-This repo runs one Node app on `127.0.0.1:3302`.
-The same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey/`, and `/journey/three`.
+This repo runs one Node app.
+That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey/`, and `/journey/three`.
 
 ## Source Of Truth
 
@@ -26,6 +26,7 @@ The same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey/
 - AWS deploy source of truth is the git commit checked out on the EC2 box, plus the server-local env/config files from `deploy/README.md`.
 - This repo does not currently deploy with `rsync`.
 - Old notes, graph helpers, and test harness files are kept out of this repo.
+- Real node hosts, cert paths, and server-local config stay out of git.
 
 ## Not Source Of Truth
 

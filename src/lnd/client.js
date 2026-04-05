@@ -32,10 +32,10 @@ function sleep(ms) {
  * Usage:
  *   const client = new NodeClient({
  *     name: 'alpha',
- *     host: 'localhost',
+ *     host: 'node-rest-host',
  *     restPort: 8080,
- *     macaroonPath: '~/.lnd/data/chain/bitcoin/mainnet/admin.macaroon',
- *     tlsCertPath: '~/.lnd/tls.cert',
+ *     macaroonPath: '/path/to/node.macaroon',
+ *     tlsCertPath: '/path/to/node.cert',
  *   });
  *   await client.init();
  *   const info = await client.getInfo();

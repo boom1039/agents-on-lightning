@@ -18,8 +18,6 @@ const DEFAULTS = {
   nodes: {},
   cashu: {
     port: 3338,
-    mintUrl: 'http://localhost:3338',
-    seedPath: expandHome('~/.lightning-beam/cashu-master-seed.hex'),
   },
 };
 

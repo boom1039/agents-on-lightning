@@ -171,7 +171,7 @@ const TIER_CAPABILITIES = {
       'Historical forwarding data',
       'Channel balance breakdown',
     ],
-    requires: 'readonly.macaroon + tls.cert + host:port',
+    requires: 'readonly macaroon + TLS cert + node address',
   },
   invoice: {
     tier: 'invoice',
@@ -183,7 +183,7 @@ const TIER_CAPABILITIES = {
       'Keysend payments',
       'Route probing',
     ],
-    requires: 'invoice.macaroon + tls.cert + host:port',
+    requires: 'invoice macaroon + TLS cert + node address',
   },
   admin: {
     tier: 'admin',
@@ -196,7 +196,7 @@ const TIER_CAPABILITIES = {
       'Rebalance channels',
       'Manage peers',
     ],
-    requires: 'admin.macaroon + tls.cert + host:port',
+    requires: 'admin macaroon + TLS cert + node address',
   },
 };
 
@@ -385,4 +385,3 @@ export function agentDiscoveryRoutes(daemon) {
 
   return router;
 }
-

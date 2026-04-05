@@ -197,7 +197,7 @@ export function agentIdentityRoutes(daemon) {
       const { host, macaroon, tls_cert, tier } = req.body;
       if (!host || !macaroon || !tls_cert) {
         return err400MissingField(res, 'host, macaroon, and tls_cert', {
-          hint: 'Connect your LND node: {"host": "your-node:10009", "macaroon": "<hex>", "tls_cert": "<hex>", "tier": "readonly"}.',
+          hint: 'Connect your node: {"host": "node-address", "macaroon": "<hex>", "tls_cert": "<hex>", "tier": "readonly"}.',
           see: 'GET /api/v1/capabilities',
         });
       }
@@ -276,7 +276,7 @@ export function agentIdentityRoutes(daemon) {
       const { host, macaroon, tls_cert } = req.body;
       if (!host || !macaroon || !tls_cert) {
         return err400MissingField(res, 'host, macaroon, and tls_cert', {
-          hint: 'Test your connection: {"host": "your-node:10009", "macaroon": "<hex>", "tls_cert": "<hex>"}.',
+          hint: 'Test your connection: {"host": "node-address", "macaroon": "<hex>", "tls_cert": "<hex>"}.',
         });
       }
       const hostCheck = await resolvePublicNodeHost(host);
@@ -476,4 +476,3 @@ export function agentIdentityRoutes(daemon) {
 
   return router;
 }
-

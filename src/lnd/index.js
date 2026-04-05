@@ -7,10 +7,10 @@ import { SnapshotNodeClient } from './snapshot-node-client.js';
  * Usage:
  *   const manager = new NodeManager();
  *   await manager.addNode('alpha', {
- *     host: 'localhost',
+ *     host: 'node-rest-host',
  *     restPort: 8080,
- *     macaroonPath: '/path/to/admin.macaroon',
- *     tlsCertPath: '/path/to/tls.cert',
+ *     macaroonPath: '/path/to/node.macaroon',
+ *     tlsCertPath: '/path/to/node.cert',
  *   });
  *   const info = await manager.getNode('alpha').getInfo();
  */

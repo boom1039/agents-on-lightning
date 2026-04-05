@@ -49,7 +49,7 @@ function resolveManifestUrl(baseUrl = null) {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return new URL('/api/journey/manifest', window.location.origin).toString();
   }
-  return 'http://127.0.0.1:3302/api/journey/manifest';
+  return '/api/journey/manifest';
 }
 
 export async function loadManifest(baseUrl = null) {

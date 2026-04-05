@@ -99,7 +99,7 @@ export class AgentDaemon {
 
     const cashuProofStore = new AgentCashuProofStore(this.dataLayer);
     const seedPath = this.config.cashu?.seedPath ||
-      resolve(process.env.HOME || '/root', '.lightning-beam', 'cashu-master-seed.hex');
+      resolve(process.env.AOL_DATA_DIR || resolve(getProjectRoot(), 'data'), 'cashu-master-seed.hex');
     const cashuSeedManager = new AgentCashuSeedManager(seedPath);
     try { await cashuSeedManager.initialize(); this._cashuSeedManager = cashuSeedManager; }
     catch { this._cashuSeedManager = null; }
@@ -107,7 +107,7 @@ export class AgentDaemon {
     this.agentCashuWallet = new AgentCashuWalletOperations({
       proofStore: cashuProofStore,
       ledger: this.publicLedger,
-      mintUrl: this.config.cashu?.mintUrl || `http://localhost:${this.config.cashu?.port || 3338}`,
+      mintUrl: this.config.cashu?.mintUrl || `http://127.0.0.1:${this.config.cashu?.port || 3338}`,
       mintPort: this.config.cashu?.port || 3338,
       seedManager: this._cashuSeedManager,
     });

@@ -29,5 +29,5 @@ Rules:
 What uses this:
 
 - `src/monitor/agent-surface-inventory.js` builds the live manifest from these comments.
-- `http://127.0.0.1:3302/journey/` and `/journey/three` group and sort routes from this manifest.
+- `/journey/` and `/journey/three` group and sort routes from this manifest.
 - The parser throws at startup and tests fail if required fields are missing.

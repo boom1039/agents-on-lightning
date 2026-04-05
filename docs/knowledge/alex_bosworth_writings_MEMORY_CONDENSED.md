@@ -17,7 +17,7 @@ This guide is a practical setup reference for running LND on a cloud instance (E
 
 ## Recommended LND Configuration (Production Routing Node)
 
-This is the core high-value content — a field-tested `lnd.conf` with operator reasoning. Our node (`boom`) can compare against these settings.
+This is the core high-value content — a field-tested `lnd.conf` with operator reasoning. Any operator can compare their own node settings against these values.
 
 ### Application Options
 

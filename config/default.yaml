@@ -1,23 +1,13 @@
 # Agents on Lightning — default configuration
-# Override with config/local.yaml or environment variables
+# Keep real infrastructure details in an untracked local override.
+# Override with config/local.yaml or environment variables.
 
 web:
   port: 3302
 
-# Local dev defaults only.
-# For EC2, use a separate config file and set AOL_CONFIG_PATH.
+# Add real node settings in config/local.yaml.
+nodes: {}
 
-# LND node connection
-nodes:
-  alpha:
-    lndDir: ~/.lnd
-    host: localhost
-    restPort: 8080
-    macaroonPath: ~/.lnd/data/chain/bitcoin/mainnet/agents-on-lightning.macaroon
-    tlsCertPath: ~/.lnd/tls.cert
-
-# Cashu ecash wallet
+# Add real Cashu settings in config/local.yaml.
 cashu:
   port: 3338
-  mintUrl: http://localhost:3338
-  seedPath: ~/.lightning-beam/cashu-master-seed.hex

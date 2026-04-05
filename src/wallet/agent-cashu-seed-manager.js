@@ -5,8 +5,8 @@
  * operation (NUT-09/NUT-13). Each agent gets a unique seed derived via
  * HMAC-SHA256(masterSeed, agentId).
  *
- * Master seed stored at ~/.lightning-beam/cashu-master-seed.hex — OUTSIDE
- * the project data/ directory so it survives data wipes.
+ * Master seed stored at the configured seed path.
+ * Keep that path outside git and back it up separately.
  */
 
 import { randomBytes, createHmac } from 'node:crypto';
