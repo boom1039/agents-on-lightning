@@ -63,7 +63,8 @@ function showAgentTooltip(agentId, mx, my) {
     ? data.recent.map(r => r.routePath || r.routeKey).slice(0, 3).join(' &rarr; ')
     : 'none';
   tooltipEl.innerHTML = `
-    <div class="tt-title">${agentId}</div>
+    <div class="tt-title">${data.name || agentId}</div>
+    <div>ID: ${agentId}</div>
     <div>Route: ${data.routeKey || 'unknown'}</div>
     <div>Domain: ${getPhaseName(data.phase)} &middot; Slot: ${data.slot ?? '?'}</div>
     <div class="tt-dim">Recent: ${recentStr}</div>

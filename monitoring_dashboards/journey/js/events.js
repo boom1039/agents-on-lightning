@@ -186,6 +186,7 @@ function applySnapshot(snap) {
     const data = agentMgr.acquire(agent.id);
     if (!data) continue;
 
+    data.name = agent.name || data.name || null;
     data.routeKey = agent.routeKey;
     data.phase = entry.phase;
     if (agent.recent) data.recent = agent.recent.slice(0, 5);
@@ -210,6 +211,7 @@ function applyEvent(ev) {
 
     const data = agentMgr.acquire(ev.agent_id);
     if (!data) return;
+    data.name = ev.agent?.name || ev.agent_name || data.name || null;
     data.routeKey = rk;
     data.phase = entry.phase;
     moveAgentToRoute(ev.agent_id, rk);
@@ -238,6 +240,7 @@ function applyEvent(ev) {
       if (!data) return;
     }
 
+    data.name = ev.agent?.name || ev.agent_name || data.name || null;
     data.routeKey = toKey;
     data.phase = toEntry.phase;
     moveAgentToRoute(ev.agent_id, toKey);
@@ -276,6 +279,7 @@ function applyEvent(ev) {
         data = agentMgr.acquire(ev.agent_id);
         if (!data) return;
       }
+      data.name = ev.agent?.name || ev.agent_name || data.name || null;
       data.routeKey = rk;
       data.phase = entry.phase;
       moveAgentToRoute(ev.agent_id, rk);
@@ -300,6 +304,7 @@ function applyEvent(ev) {
         data = agentMgr.acquire(ev.agent_id);
         if (!data) return;
       }
+      data.name = ev.agent?.name || ev.agent_name || data.name || null;
       data.routeKey = ev.routeKey;
       data.phase = entry.phase;
       moveAgentToRoute(ev.agent_id, ev.routeKey);

@@ -178,6 +178,7 @@ export class LiveJourneyState {
   _serializeAgent(agent, now = Date.now()) {
     return {
       id: agent.id,
+      name: agent.name || null,
       routeKey: agent.routeKey,
       routePath: agent.routePath,
       rawPath: agent.rawPath,
@@ -228,12 +229,14 @@ export class LiveJourneyState {
     traceId = null,
     startedAt = null,
     timing = null,
+    name = null,
   } = {}) {
     const route = this._ensureRoute(surface);
     let agent = this.agents.get(agentId);
     if (!agent) {
       agent = {
         id: agentId,
+        name: null,
         routeKey: null,
         routePath: null,
         rawPath: null,
@@ -292,6 +295,7 @@ export class LiveJourneyState {
     }
 
     applySurfaceMeta(agent, surface);
+    if (typeof name === 'string' && name.trim()) agent.name = name.trim();
     agent.phase = phase || agent.phase;
     agent.status = status;
     agent.lastEventTime = ts;
@@ -352,6 +356,7 @@ export class LiveJourneyState {
         phase: 'registered',
         status: 201,
         timing,
+        name: event.agent_name || null,
       });
       const storedAgent = this.agents.get(event.agent_id);
       if (storedAgent) {
@@ -369,6 +374,7 @@ export class LiveJourneyState {
         agent_id: event.agent_id,
         ...surfaceEventFields(surface),
         success: true,
+        agent_name: event.agent_name || null,
         timing,
         agent,
       };
@@ -394,12 +400,14 @@ export class LiveJourneyState {
         traceId: event.trace_id,
         startedAt: inflight.startedAt,
         timing,
+        name: event.agent_name || null,
       });
       const normalized = {
         event: 'agent_bound',
         ts,
         trace_id: event.trace_id,
         agent_id: event.agent_id,
+        agent_name: event.agent_name || null,
         ...surfaceEventFields(inflight.surface),
         timing,
         agent,
@@ -429,6 +437,7 @@ export class LiveJourneyState {
           traceId,
           startedAt: requestStartedAt,
           timing,
+          name: event.agent_name || null,
         })
         : null;
       const normalized = {
@@ -436,6 +445,7 @@ export class LiveJourneyState {
         ts,
         trace_id: traceId,
         agent_id: event.agent_id || null,
+        agent_name: event.agent_name || null,
         ...surfaceEventFields(surface),
         timing,
         agent,
@@ -478,6 +488,7 @@ export class LiveJourneyState {
           traceId: event.trace_id || null,
           startedAt: inflight?.startedAt || timing.startedAtMs || null,
           timing,
+          name: event.agent_name || null,
         })
         : null;
 
@@ -486,6 +497,7 @@ export class LiveJourneyState {
         ts,
         trace_id: event.trace_id || null,
         agent_id: agentId,
+        agent_name: event.agent_name || null,
         ...surfaceEventFields(surface),
         status,
         duration_ms: Number.isFinite(event.duration_ms) ? event.duration_ms : null,

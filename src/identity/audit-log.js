@@ -88,12 +88,13 @@ export function logWalletOperation(agentId, operation, amountSats, success) {
   });
 }
 
-export function logRegistrationAttempt(ip, success, agentId) {
+export function logRegistrationAttempt(ip, success, agentId, agentName = null) {
   return _append({
     event: 'registration_attempt',
     ip: ip || null,
     success,
     agent_id: agentId || null,
+    agent_name: agentName || null,
   });
 }
 
@@ -158,12 +159,13 @@ export function auditMiddleware(req, res, next) {
     domain: trackedSurface.entry.domain || null,
   } : {};
   req.dashboardTraceId = traceId;
-  req.dashboardBindAgent = (agentId) => {
+  req.dashboardBindAgent = (agentId, agentName = null) => {
     if (!agentId) return;
     void recordJourneyEvent({
       event: 'agent_bound',
       trace_id: traceId,
       agent_id: agentId,
+      agent_name: agentName || null,
       method: req.method,
       path: originalPath,
       ...surfaceMeta,
@@ -177,6 +179,7 @@ export function auditMiddleware(req, res, next) {
     method: req.method,
     path: originalPath,
     agent_id: req.agentId || null,
+    agent_name: req.agentProfile?.name || null,
     ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
     accept: accept || null,
     doc_kind,
@@ -194,6 +197,7 @@ export function auditMiddleware(req, res, next) {
       duration_ms: Date.now() - start,
       ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
       agent_id: req.agentId || null,
+      agent_name: req.agentProfile?.name || null,
       accept: accept || null,
       doc_kind,
       ...surfaceMeta,
@@ -207,6 +211,7 @@ export function auditMiddleware(req, res, next) {
       duration_ms: Date.now() - start,
       ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
       agent_id: req.agentId || null,
+      agent_name: req.agentProfile?.name || null,
       accept: accept || null,
       doc_kind,
       ...surfaceMeta,

@@ -1412,7 +1412,7 @@
           : `<div class="tt-divider"></div>${dwellHistory.map((entry) => (
             tooltipRow(compactPath(entry.routePath), `${formatDurationCompact(entry.dwellMs)} • left ${formatTimestamp(entry.leftAt)}`)
           )).join('')}<div class="tt-note">Recent route stays</div>`;
-        tooltip.innerHTML = `<div class="tt-title">${escapeHtml(agent.id)}</div>${rows.join('')}${dwellHtml}`;
+        tooltip.innerHTML = `<div class="tt-title">${escapeHtml(agent.name || agent.id)}</div>${tooltipRow('agent id', agent.id)}${rows.join('')}${dwellHtml}`;
       } else {
         const route = payload.route;
         const ages = route.agents

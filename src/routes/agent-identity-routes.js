@@ -91,7 +91,7 @@ export function agentIdentityRoutes(daemon) {
         try { req.body = JSON.parse(req.body); } catch {}
       }
       const result = await daemon.agentRegistry.register(req.body);
-      logRegistrationAttempt(ip, true, result.agent_id);
+      logRegistrationAttempt(ip, true, result.agent_id, typeof req.body?.name === 'string' ? req.body.name.trim() : null);
       res.status(201).json(result);
     } catch (err) {
       logRegistrationAttempt(ip, false, null);
