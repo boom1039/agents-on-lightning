@@ -22,6 +22,12 @@ export function getEventsPerSecond() {
 // HUD callback (set by hud.js to avoid circular imports)
 let onSnapshotHUD = null;
 export function onSnapshot(fn) { onSnapshotHUD = fn; }
+let onConnectionHUD = null;
+export function onConnection(fn) { onConnectionHUD = fn; }
+
+function emitConnection(connected, label) {
+  if (onConnectionHUD) onConnectionHUD({ connected, label });
+}
 
 // Route stat helpers
 
@@ -136,14 +142,21 @@ export function repositionAllAgents() {
 // SSE client
 
 export function connectSSE() {
+  emitConnection(false, 'CONNECTING');
   const es = new EventSource('/api/journey/events');
+  es.onopen = () => {
+    emitConnection(true, 'LIVE');
+  };
   es.onmessage = (msg) => {
     let data;
     try { data = JSON.parse(msg.data); } catch { return; }
+    emitConnection(true, 'LIVE');
     if (data.type === 'snapshot') applySnapshot(data.snapshot);
     else applyEvent(data);
   };
-  es.onerror = () => {};
+  es.onerror = () => {
+    emitConnection(false, 'RETRYING');
+  };
 }
 
 function applySnapshot(snap) {

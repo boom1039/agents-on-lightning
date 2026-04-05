@@ -1,5 +1,5 @@
 import { TOTAL_ROUTES } from './manifest.js';
-import { routeStats, getEventsPerSecond, onSnapshot } from './events.js';
+import { routeStats, getEventsPerSecond, onConnection, onSnapshot } from './events.js';
 import { agentMgr, flightMgr } from './agents.js';
 import { phaseBadges, updateSpriteText } from './builder.js';
 
@@ -7,10 +7,17 @@ const hudAgents = document.getElementById('hud-agents');
 const hudInflight = document.getElementById('hud-inflight');
 const hudEps = document.getElementById('hud-eps');
 const hudActive = document.getElementById('hud-active');
+const hudLive = document.getElementById('hud-live');
 
 function updateHUD(stats) {
   hudAgents.textContent = stats?.agents ?? agentMgr.agents.size;
   hudInflight.textContent = stats?.inFlight ?? flightMgr.inflightCount;
+}
+
+function updateConnectionHUD(state) {
+  if (!hudLive) return;
+  hudLive.textContent = state?.label || 'CONNECTING';
+  hudLive.style.color = state?.connected ? '#4ade80' : '#f59e0b';
 }
 
 export function refreshHUD() {
@@ -40,7 +47,9 @@ export function refreshHUD() {
 export function initHUD() {
   // Register for SSE snapshot updates
   onSnapshot(updateHUD);
+  onConnection(updateConnectionHUD);
   hudActive.textContent = `0/${TOTAL_ROUTES}`;
+  updateConnectionHUD({ connected: false, label: 'CONNECTING' });
 
   // Simulate button
   let simulating = false;
