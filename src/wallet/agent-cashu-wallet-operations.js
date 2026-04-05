@@ -174,7 +174,10 @@ export class AgentCashuWalletOperations {
   }
 
   get mintUrl() {
-    return this._mintUrl || `http://127.0.0.1:${this._mintPort}`;
+    if (!this._mintUrl) {
+      throw new Error('Cashu mint URL not configured');
+    }
+    return this._mintUrl;
   }
 
   // ---------------------------------------------------------------------------

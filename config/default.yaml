@@ -9,8 +9,7 @@ web:
 nodes: {}
 
 # Add real Cashu settings in config/local.yaml.
-cashu:
-  port: 3338
+cashu: {}
 
 # Keep real route limits and safety caps in config/local.yaml.
 dangerRoutes: {}

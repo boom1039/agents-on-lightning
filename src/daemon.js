@@ -8,7 +8,7 @@ import { loadConfig, getProjectRoot } from './config.js';
 import { DataLayer } from './data-layer.js';
 import { NodeManager } from './lnd/index.js';
 import { readFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { resolve } from 'node:path';
 
 // Identity
 import { AgentRegistry } from './identity/registry.js';
@@ -75,14 +75,12 @@ export class AgentDaemon {
     // 2. Load API key (for help endpoint)
     if (!process.env.ANTHROPIC_API_KEY) {
       this._startupWarnings.push('ANTHROPIC_API_KEY missing');
-      for (const keyPath of [
-        join(process.env.HOME || '', '.config', 'anthropic', 'api_key'),
-        resolve(getProjectRoot(), 'data', '.api-key'),
-      ]) {
+      const keyPath = this.config.help?.apiKeyFile || process.env.ANTHROPIC_API_KEY_FILE;
+      if (keyPath) {
         try {
           const k = (await readFile(keyPath, 'utf-8')).trim();
-          if (k?.startsWith('sk-ant-')) { process.env.ANTHROPIC_API_KEY = k; break; }
-        } catch { /* next */ }
+          if (k?.startsWith('sk-ant-')) process.env.ANTHROPIC_API_KEY = k;
+        } catch { /* leave missing warning in place */ }
       }
     }
 
@@ -110,17 +108,21 @@ export class AgentDaemon {
     });
 
     const cashuProofStore = new AgentCashuProofStore(this.dataLayer);
-    const seedPath = this.config.cashu?.seedPath ||
-      resolve(process.env.AOL_DATA_DIR || resolve(getProjectRoot(), 'data'), 'cashu-master-seed.hex');
-    const cashuSeedManager = new AgentCashuSeedManager(seedPath);
-    try { await cashuSeedManager.initialize(); this._cashuSeedManager = cashuSeedManager; }
-    catch { this._cashuSeedManager = null; }
+    const seedPath = this.config.cashu?.seedPath || null;
+    if (seedPath) {
+      const cashuSeedManager = new AgentCashuSeedManager(seedPath);
+      try { await cashuSeedManager.initialize(); this._cashuSeedManager = cashuSeedManager; }
+      catch { this._cashuSeedManager = null; }
+    } else {
+      this._cashuSeedManager = null;
+      this._startupWarnings.push('cashu.seedPath missing');
+    }
 
     this.agentCashuWallet = new AgentCashuWalletOperations({
       proofStore: cashuProofStore,
       ledger: this.publicLedger,
-      mintUrl: this.config.cashu?.mintUrl || `http://127.0.0.1:${this.config.cashu?.port || 3338}`,
-      mintPort: this.config.cashu?.port || 3338,
+      mintUrl: this.config.cashu?.mintUrl || null,
+      mintPort: this.config.cashu?.port || null,
       seedManager: this._cashuSeedManager,
     });
 

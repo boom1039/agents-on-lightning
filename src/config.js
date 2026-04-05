@@ -56,6 +56,9 @@ function expandPaths(config) {
     if (config.cashu.tlsCertPath) config.cashu.tlsCertPath = expandHome(config.cashu.tlsCertPath);
     if (config.cashu.macaroonPath) config.cashu.macaroonPath = expandHome(config.cashu.macaroonPath);
   }
+  if (config.help?.apiKeyFile) {
+    config.help.apiKeyFile = expandHome(config.help.apiKeyFile);
+  }
   return config;
 }
 

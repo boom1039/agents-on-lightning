@@ -106,6 +106,7 @@ safety:
     defaultCooldownMinutes: PRIVATE_VALUE
 
 help:
+  apiKeyFile: PRIVATE_PATH
   rateLimit: PRIVATE_VALUE
   rateWindowMs: PRIVATE_VALUE
   upstreamTimeoutMs: PRIVATE_VALUE
