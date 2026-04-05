@@ -3,6 +3,24 @@
 This repo deploys by git on the server.
 Do not commit server-local env files, config files, certs, macaroons, or data.
 
+## Keep these in git
+
+These files should match what prod runs:
+
+- `deploy/config/agents-on-lightning.env.example`
+- `deploy/config/config.yaml.example`
+- `deploy/systemd/agents-on-lightning.service.template`
+- `deploy/nginx/agents-on-lightning.conf.template`
+- `deploy/nginx/agents-on-lightning-proxy.conf.template`
+
+Keep these out of git:
+
+- real env values
+- real config values
+- certs
+- macaroons
+- live data
+
 ## Pick your own local values
 
 Replace these placeholders on the box:
@@ -56,6 +74,7 @@ sudo chown -R APP_USER:APP_USER APP_DIR APP_DATA_DIR
 
 ## 4. Write the env file
 
+Start from `deploy/config/agents-on-lightning.env.example`.
 Create `APP_CONFIG_DIR/agents-on-lightning.env`:
 
 ```dotenv
@@ -79,6 +98,7 @@ PYTHON3=/usr/bin/python3
 
 ## 5. Write the app config
 
+Start from `deploy/config/config.yaml.example`.
 Create `APP_CONFIG_DIR/config.yaml`:
 
 ```yaml
@@ -171,6 +191,7 @@ velocity:
 
 ## 6. Write the systemd unit
 
+Start from `deploy/systemd/agents-on-lightning.service.template`.
 Create `/etc/systemd/system/agents-on-lightning.service`:
 
 ```ini
@@ -229,6 +250,7 @@ sudo htpasswd -c /etc/nginx/.htpasswd-agents-dashboard YOUR_USERNAME
 
 ## 9. Put NGINX in front
 
+Start from `deploy/nginx/agents-on-lightning.conf.template` and `deploy/nginx/agents-on-lightning-proxy.conf.template`.
 Use your own domain names and certificate paths.
 Proxy the public site to `APP_HOST:APP_PORT`.
 If you want dashboard auth, protect `/journey/` and `/journey/three` in NGINX.

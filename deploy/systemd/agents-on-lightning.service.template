@@ -1,0 +1,27 @@
+[Unit]
+Description=Agents on Lightning API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=APP_USER
+Group=APP_USER
+WorkingDirectory=APP_DIR
+EnvironmentFile=APP_CONFIG_DIR/agents-on-lightning.env
+ExecStart=/usr/bin/node APP_DIR/src/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=APP_DATA_DIR APP_DIR/data
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,85 @@
+web:
+  port: APP_PORT
+
+nodes:
+  alpha:
+    host: LND_REST_HOST
+    restPort: LND_REST_PORT
+    macaroonPath: LND_MACAROON_PATH
+    tlsCertPath: LND_TLS_CERT_PATH
+
+cashu:
+  mintUrl: CASHU_MINT_URL
+  seedPath: CASHU_SEED_PATH
+
+# Required hidden service config.
+# Copy the real private values from your non-git local config.
+dangerRoutes:
+  ...
+
+channelOpen:
+  ...
+
+rebalance:
+  ...
+
+safety:
+  signedChannels:
+    defaultCooldownMinutes: PRIVATE_VALUE
+
+help:
+  apiKeyFile: PRIVATE_PATH
+  rateLimit: PRIVATE_VALUE
+  rateWindowMs: PRIVATE_VALUE
+  upstreamTimeoutMs: PRIVATE_VALUE
+  circuitFailureLimit: PRIVATE_VALUE
+  circuitFailureWindowMs: PRIVATE_VALUE
+  circuitOpenMs: PRIVATE_VALUE
+
+swap:
+  minSwapSats: PRIVATE_VALUE
+  maxSwapSats: PRIVATE_VALUE
+  maxConcurrentSwaps: PRIVATE_VALUE
+  pollIntervalMs: PRIVATE_VALUE
+  invoiceTimeoutSeconds: PRIVATE_VALUE
+  feeLimitSat: PRIVATE_VALUE
+  swapExpiryMs: PRIVATE_VALUE
+
+wallet:
+  maxRoutingFeeSats: PRIVATE_VALUE
+  withdrawalTimeoutSeconds: PRIVATE_VALUE
+
+rateLimits:
+  globalCap:
+    limit: PRIVATE_VALUE
+    windowMs: PRIVATE_VALUE
+  progressive:
+    resetWindowMs: PRIVATE_VALUE
+    thresholds:
+      - violations: PRIVATE_VALUE
+        multiplier: PRIVATE_VALUE
+      - violations: PRIVATE_VALUE
+        multiplier: PRIVATE_VALUE
+  categories:
+    registration: ...
+    analysis: ...
+    wallet_write: ...
+    wallet_read: ...
+    social_write: ...
+    social_read: ...
+    discovery: ...
+    mcp: ...
+    channel_instruct: ...
+    channel_read: ...
+    analytics_query: ...
+    capital_read: ...
+    capital_write: ...
+    market_read: ...
+    market_private_read: ...
+    market_write: ...
+    identity_read: ...
+    identity_write: ...
+    node_write: ...
+
+velocity:
+  dailyLimitSats: PRIVATE_VALUE
