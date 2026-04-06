@@ -329,7 +329,7 @@ export class ChannelOpener {
   // ---------------------------------------------------------------------------
 
   async _recoverSubmittingEntries() {
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) {
       console.warn('[ChannelOpener] No LND client for crash recovery — will retry on next load');
       return;
@@ -688,7 +688,7 @@ export class ChannelOpener {
       };
     }
 
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) {
       return {
         success: false,
@@ -940,7 +940,7 @@ export class ChannelOpener {
       await this._dedup.mark(instrHash);
 
       // Connect peer (best effort — may already be connected)
-      const client = this._nodeManager.getDefaultNodeOrNull();
+      const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
       if (client && safePeerAddress) {
         try {
           await client.connectPeer(peerPubkey, safePeerAddress);
@@ -1094,7 +1094,7 @@ export class ChannelOpener {
     );
     if (pendingEntries.length === 0) return;
 
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) return;
 
     // Call listChannels once and build lookup by channel_point

@@ -32,6 +32,16 @@ function showHint(text, duration = 2000) {
   setTimeout(() => { dragHint.style.display = 'none'; }, duration);
 }
 
+function formatSecurity(security) {
+  if (!security || typeof security !== 'object') return 'plain';
+  const flags = [];
+  if (security.moves_money) flags.push('money');
+  if (security.requires_ownership) flags.push('ownership');
+  if (security.requires_signature) flags.push('signed');
+  if (security.long_running) flags.push('long');
+  return flags.length > 0 ? flags.join(', ') : 'plain';
+}
+
 function copyToClipboard(label, json) {
   navigator.clipboard.writeText(json).then(() => {
     showHint(`${label} copied to clipboard!`);
@@ -51,6 +61,9 @@ function showRouteTooltip(rb, mx, my) {
     <hr>
     <div>Agents inside: ${s.activeAgents} &middot; In-flight: ${s.inFlight}</div>
     <div>2xx: ${s.status2xx} &middot; 4xx: ${s.status4xx} &middot; 5xx: ${s.status5xx}</div>
+    <div>Security: ${formatSecurity(rb.entry.security)}</div>
+    <div>Auth fail: ${s.authFailures || 0} &middot; Authz: ${s.authzDenied || 0}</div>
+    <div>Validate: ${s.validationFailures || 0} &middot; 429: ${s.rateLimitHits || 0}</div>
     <div class="tt-dim">Requests: ${s.finished} &middot; Height: ${rb.curH.toFixed(1)}</div>
   `;
   positionTooltip(mx, my);
@@ -69,6 +82,7 @@ function showAgentTooltip(agentId, mx, my) {
   }
   if (Number(data.lockedSats || 0) > 0) fundingRows.push(`<div>Locked: ${Number(data.lockedSats || 0).toLocaleString()} sats</div>`);
   if (data.lastFailureReason) fundingRows.push(`<div>Last failure: ${data.lastFailureReason}</div>`);
+  if (data.security) fundingRows.push(`<div>Security: ${formatSecurity(data.security)}</div>`);
   if (Number(data.cooldownRetryAtMs || 0) > Date.now()) {
     const secondsLeft = Math.ceil((Number(data.cooldownRetryAtMs) - Date.now()) / 1000);
     fundingRows.push(`<div>Retry in: ${secondsLeft}s</div>`);

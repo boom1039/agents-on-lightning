@@ -374,7 +374,7 @@ export class SignedInstructionExecutor {
 
     // Fetch current policy for context
     let current_policy = null;
-    const node = this._nodeManager.getDefaultNodeOrNull();
+    const node = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (node) {
       try {
         const report = await node.feeReport();
@@ -459,7 +459,7 @@ export class SignedInstructionExecutor {
       }
 
       // Step 10: LND reachable
-      const node = this._nodeManager.getDefaultNodeOrNull();
+      const node = this._nodeManager.getScopedDefaultNodeOrNull('operator');
       if (!node) {
         return {
           success: false,

@@ -79,6 +79,21 @@ const SKIPPED_DOC_ROUTE_TAGS = [
   NON_LIVE_ROUTE_TAG,
   MANIFEST_EXCLUDED_ROUTE_TAG,
 ];
+const SECURITY_FIELDS = [
+  'moves_money',
+  'requires_ownership',
+  'requires_signature',
+  'long_running',
+];
+const LONG_RUNNING_ROUTE_KEYS = new Set([
+  'POST /api/v1/analytics/execute',
+  'POST /api/v1/help',
+  'POST /api/v1/market/open',
+  'POST /api/v1/market/close',
+  'POST /api/v1/market/swap/lightning-to-onchain',
+  'POST /api/v1/market/fund-from-ecash',
+  'POST /api/v1/market/rebalance',
+]);
 
 function splitRouteKey(route) {
   const [method, ...pathParts] = route.split(' ');
@@ -206,6 +221,19 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function isBoolean(value) {
+  return typeof value === 'boolean';
+}
+
+function normalizeSecurityMeta(value = {}) {
+  return {
+    moves_money: value?.moves_money === true,
+    requires_ownership: value?.requires_ownership === true,
+    requires_signature: value?.requires_signature === true,
+    long_running: value?.long_running === true,
+  };
+}
+
 function validateRouteMeta({ method, path, file, line, meta = {} }) {
   const missing = [];
   const invalid = [];
@@ -223,6 +251,32 @@ function validateRouteMeta({ method, path, file, line, meta = {} }) {
 
   if (!Array.isArray(meta.tags) || meta.tags.length === 0) missing.push('tags');
   else if (!meta.tags.includes(meta.domain)) invalid.push(`tags missing domain=${meta.domain}`);
+
+  const routeKey = `${method} ${path}`;
+  const security = meta.security;
+  if (!security || typeof security !== 'object' || Array.isArray(security)) {
+    missing.push('security');
+  } else {
+    for (const field of SECURITY_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(security, field)) missing.push(`security.${field}`);
+      else if (!isBoolean(security[field])) invalid.push(`security.${field}=${security[field]}`);
+    }
+
+    if (SECURITY_FIELDS.every((field) => isBoolean(security[field]))) {
+      if (meta.auth === 'public' && security.moves_money) invalid.push('public route cannot move money');
+      if (meta.auth === 'public' && security.requires_ownership) invalid.push('public route cannot require ownership');
+      if (meta.auth === 'public' && security.requires_signature) invalid.push('public route cannot require signature');
+      if (security.moves_money && meta.auth !== 'agent') invalid.push('money route must use auth=agent');
+      if (security.moves_money && !security.requires_ownership) invalid.push('money route must require ownership');
+      if (security.requires_signature && meta.auth !== 'agent') invalid.push('signed route must use auth=agent');
+      if (security.long_running && !LONG_RUNNING_ROUTE_KEYS.has(routeKey)) {
+        invalid.push(`security.long_running=true but ${routeKey} is not in the timeout inventory`);
+      }
+      if (!security.long_running && LONG_RUNNING_ROUTE_KEYS.has(routeKey)) {
+        invalid.push(`security.long_running=false but ${routeKey} is in the timeout inventory`);
+      }
+    }
+  }
 
   if (missing.length === 0 && invalid.length === 0) return;
 
@@ -395,6 +449,7 @@ function buildCatalogEntry({
   const tags = Array.isArray(meta.tags) ? meta.tags.map((tag) => `${tag}`) : [];
   const pathGroup = classifyPathGroup(path);
   const domain = meta.domain.trim();
+  const security = normalizeSecurityMeta(meta.security);
   return {
     key,
     method,
@@ -411,9 +466,18 @@ function buildCatalogEntry({
     tags,
     label: meta.label.trim(),
     order: normalizeOrder(meta.order),
+    security,
     canonical: key === canonicalKey,
     canonical_key: canonicalKey,
     alias_of: key === canonicalKey ? null : canonicalKey,
+  };
+}
+
+function buildManifestRoute(route) {
+  return {
+    ...route,
+    journey: route.journey ? { ...route.journey } : null,
+    security: route.security ? { ...route.security } : null,
   };
 }
 
@@ -915,13 +979,12 @@ export function resolveTrackedSurface({ method, path, doc_kind = null }) {
 }
 
 export function getAgentSurfaceManifest() {
+  const routes = ROUTE_CATALOG.map((route) => buildManifestRoute(route));
   return {
     built_at: Date.now(),
     journey_phases: JOURNEY_PHASES.map((phase) => ({ ...phase })),
-    routes: ROUTE_CATALOG.map((route) => ({
-      ...route,
-      journey: route.journey ? { ...route.journey } : null,
-    })),
+    routes,
+    route_lookup: Object.fromEntries(routes.map((route) => [route.key, route])),
     docs: DOC_NODES.map((doc) => ({
       doc_id: doc.doc_id,
       title: doc.title,

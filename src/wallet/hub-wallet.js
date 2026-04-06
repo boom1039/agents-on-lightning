@@ -327,6 +327,6 @@ export class HubWallet {
     if (!this._nodeManager) return null;
     const names = this._nodeManager.getNodeNames();
     if (names.length === 0) return null;
-    return this._nodeManager.getNode(names[0]);
+    return this._nodeManager.getScopedDefaultNodeOrNull('wallet') || this._nodeManager.getNode(names[0]);
   }
 }

@@ -6,6 +6,10 @@ nodes:
     host: LND_REST_HOST
     restPort: LND_REST_PORT
     macaroonPath: LND_MACAROON_PATH
+    macaroonRoles:
+      read: LND_READ_MACAROON_PATH
+      wallet: LND_WALLET_MACAROON_PATH
+      operator: LND_OPERATOR_MACAROON_PATH
     tlsCertPath: LND_TLS_CERT_PATH
 
 cashu:

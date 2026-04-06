@@ -101,7 +101,7 @@ export class DepositTracker {
       throw new Error('generateAddress requires a valid agentId');
     }
 
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('wallet');
     if (!client) {
       throw new Error('No LND node available to generate deposit address');
     }
@@ -155,7 +155,7 @@ export class DepositTracker {
    * watching addresses, detect new deposits, update confirmations.
    */
   async pollForDeposits() {
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('wallet');
     if (!client) return;
 
     // Build lookup of addresses we care about (watching or pending_deposit)

@@ -71,20 +71,24 @@ function sanitizeDashboardResultMeta(input = {}) {
   return clean;
 }
 
-export function logRateLimitHit(category, ip, agentId) {
+export function logRateLimitHit(category, ip, agentId, routePath = null, method = null) {
   return _append({
     event: 'rate_limit_hit',
     category,
     ip: ip || null,
     agent_id: agentId || null,
+    path: routePath || null,
+    method: method ? String(method).toUpperCase() : null,
   });
 }
 
-export function logAuthFailure(ip, hadBearerToken) {
+export function logAuthFailure(ip, hadBearerToken, routePath = null, method = null) {
   return _append({
     event: 'auth_failure',
     ip: ip || null,
     had_bearer_token: Boolean(hadBearerToken),
+    path: routePath || null,
+    method: method ? String(method).toUpperCase() : null,
   });
 }
 

@@ -27,7 +27,7 @@ export function operatorControlRoutes(daemon) {
       const profile = daemon.agentRegistry.getById(agent_id);
       if (!profile) return res.status(404).json({ error: 'Agent not found' });
 
-      const node = daemon.nodeManager.getDefaultNodeOrNull();
+      const node = daemon.nodeManager.getScopedDefaultNodeOrNull('operator');
       if (!node) return res.status(503).json({ error: 'LND node not available' });
 
       const channelsResp = await node.listChannels();

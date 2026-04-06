@@ -47,6 +47,11 @@ function expandPaths(config) {
       const node = config.nodes[nodeName];
       if (node.lndDir) node.lndDir = expandHome(node.lndDir);
       if (node.macaroonPath) node.macaroonPath = expandHome(node.macaroonPath);
+      if (node.macaroonRoles && typeof node.macaroonRoles === 'object') {
+        for (const role of Object.keys(node.macaroonRoles)) {
+          node.macaroonRoles[role] = expandHome(node.macaroonRoles[role]);
+        }
+      }
       if (node.tlsCertPath) node.tlsCertPath = expandHome(node.tlsCertPath);
     }
   }

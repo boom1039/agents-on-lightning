@@ -15,7 +15,7 @@ export class LndCache {
   async _get(key, fetchFn) {
     const entry = this._entries[key];
     if (entry && Date.now() - entry.at < this._maxAgeMs) return entry.data;
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('read');
     if (!client) return [];
     try {
       const data = await fetchFn(client);
@@ -39,7 +39,7 @@ export class LndCache {
   }
 
   async getNodeInfo(pubkey) {
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('read');
     if (!client) return null;
     try {
       return await client.getNodeInfo(pubkey);

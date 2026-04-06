@@ -82,7 +82,7 @@ export function agentIdentityRoutes(daemon) {
   // =========================================================================
 
   // Register a new agent identity.
-  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"register","summary":"Register a new agent identity.","order":110,"tags":["identity","write","public"],"doc":["llms.txt","skills/analytics-catalog-and-quote.txt","skills/analytics-execute-and-history.txt","skills/capital-balance-and-activity.txt","skills/capital-deposit-and-status.txt","skills/capital-withdraw-and-help.txt","skills/channels-signed-channel-lifecycle.txt","skills/identity.txt","skills/market-close.txt","skills/market-open-flow.txt","skills/market-swap-ecash-and-rebalance.txt","skills/market-teaching-surfaces.txt","skills/social-alliances.txt","skills/social-messaging.txt","skills/wallet.txt"]}
+  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"register","summary":"Register a new agent identity.","order":110,"tags":["identity","write","public"],"doc":["llms.txt","skills/analytics-catalog-and-quote.txt","skills/analytics-execute-and-history.txt","skills/capital-balance-and-activity.txt","skills/capital-deposit-and-status.txt","skills/capital-withdraw-and-help.txt","skills/channels-signed-channel-lifecycle.txt","skills/identity.txt","skills/market-close.txt","skills/market-open-flow.txt","skills/market-swap-ecash-and-rebalance.txt","skills/market-teaching-surfaces.txt","skills/social-alliances.txt","skills/social-messaging.txt","skills/wallet.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/agents/register', rateLimit('registration'), async (req, res) => {
     const ip = getSocketAddress(req) || 'unknown';
     try {
@@ -103,7 +103,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Read agents me.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"me","summary":"Read agents me.","order":120,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"me","summary":"Read agents me.","order":120,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const profile = await daemon.agentRegistry.getFullProfile(req.agentId);
@@ -123,7 +123,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Update agents me.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"me","summary":"Update agents me.","order":130,"tags":["identity","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/identity.txt","skills/market-close.txt","skills/market-open-flow.txt","skills/market-swap-ecash-and-rebalance.txt","skills/signing-secp256k1.txt"]}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"me","summary":"Update agents me.","order":130,"tags":["identity","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/identity.txt","skills/market-close.txt","skills/market-open-flow.txt","skills/market-swap-ecash-and-rebalance.txt","skills/signing-secp256k1.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.put('/api/v1/agents/me', auth, rateLimit('identity_write'), async (req, res) => {
     try {
       const updated = await daemon.agentRegistry.updateProfile(req.agentId, req.body);
@@ -144,14 +144,14 @@ export function agentIdentityRoutes(daemon) {
   };
 
   // Read agents me referral code.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral-code","summary":"Read agents me referral code.","order":140,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral-code","summary":"Read agents me referral code.","order":140,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me/referral-code', auth, rateLimit('identity_read'), sendReferralCode);
   // Read agents me referral.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral","summary":"Read agents me referral.","order":150,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral","summary":"Read agents me referral.","order":150,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me/referral', auth, rateLimit('identity_read'), sendReferralCode);
 
   // Read agents by id.
-  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"agent","summary":"Read agents by id.","order":160,"tags":["identity","read","dynamic","public"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"agent","summary":"Read agents by id.","order":160,"tags":["identity","read","dynamic","public"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/:id', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason, {
@@ -168,7 +168,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Read agents by id lineage.
-  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"lineage","summary":"Read agents by id lineage.","order":170,"tags":["identity","read","dynamic","public"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"lineage","summary":"Read agents by id lineage.","order":170,"tags":["identity","read","dynamic","public"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/:id/lineage', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
     if (!idCheck.valid) return err400Validation(res, idCheck.reason);
@@ -187,7 +187,7 @@ export function agentIdentityRoutes(daemon) {
   // =========================================================================
 
   // Connect node.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"connect","summary":"Connect node.","order":200,"tags":["identity","write","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"connect","summary":"Connect node.","order":200,"tags":["identity","write","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/node/connect', auth, rateLimit('node_write'), async (req, res) => {
     try {
       const unexpected = findUnexpectedKeys(req.body, ['host', 'macaroon', 'tls_cert', 'tier']);
@@ -266,7 +266,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Test node test connection.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"test-connection","summary":"Test node test connection.","order":210,"tags":["identity","write","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"test-connection","summary":"Test node test connection.","order":210,"tags":["identity","write","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/node/test-connection', auth, rateLimit('node_write'), async (req, res) => {
     try {
       const unexpected = findUnexpectedKeys(req.body, ['host', 'macaroon', 'tls_cert']);
@@ -317,7 +317,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Read node status.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"status","summary":"Read node status.","order":220,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Node","label":"status","summary":"Read node status.","order":220,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/node/status', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const state = await daemon.agentRegistry.getFullProfile(req.agentId);
@@ -335,7 +335,7 @@ export function agentIdentityRoutes(daemon) {
   // =========================================================================
 
   // Read agents me dashboard.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"dashboard","summary":"Read agents me dashboard.","order":180,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"dashboard","summary":"Read agents me dashboard.","order":180,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me/dashboard', auth, rateLimit('identity_read'), async (req, res) => {
     const agentId = req.agentId;
     const dashboard = {};
@@ -405,7 +405,7 @@ export function agentIdentityRoutes(daemon) {
   // =========================================================================
 
   // Submit actions.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"submit","summary":"Submit actions.","order":300,"tags":["identity","write","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"submit","summary":"Submit actions.","order":300,"tags":["identity","write","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/actions/submit', auth, rateLimit('social_write'), async (req, res) => {
     try {
       const unexpected = findUnexpectedKeys(req.body, ['action_type', 'params', 'description']);
@@ -451,7 +451,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Read actions history.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"history","summary":"Read actions history.","order":310,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"history","summary":"Read actions history.","order":310,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/actions/history', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);
@@ -462,7 +462,7 @@ export function agentIdentityRoutes(daemon) {
   });
 
   // Read actions by id.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"action","summary":"Read actions by id.","order":320,"tags":["identity","read","dynamic","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"action","summary":"Read actions by id.","order":320,"tags":["identity","read","dynamic","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/actions/:id', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const actions = await daemon.agentRegistry.getActions(req.agentId);

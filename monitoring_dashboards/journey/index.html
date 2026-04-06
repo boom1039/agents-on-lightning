@@ -357,6 +357,7 @@
         canonical: route.canonical !== false,
         summary: route.summary || null,
         auth: route.auth || null,
+        security: route.security ? { ...route.security } : null,
         sourceFile: route.source_file || null,
         sourceLine: Number.isInteger(route.source_line) ? route.source_line : null,
         tags: Array.isArray(route.tags) ? route.tags.slice() : [],
@@ -370,6 +371,10 @@
         status2xx: 0,
         status4xx: 0,
         status5xx: 0,
+        authFailures: 0,
+        authzDenied: 0,
+        validationFailures: 0,
+        rateLimitHits: 0,
         lastEventTime: 0,
       };
     }
@@ -503,6 +508,33 @@
     function formatTagList(tags) {
       if (!Array.isArray(tags) || tags.length === 0) return '-';
       return tags.join(', ');
+    }
+
+    function formatSecurityList(security) {
+      if (!security || typeof security !== 'object') return '-';
+      const flags = [];
+      if (security.moves_money) flags.push('money');
+      if (security.requires_ownership) flags.push('ownership');
+      if (security.requires_signature) flags.push('signed');
+      if (security.long_running) flags.push('long');
+      return flags.length > 0 ? flags.join(', ') : 'plain';
+    }
+
+    function securityGlyphs(security) {
+      if (!security || typeof security !== 'object') return '';
+      const flags = [];
+      if (security.moves_money) flags.push('M');
+      if (security.requires_ownership) flags.push('O');
+      if (security.requires_signature) flags.push('S');
+      if (security.long_running) flags.push('L');
+      return flags.join(' ');
+    }
+
+    function routeWarningTotal(route) {
+      return Number(route.authFailures || 0)
+        + Number(route.authzDenied || 0)
+        + Number(route.validationFailures || 0)
+        + Number(route.rateLimitHits || 0);
     }
 
     function formatDocList(docIds, limit = 4) {
@@ -1017,6 +1049,7 @@
           canonical: agent.canonical,
           summary: agent.summary,
           auth: agent.auth,
+          security: agent.security,
           sourceFile: agent.sourceFile,
           sourceLine: agent.sourceLine,
           tags: agent.tags,
@@ -1026,6 +1059,10 @@
           docIds: agent.docIds,
           linkedRouteKeys: agent.linkedRouteKeys,
           linkedDocIds: agent.linkedDocIds,
+          authFailures: agent.authFailures,
+          authzDenied: agent.authzDenied,
+          validationFailures: agent.validationFailures,
+          rateLimitHits: agent.rateLimitHits,
           lastEventTime: agent.lastEventTime,
         });
       }
@@ -1056,6 +1093,7 @@
           canonical: event.canonical,
           summary: event.summary,
           auth: event.auth,
+          security: event.security,
           sourceFile: event.sourceFile,
           sourceLine: event.sourceLine,
           tags: event.tags,
@@ -1065,6 +1103,10 @@
           docIds: event.docIds,
           linkedRouteKeys: event.linkedRouteKeys,
           linkedDocIds: event.linkedDocIds,
+          authFailures: event.auth_failures,
+          authzDenied: event.authz_denied,
+          validationFailures: event.validation_failures,
+          rateLimitHits: event.rate_limit_hits,
           lastEventTime: event.ts,
         });
       }
@@ -1083,6 +1125,7 @@
           canonical: event.agent.canonical,
           summary: event.agent.summary,
           auth: event.agent.auth,
+          security: event.agent.security,
           sourceFile: event.agent.sourceFile,
           sourceLine: event.agent.sourceLine,
           tags: event.agent.tags,
@@ -1092,6 +1135,10 @@
           docIds: event.agent.docIds,
           linkedRouteKeys: event.agent.linkedRouteKeys,
           linkedDocIds: event.agent.linkedDocIds,
+          authFailures: event.agent.authFailures,
+          authzDenied: event.agent.authzDenied,
+          validationFailures: event.agent.validationFailures,
+          rateLimitHits: event.agent.rateLimitHits,
           lastEventTime: event.agent.lastEventTime,
         });
       }
@@ -1284,6 +1331,25 @@
         }
       }
 
+      const securityText = securityGlyphs(route.security);
+      const warningTotal = routeWarningTotal(route);
+      if (tile.h > 28) {
+        if (securityText) {
+          ctx.fillStyle = '#8b949e';
+          ctx.font = '600 7px "SF Mono", monospace';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(securityText, tile.x + 4, tile.y + tile.h - 4);
+        }
+        if (warningTotal > 0) {
+          ctx.fillStyle = warningTotal >= 5 ? '#f85149' : '#d29922';
+          ctx.font = '600 7px "SF Mono", monospace';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`WARN ${warningTotal}`, tile.x + tile.w - 4, tile.y + tile.h - 4);
+        }
+      }
+
       const inner = {
         x: tile.x + 4,
         y: tile.y + 18,
@@ -1422,6 +1488,7 @@
           tooltipRow('surface', agent.surfaceType),
           agent.summary ? tooltipRow('summary', agent.summary) : '',
           agent.auth ? tooltipRow('auth', agent.auth) : '',
+          agent.security ? tooltipRow('security', formatSecurityList(agent.security)) : '',
           agent.docTitle ? tooltipRow('doc', agent.docTitle) : '',
           (!agent.docTitle && agent.docId) ? tooltipRow('doc', agent.docId) : '',
           (Array.isArray(agent.docIds) && agent.docIds.length > 0) ? tooltipRow('linked docs', formatDocList(agent.docIds)) : '',
@@ -1476,12 +1543,17 @@
           ${tooltipRow('surface', route.surfaceType)}
           ${route.summary ? tooltipRow('summary', route.summary) : ''}
           ${route.auth ? tooltipRow('auth', route.auth) : ''}
+          ${route.security ? tooltipRow('security', formatSecurityList(route.security)) : ''}
           ${(route.docTitle || route.docId) ? tooltipRow('doc', route.docTitle || route.docId) : ''}
           ${(Array.isArray(route.docIds) && route.docIds.length > 0) ? tooltipRow('linked docs', formatDocList(route.docIds)) : ''}
           ${(Array.isArray(route.linkedRouteKeys) && route.linkedRouteKeys.length > 0) ? tooltipRow('linked routes', route.linkedRouteKeys.length) : ''}
           ${(Array.isArray(route.linkedDocIds) && route.linkedDocIds.length > 0) ? tooltipRow('linked docs graph', route.linkedDocIds.length) : ''}
           ${tooltipRow('tags', formatTagList(route.tags))}
           ${tooltipRow('source', formatSourceRef(route))}
+          ${tooltipRow('auth failures', Number(route.authFailures || 0))}
+          ${tooltipRow('authz denied', Number(route.authzDenied || 0))}
+          ${tooltipRow('validation fails', Number(route.validationFailures || 0))}
+          ${tooltipRow('rate limits', Number(route.rateLimitHits || 0))}
           ${tooltipRow('agents', route.agents.length)}
           ${tooltipRow('in flight', route.inFlight || 0)}
           ${tooltipRow('oldest stay', formatDurationLong(oldest))}

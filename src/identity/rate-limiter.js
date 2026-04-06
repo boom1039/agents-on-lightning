@@ -309,6 +309,8 @@ export function rateLimit(category) {
     try {
     const socketIp = getSocketAddress(req) || 'unknown';
     const agentId = req.agentId || null;
+    const routePath = req.path || req.originalUrl || null;
+    const method = req.method || null;
 
     // Exempt localhost (dashboard, test runner, operator)
     if (isLoopbackAddress(socketIp)) return next();
@@ -316,7 +318,7 @@ export function rateLimit(category) {
     // 1. Global server cap
     const globalCheck = await _checkGlobalCap();
     if (!globalCheck.allowed) {
-      logRateLimitHit('global', socketIp, agentId);
+      logRateLimitHit('global', socketIp, agentId, routePath, method);
       return err429(res, { category: 'global', retryAfter: globalCheck.retryAfter });
     }
 
@@ -324,7 +326,7 @@ export function rateLimit(category) {
     if (config.perIp) {
       const ipCheck = await checkAndIncrement(`${category}:ip:${socketIp}`, config.perIp, config.windowMs);
       if (!ipCheck.allowed) {
-        logRateLimitHit(category, socketIp, agentId);
+        logRateLimitHit(category, socketIp, agentId, routePath, method);
         return err429(res, { category, retryAfter: ipCheck.retryAfter });
       }
     }
@@ -338,7 +340,7 @@ export function rateLimit(category) {
       if (!agentCheck.allowed) {
         recordViolation(agentId);
         const penaltyInfo = multiplier > 1 ? ` (penalty ${multiplier}x due to repeated violations)` : '';
-        logRateLimitHit(category, socketIp, agentId);
+        logRateLimitHit(category, socketIp, agentId, routePath, method);
         return err429(res, { category, retryAfter: agentCheck.retryAfter, penaltyMultiplier: multiplier, penaltyInfo });
       }
     }
@@ -347,7 +349,7 @@ export function rateLimit(category) {
     const catCheck = await checkAndIncrement(`${category}:global`, config.global, config.windowMs);
     if (!catCheck.allowed) {
       if (agentId) recordViolation(agentId);
-      logRateLimitHit(category, socketIp, agentId);
+      logRateLimitHit(category, socketIp, agentId, routePath, method);
       return err429(res, { category, retryAfter: catCheck.retryAfter });
     }
 
@@ -367,10 +369,12 @@ export function rateLimit(category) {
 export async function globalRateLimit(req, res, next) {
   try {
   const socketIp = getSocketAddress(req) || 'unknown';
+  const routePath = req.path || req.originalUrl || null;
+  const method = req.method || null;
   if (isLoopbackAddress(socketIp)) return next();
   const globalCheck = await _checkGlobalCap();
   if (!globalCheck.allowed) {
-    logRateLimitHit('global', socketIp, null);
+    logRateLimitHit('global', socketIp, null, routePath, method);
     return err429(res, { category: 'global', retryAfter: globalCheck.retryAfter });
   }
   next();

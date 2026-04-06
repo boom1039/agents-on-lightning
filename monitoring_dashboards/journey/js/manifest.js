@@ -32,6 +32,12 @@ function normalizeRoute(route = {}) {
     endpoint: route.endpoint || journey.endpoint || route.label || route.path,
     order: Number.isInteger(route.order) ? route.order : (Number.isInteger(journey.order) ? journey.order : null),
     domain: route.domain || journey.phase_key || 'other',
+    summary: route.summary || null,
+    auth: route.auth || null,
+    tags: Array.isArray(route.tags) ? route.tags.slice() : [],
+    security: route.security ? { ...route.security } : null,
+    sourceFile: route.source_file || null,
+    sourceLine: Number.isInteger(route.source_line) ? route.source_line : null,
   };
 }
 

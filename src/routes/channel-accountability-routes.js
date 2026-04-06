@@ -62,14 +62,14 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: my assigned channels ---
   // Read channels mine.
-  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"mine","summary":"Read channels mine.","order":100,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/market-close.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"mine","summary":"Read channels mine.","order":100,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/market-close.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/mine', auth, rateLimit('channel_read'), async (req, res) => {
     try {
       await daemon.channelCloser?.refreshNow?.();
       const assignments = daemon.channelAssignments.getByAgent(req.agentId);
 
       // Enrich with current fees from LND
-      const node = daemon.nodeManager.getDefaultNodeOrNull();
+      const node = daemon.nodeManager.getScopedDefaultNodeOrNull('read');
       let feeMap = new Map();
       if (node) {
         try {
@@ -97,7 +97,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: preview signed instruction (dry-run validation) ---
   // Preview channels.
-  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"preview","summary":"Preview channels.","order":110,"tags":["channels","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"preview","summary":"Preview channels.","order":110,"tags":["channels","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":true,"long_running":false}}
   router.post('/api/v1/channels/preview', auth, rateLimit('channel_read'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -152,7 +152,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: submit signed instruction ---
   // Create instructions for channels.
-  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"instruct","summary":"Create instructions for channels.","order":120,"tags":["channels","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"instruct","summary":"Create instructions for channels.","order":120,"tags":["channels","write","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":true,"long_running":false}}
   router.post('/api/v1/channels/instruct', auth, rateLimit('channel_instruct'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -249,7 +249,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Agent: instruction history ---
   // Read channels instructions.
-  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"instructions","summary":"Read channels instructions.","order":130,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"instructions","summary":"Read channels instructions.","order":130,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/instructions', auth, rateLimit('channel_read'), async (req, res) => {
     try {
       const limit = clampQueryInt(req.query.limit, 100, 1, 1000);
@@ -263,7 +263,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: audit chain ---
   // Read channels audit.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Audit","label":"audit","summary":"Read channels audit.","order":200,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Audit","label":"audit","summary":"Read channels audit.","order":200,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/audit', rateLimit('channel_read'), async (_req, res) => {
     try {
       const limit = clampQueryInt(_req.query.limit, 100, 1, 1000);
@@ -282,7 +282,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: audit chain for specific channel ---
   // Read channels audit by chanId.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Audit","label":"audit-by-channel","summary":"Read channels audit by chanId.","order":210,"tags":["channels","read","dynamic","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Audit","label":"audit-by-channel","summary":"Read channels audit by chanId.","order":210,"tags":["channels","read","dynamic","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/audit/:chanId', rateLimit('channel_read'), async (req, res) => {
     const chanCheck = validateChannelIdOrPoint(req.params.chanId);
     if (!chanCheck.valid) return res.status(400).json({ error: chanCheck.reason });
@@ -303,7 +303,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: verify chain integrity ---
   // Read channels verify.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Verify","label":"verify","summary":"Read channels verify.","order":300,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Verify","label":"verify","summary":"Read channels verify.","order":300,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/verify', rateLimit('channel_read'), async (_req, res) => {
     try {
       const result = await daemon.channelAuditLog.verify();
@@ -316,7 +316,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: verify chain for specific channel ---
   // Read channels verify by chanId.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Verify","label":"verify-by-channel","summary":"Read channels verify by chanId.","order":310,"tags":["channels","read","dynamic","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Verify","label":"verify-by-channel","summary":"Read channels verify by chanId.","order":310,"tags":["channels","read","dynamic","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/verify/:chanId', rateLimit('channel_read'), async (req, res) => {
     const chanCheck = validateChannelIdOrPoint(req.params.chanId);
     if (!chanCheck.valid) return res.status(400).json({ error: chanCheck.reason });
@@ -331,7 +331,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: violations ---
   // Read channels violations.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Status","label":"violations","summary":"Read channels violations.","order":400,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Status","label":"violations","summary":"Read channels violations.","order":400,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/violations', rateLimit('channel_read'), async (req, res) => {
     try {
       const limit = clampQueryInt(req.query.limit, 100, 1, 1000);
@@ -348,7 +348,7 @@ export function channelAccountabilityRoutes(daemon) {
 
   // --- Public: monitor status ---
   // Read channels status.
-  // @agent-route {"auth":"public","domain":"channels","subgroup":"Status","label":"status","summary":"Read channels status.","order":410,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"]}
+  // @agent-route {"auth":"public","domain":"channels","subgroup":"Status","label":"status","summary":"Read channels status.","order":410,"tags":["channels","read","public"],"doc":["skills/channels-audit-and-monitoring.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/status', rateLimit('channel_read'), async (_req, res) => {
     try {
       const monitorStatus = daemon.channelMonitor.getStatus();

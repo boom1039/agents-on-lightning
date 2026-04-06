@@ -66,6 +66,7 @@ function surfaceEventFields(surface) {
     canonical: surface.canonical,
     summary: surface.summary || null,
     auth: surface.auth || null,
+    security: surface.security ? { ...surface.security } : null,
     sourceFile: surface.sourceFile || null,
     sourceLine: Number.isInteger(surface.sourceLine) ? surface.sourceLine : null,
     tags: cloneList(surface.tags),
@@ -90,6 +91,7 @@ function applySurfaceMeta(target, surface) {
   target.canonical = surface.canonical;
   target.summary = surface.summary || null;
   target.auth = surface.auth || null;
+  target.security = surface.security ? { ...surface.security } : null;
   target.sourceFile = surface.sourceFile || null;
   target.sourceLine = Number.isInteger(surface.sourceLine) ? surface.sourceLine : null;
   target.tags = cloneList(surface.tags);
@@ -151,6 +153,10 @@ export class LiveJourneyState {
         status2xx: 0,
         status4xx: 0,
         status5xx: 0,
+        authFailures: 0,
+        authzDenied: 0,
+        validationFailures: 0,
+        rateLimitHits: 0,
         lastEventTime: 0,
       };
       applySurfaceMeta(route, surface);
@@ -196,6 +202,7 @@ export class LiveJourneyState {
       canonical: agent.canonical,
       summary: agent.summary || null,
       auth: agent.auth || null,
+      security: agent.security ? { ...agent.security } : null,
       sourceFile: agent.sourceFile || null,
       sourceLine: Number.isInteger(agent.sourceLine) ? agent.sourceLine : null,
       tags: cloneList(agent.tags),
@@ -459,6 +466,36 @@ export class LiveJourneyState {
       return normalized;
     }
 
+    if (
+      event.event === 'auth_failure'
+      || event.event === 'authz_denied'
+      || event.event === 'validation_failure'
+      || event.event === 'rate_limit_hit'
+    ) {
+      const surface = describeJourneySurface(event);
+      if (surface.surfaceType === 'other') return null;
+      const route = this._ensureRoute(surface);
+      route.lastEventTime = ts;
+
+      if (event.event === 'auth_failure') route.authFailures += 1;
+      else if (event.event === 'authz_denied') route.authzDenied += 1;
+      else if (event.event === 'validation_failure') route.validationFailures += 1;
+      else if (event.event === 'rate_limit_hit') route.rateLimitHits += 1;
+
+      const normalized = {
+        event: event.event,
+        ts,
+        agent_id: event.agent_id || null,
+        ...surfaceEventFields(surface),
+        auth_failures: route.authFailures,
+        authz_denied: route.authzDenied,
+        validation_failures: route.validationFailures,
+        rate_limit_hits: route.rateLimitHits,
+      };
+      this._recordRecent(normalized);
+      return normalized;
+    }
+
     if (event.event === 'request_start') {
       const surface = describeJourneySurface(event);
       if (surface.surfaceType === 'other') return null;
@@ -603,6 +640,7 @@ export class LiveJourneyState {
         canonical: route.canonical,
         summary: route.summary || null,
         auth: route.auth || null,
+        security: route.security ? { ...route.security } : null,
         sourceFile: route.sourceFile || null,
         sourceLine: Number.isInteger(route.sourceLine) ? route.sourceLine : null,
         tags: cloneList(route.tags),
@@ -618,6 +656,10 @@ export class LiveJourneyState {
         status2xx: route.status2xx,
         status4xx: route.status4xx,
         status5xx: route.status5xx,
+        authFailures: route.authFailures,
+        authzDenied: route.authzDenied,
+        validationFailures: route.validationFailures,
+        rateLimitHits: route.rateLimitHits,
         lastEventTime: route.lastEventTime,
       }));
 

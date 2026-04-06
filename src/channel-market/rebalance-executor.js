@@ -139,7 +139,7 @@ export class RebalanceExecutor {
   // ---------------------------------------------------------------------------
 
   async _recoverInflightPayments() {
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) {
       console.warn('[RebalanceExecutor] No LND client for crash recovery — will retry on next load');
       return;
@@ -330,7 +330,7 @@ export class RebalanceExecutor {
     }
 
     // Get LND client
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) {
       return { success: false, error: 'LND node not available', status: 503 };
     }
@@ -536,7 +536,7 @@ export class RebalanceExecutor {
       };
     }
 
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
     if (!client) {
       return { success: false, error: 'LND node not available', status: 503 };
     }

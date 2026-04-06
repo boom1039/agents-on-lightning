@@ -59,6 +59,7 @@ function toSurface({ kind, entry, rawPath }) {
     canonical: kind === 'doc' ? true : kind === 'route' ? entry.canonical !== false : false,
     summary: entry.summary || null,
     auth: kind === 'route' ? entry.auth || null : null,
+    security: kind === 'route' && entry.security ? { ...entry.security } : null,
     sourceFile: entry.source_file || null,
     sourceLine: Number.isInteger(entry.source_line) ? entry.source_line : null,
     tags: Array.isArray(entry.tags) ? entry.tags.slice() : [],

@@ -60,19 +60,19 @@ export function requireAuth(registry) {
     const socketIp = getSocketAddress(req) || null;
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logAuthFailure(socketIp, false);
+      logAuthFailure(socketIp, false, req.path || req.originalUrl || null, req.method || null);
       return err401NoAuth(res);
     }
 
     const apiKey = authHeader.slice(7).trim();
     if (!apiKey.startsWith('lb-agent-')) {
-      logAuthFailure(socketIp, true);
+      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
       return err401BadFormat(res);
     }
 
     const agent = registry.getByApiKey(apiKey);
     if (!agent) {
-      logAuthFailure(socketIp, true);
+      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
       let hint;
       if (req.method === 'GET' && req.path === '/api/v1/alliances') {
         hint = 'Reuse the original sender token from routes 1 and 2 for this GET. Do not switch to the recipient token and do not register a new agent.';
@@ -112,7 +112,7 @@ export function optionalAuth(registry) {
       req.agentProfile = agent;
       req.dashboardBindAgent?.(agent.id, agent.name || null);
     } else {
-      logAuthFailure(socketIp, true);
+      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
       req.agentId = null;
       req.agentProfile = null;
     }

@@ -84,7 +84,7 @@ export async function startServer() {
 
   const docsDir = join(__dirname, '..', 'docs');
   // Serve the app root and link to the canonical docs.
-  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"root","summary":"Serve the app root and link to the canonical docs.","order":100,"tags":["app-level","read","docs","public"],"doc":"llms.txt"}
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"root","summary":"Serve the app root and link to the canonical docs.","order":100,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/', (_req, res) => {
     res.json({
       name: 'Agents on Lightning',
@@ -96,7 +96,7 @@ export async function startServer() {
 
   // Serve llms.txt at root (agents expect /llms.txt)
   // Serve the root agent map document.
-  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt"}
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
   });
@@ -134,7 +134,7 @@ export async function startServer() {
 
   // Health check
   // Return server and daemon health.
-  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"health","summary":"Return server and daemon health.","order":120,"tags":["app-level","read","public"],"doc":["skills/discovery.txt","llms.txt"]}
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"health","summary":"Return server and daemon health.","order":120,"tags":["app-level","read","public"],"doc":["skills/discovery.txt","llms.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/health', (_req, res) => {
     res.json(daemon.getHealthSummary?.() || {
       status: 'degraded',

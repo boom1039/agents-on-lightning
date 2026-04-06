@@ -151,7 +151,7 @@ export class RevenueAttributionTracker {
   // ---------------------------------------------------------------------------
 
   async _processForwards() {
-    const client = this._nodeManager.getDefaultNodeOrNull();
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('read');
     if (!client) return;
 
     const now = Math.floor(Date.now() / 1000);

@@ -1,6 +1,8 @@
 import { NodeClient, LndError } from './client.js';
 import { SnapshotNodeClient } from './snapshot-node-client.js';
 
+const SCOPED_NODE_ROLES = new Set(['read', 'wallet', 'operator']);
+
 /**
  * Manages multiple LND NodeClient instances, keyed by name.
  *
@@ -21,6 +23,54 @@ export class NodeManager {
 
     /** @type {string|null} Name of the first node added */
     this._defaultName = null;
+    this._scopedDefaultNodes = new Map();
+  }
+
+  _normalizeScope(role = 'read') {
+    return SCOPED_NODE_ROLES.has(role) ? role : 'read';
+  }
+
+  async _connectClient(name, config) {
+    const client = new NodeClient({ name, ...config });
+    await client.init();
+
+    let info;
+    try {
+      info = await client.getInfo();
+    } catch (err) {
+      const detail = err instanceof LndError
+        ? `HTTP ${err.statusCode}: ${err.message}`
+        : err.message;
+      throw new Error(
+        `Failed to connect to LND node "${name}" at ${config.host}:${config.restPort}: ${detail}`
+      );
+    }
+
+    return { client, info };
+  }
+
+  async _initializeScopedDefaults(name, config, fallbackClient) {
+    this._scopedDefaultNodes.clear();
+
+    for (const role of SCOPED_NODE_ROLES) {
+      const rolePath = config?.macaroonRoles?.[role];
+      if (!rolePath || rolePath === config.macaroonPath) {
+        this._scopedDefaultNodes.set(role, fallbackClient);
+        continue;
+      }
+
+      try {
+        const { client } = await this._connectClient(`${name}:${role}`, {
+          ...config,
+          macaroonPath: rolePath,
+        });
+        this._scopedDefaultNodes.set(role, client);
+        console.log(`[NodeManager] Scoped ${role} macaroon ready for "${name}"`);
+      } catch (err) {
+        console.warn(`[NodeManager] Scoped ${role} macaroon failed for "${name}" — using default access: ${err.message}`);
+        this._scopedDefaultNodes.set(role, fallbackClient);
+      }
+    }
   }
 
   /**
@@ -43,23 +93,7 @@ export class NodeManager {
       throw new Error(`Node "${name}" is already registered.`);
     }
 
-    const client = new NodeClient({ name, ...config });
-
-    // Load TLS cert and macaroon from disk
-    await client.init();
-
-    // Validate the connection by querying the node
-    let info;
-    try {
-      info = await client.getInfo();
-    } catch (err) {
-      const detail = err instanceof LndError
-        ? `HTTP ${err.statusCode}: ${err.message}`
-        : err.message;
-      throw new Error(
-        `Failed to connect to LND node "${name}" at ${config.host}:${config.restPort}: ${detail}`
-      );
-    }
+    const { client, info } = await this._connectClient(name, config);
 
     const alias = info.alias || info.identity_pubkey?.slice(0, 12) || name;
     console.log(
@@ -74,6 +108,7 @@ export class NodeManager {
 
     if (this._defaultName === null) {
       this._defaultName = name;
+      await this._initializeScopedDefaults(name, config, client);
     }
 
     return client;
@@ -178,6 +213,16 @@ export class NodeManager {
   getDefaultNodeOrNull() {
     if (this._defaultName === null) return null;
     return this._nodes.get(this._defaultName) || null;
+  }
+
+  getScopedDefaultNode(role = 'read') {
+    const scope = this._normalizeScope(role);
+    return this._scopedDefaultNodes.get(scope) || this.getDefaultNode();
+  }
+
+  getScopedDefaultNodeOrNull(role = 'read') {
+    const scope = this._normalizeScope(role);
+    return this._scopedDefaultNodes.get(scope) || this.getDefaultNodeOrNull();
   }
 
   /**
@@ -319,6 +364,11 @@ export class NodeManager {
       // Promote the next node to default, or null if empty
       const first = this._nodes.keys().next();
       this._defaultName = first.done ? null : first.value;
+      this._scopedDefaultNodes.clear();
+      if (this._defaultName) {
+        const nextDefault = this._nodes.get(this._defaultName) || null;
+        for (const role of SCOPED_NODE_ROLES) this._scopedDefaultNodes.set(role, nextDefault);
+      }
     }
     return removed;
   }

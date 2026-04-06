@@ -52,7 +52,20 @@ function updateAgentFunding(data, agent) {
 // Route stat helpers
 
 function getStats(rk) {
-  if (!routeStats.has(rk)) routeStats.set(rk, { activeAgents:0, inFlight:0, finished:0, status2xx:0, status4xx:0, status5xx:0 });
+  if (!routeStats.has(rk)) {
+    routeStats.set(rk, {
+      activeAgents:0,
+      inFlight:0,
+      finished:0,
+      status2xx:0,
+      status4xx:0,
+      status5xx:0,
+      authFailures:0,
+      authzDenied:0,
+      validationFailures:0,
+      rateLimitHits:0,
+    });
+  }
   return routeStats.get(rk);
 }
 
@@ -197,10 +210,20 @@ function applySnapshot(snap) {
       activeAgents: r.activeAgents || 0, inFlight: r.inFlight || 0,
       finished: r.finished || 0, status2xx: r.status2xx || 0,
       status4xx: r.status4xx || 0, status5xx: r.status5xx || 0,
+      authFailures: r.authFailures || 0,
+      authzDenied: r.authzDenied || 0,
+      validationFailures: r.validationFailures || 0,
+      rateLimitHits: r.rateLimitHits || 0,
     });
     const box = routeBoxes.get(r.routeKey);
     if (box) {
       box.stats = routeStats.get(r.routeKey);
+      box.entry.summary = r.summary || box.entry.summary || null;
+      box.entry.auth = r.auth || box.entry.auth || null;
+      box.entry.security = r.security || box.entry.security || null;
+      box.entry.tags = Array.isArray(r.tags) ? r.tags.slice() : (box.entry.tags || []);
+      box.entry.sourceFile = r.sourceFile || box.entry.sourceFile || null;
+      box.entry.sourceLine = Number.isInteger(r.sourceLine) ? r.sourceLine : (box.entry.sourceLine ?? null);
       box.mat.opacity = (r.activeAgents > 0 || r.inFlight > 0) ? styleState.routeActiveOp : styleState.routeIdleOp;
     }
   }
@@ -292,6 +315,25 @@ function applyEvent(ev) {
 
     setRouteActive(toKey, true);
     if (ev.agent) updateAgentRecent(ev.agent_id, ev.agent);
+  }
+
+  if (
+    ev.event === 'auth_failure'
+    || ev.event === 'authz_denied'
+    || ev.event === 'validation_failure'
+    || ev.event === 'rate_limit_hit'
+  ) {
+    const rk = ev.routeKey;
+    const entry = routeKeyMap.get(rk);
+    if (!entry) return;
+    const stats = getStats(rk);
+    stats.authFailures = Number(ev.auth_failures || stats.authFailures || 0);
+    stats.authzDenied = Number(ev.authz_denied || stats.authzDenied || 0);
+    stats.validationFailures = Number(ev.validation_failures || stats.validationFailures || 0);
+    stats.rateLimitHits = Number(ev.rate_limit_hits || stats.rateLimitHits || 0);
+    const box = routeBoxes.get(rk);
+    if (box) box.stats = stats;
+    setRouteActive(rk, true);
   }
 
   if (ev.event === 'request_finish') {

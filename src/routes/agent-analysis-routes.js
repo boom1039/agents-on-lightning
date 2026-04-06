@@ -25,10 +25,10 @@ export function agentAnalysisRoutes(daemon) {
   // --- Network health (LND-direct) ---
 
   // Read analysis network health.
-  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Network","label":"network-health","summary":"Read analysis network health.","order":100,"tags":["analysis","read","public"],"doc":["skills/analysis-network-health.txt","skills/analysis.txt"]}
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Network","label":"network-health","summary":"Read analysis network health.","order":100,"tags":["analysis","read","public"],"doc":["skills/analysis-network-health.txt","skills/analysis.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/analysis/network-health', analysisRate, async (_req, res) => {
     try {
-      const client = daemon.nodeManager?.getDefaultNode();
+      const client = daemon.nodeManager?.getScopedDefaultNode('read');
       if (!client) {
         return res.json({
           error: 'No LND node connected',
@@ -76,13 +76,13 @@ export function agentAnalysisRoutes(daemon) {
   // --- Node profile (LND-direct) ---
 
   // Read analysis node by pubkey.
-  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Profiling","label":"node","summary":"Read analysis node by pubkey.","order":200,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-node-profile.txt","skills/analysis.txt"]}
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Profiling","label":"node","summary":"Read analysis node by pubkey.","order":200,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-node-profile.txt","skills/analysis.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/analysis/node/:pubkey', analysisRate, async (req, res) => {
     const check = validatePubkey(req.params.pubkey);
     if (!check.valid) return err400Validation(res, check.reason, { see: 'GET /api/v1/analysis/network-health' });
 
     try {
-      const client = daemon.nodeManager?.getDefaultNode();
+      const client = daemon.nodeManager?.getScopedDefaultNode('read');
       if (!client) return res.json({ error: 'No LND node connected' });
 
       const nodeInfo = await client.getNodeInfo(req.params.pubkey);
@@ -105,13 +105,13 @@ export function agentAnalysisRoutes(daemon) {
   // --- Suggest peers (LND one-hop scan → Python scoring) ---
 
   // Read analysis suggest peers by pubkey.
-  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Peers","label":"suggest-peers","summary":"Read analysis suggest peers by pubkey.","order":300,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-suggest-peers.txt","skills/analysis.txt"]}
+  // @agent-route {"auth":"public","domain":"analysis","subgroup":"Peers","label":"suggest-peers","summary":"Read analysis suggest peers by pubkey.","order":300,"tags":["analysis","read","dynamic","public"],"doc":["skills/analysis-suggest-peers.txt","skills/analysis.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/analysis/suggest-peers/:pubkey', analysisRate, async (req, res) => {
     const check = validatePubkey(req.params.pubkey);
     if (!check.valid) return err400Validation(res, check.reason);
 
     try {
-      const client = daemon.nodeManager?.getDefaultNode();
+      const client = daemon.nodeManager?.getScopedDefaultNode('read');
       if (!client) return res.json({ error: 'No LND node connected' });
 
       // 1. Get our channels (who we already connect to)

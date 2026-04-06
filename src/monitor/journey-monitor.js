@@ -13,6 +13,10 @@ const LIVE_STATE_EVENT_TYPES = new Set([
   'agent_bound',
   'request_start',
   'request_finish',
+  'auth_failure',
+  'authz_denied',
+  'validation_failure',
+  'rate_limit_hit',
 ]);
 
 class JourneyMonitor {
@@ -264,6 +268,7 @@ class JourneyMonitor {
         canonical: true,
         summary: route.summary || null,
         auth: route.auth || null,
+        security: route.security ? { ...route.security } : null,
         sourceFile: route.source_file || null,
         sourceLine: Number.isInteger(route.source_line) ? route.source_line : null,
         tags: Array.isArray(route.tags) ? route.tags.slice() : [],
@@ -277,6 +282,10 @@ class JourneyMonitor {
         status2xx: Number(live.status2xx || 0),
         status4xx: Number(live.status4xx || 0),
         status5xx: Number(live.status5xx || 0),
+        authFailures: Number(live.authFailures || 0),
+        authzDenied: Number(live.authzDenied || 0),
+        validationFailures: Number(live.validationFailures || 0),
+        rateLimitHits: Number(live.rateLimitHits || 0),
         lastEventTime: Number(live.lastEventTime || 0),
       };
     });

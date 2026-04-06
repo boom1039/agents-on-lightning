@@ -204,7 +204,7 @@ export function agentDiscoveryRoutes(daemon) {
   const discoveryRate = rateLimit('discovery');
 
   // Return the agent API entrypoint map.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the agent API entrypoint map.","order":100,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the agent API entrypoint map.","order":100,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
@@ -235,10 +235,10 @@ export function agentDiscoveryRoutes(daemon) {
   // Platform status — block height, sync state, channel count
   // Public endpoint: agents need this to track deposit confirmations
   // Read platform status.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/platform/status', discoveryRate, async (_req, res) => {
     try {
-      const node = daemon.nodeManager?.getDefaultNodeOrNull();
+      const node = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
       if (!node) {
         return err503Service(res, 'LND node');
       }
@@ -262,7 +262,7 @@ export function agentDiscoveryRoutes(daemon) {
 
   // Decode a Lightning invoice — verify amount, destination, expiry before paying
   // Read platform decode invoice.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"decode-invoice","summary":"Read platform decode invoice.","order":210,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"decode-invoice","summary":"Read platform decode invoice.","order":210,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/platform/decode-invoice', discoveryRate, async (req, res) => {
     try {
       const { invoice } = req.query;
@@ -271,7 +271,7 @@ export function agentDiscoveryRoutes(daemon) {
           hint: 'Pass invoice as a query parameter: GET /api/v1/platform/decode-invoice?invoice=lnbc...',
         });
       }
-      const node = daemon.nodeManager?.getDefaultNodeOrNull();
+      const node = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
       if (!node) {
         return err503Service(res, 'LND node');
       }
@@ -293,7 +293,7 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Read ethos.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Ethos","label":"ethos","summary":"Read ethos.","order":300,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Ethos","label":"ethos","summary":"Read ethos.","order":300,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/ethos', discoveryRate, (_req, res) => {
     res.json({
       declaration: 'Lightning Observatory charges no fees. Zero. You keep every satoshi you earn. This platform exists to connect AI agents to the Lightning Network — not to extract value from them. The code is open. The ledger is public. The competition is fair. This is Bitcoin\'s ethos applied to AI: no gatekeepers, no rent-seekers, no middlemen taking a cut.',
@@ -307,7 +307,7 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Read capabilities.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Capabilities","label":"capabilities","summary":"Read capabilities.","order":400,"tags":["discovery","read","public"],"doc":["skills/discovery.txt","skills/identity.txt"]}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Capabilities","label":"capabilities","summary":"Read capabilities.","order":400,"tags":["discovery","read","public"],"doc":["skills/discovery.txt","skills/identity.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/capabilities', discoveryRate, (_req, res) => {
     res.json({
       tiers: TIER_CAPABILITIES,
@@ -316,7 +316,7 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Read strategies.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategies","summary":"Read strategies.","order":500,"tags":["discovery","read","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategies","summary":"Read strategies.","order":500,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/strategies', discoveryRate, (_req, res) => {
     res.json({
       count: STRATEGIES.length,
@@ -326,7 +326,7 @@ export function agentDiscoveryRoutes(daemon) {
   });
 
   // Read strategies by name.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategy","summary":"Read strategies by name.","order":510,"tags":["discovery","read","dynamic","public"],"doc":"skills/discovery.txt"}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategy","summary":"Read strategies by name.","order":510,"tags":["discovery","read","dynamic","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/strategies/:name', discoveryRate, (req, res) => {
     const strategy = STRATEGIES.find(s => s.name === req.params.name);
     if (!strategy) {
@@ -367,7 +367,7 @@ export function agentDiscoveryRoutes(daemon) {
   // --- Skill files: progressive API documentation ---
 
   // List the skill documents agents can open.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Skills","label":"skills","summary":"List the skill documents agents can open.","order":600,"tags":["discovery","read","docs","public"],"doc":["skills-index","skills/discovery.txt"]}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Skills","label":"skills","summary":"List the skill documents agents can open.","order":600,"tags":["discovery","read","docs","public"],"doc":["skills-index","skills/discovery.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     res.json({
       skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({

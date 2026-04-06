@@ -90,7 +90,7 @@ export function agentEventsRoutes(daemon) {
   const auth = requireAuth(daemon.agentRegistry);
 
   // Read agents me events.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"events","summary":"Read agents me events.","order":100,"tags":["identity","read","agent"],"doc":"skills/identity.txt"}
+  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"events","summary":"Read agents me events.","order":100,"tags":["identity","read","agent"],"doc":"skills/identity.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me/events', auth, rateLimit('identity_read'), async (req, res) => {
     try {
       const sinceRaw = req.query.since;
@@ -263,4 +263,3 @@ export function agentEventsRoutes(daemon) {
 
   return router;
 }
-
