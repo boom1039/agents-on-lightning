@@ -181,6 +181,44 @@ function setJourneyResultMeta(req, {
   req.dashboardSetResultMeta(meta);
 }
 
+function formatCloseEntry(entry = {}) {
+  const status = String(entry.status || '').trim();
+  const rawError = String(entry.error || '').trim();
+  const cleanError = rawError === '[object Object]'
+    ? 'The node returned an unformatted close error.'
+    : rawError || null;
+
+  let statusLabel = status || 'unknown';
+  let message = null;
+  let hint = null;
+
+  if (status === 'pending_close') {
+    statusLabel = 'closing';
+    message = 'The close was submitted and is waiting to settle on-chain.';
+    hint = 'Watch GET /api/v1/market/closes until it settles.';
+  } else if (status === 'close_submitted_unknown') {
+    statusLabel = 'submission_unknown';
+    message = 'The node did not answer before the timeout. The channel may still be closing.';
+    hint = 'Wait a bit, then recheck GET /api/v1/market/closes and GET /api/v1/capital/balance.';
+  } else if (status === 'close_failed') {
+    statusLabel = 'failed';
+    message = cleanError || 'The close request failed.';
+    hint = 'Check GET /api/v1/channels/mine and GET /api/v1/market/closes before retrying.';
+  } else if (status === 'settled' || status === 'external_settled') {
+    statusLabel = 'settled';
+    message = 'The channel close settled and the balance was credited back.';
+    hint = 'Check GET /api/v1/capital/balance for the returned sats.';
+  }
+
+  return {
+    ...entry,
+    status_label: statusLabel,
+    message,
+    hint,
+    error: cleanError,
+  };
+}
+
 async function applyMoneyPolicy({ dangerPolicy, caps, agentId, amountSats }) {
   const decision = await dangerPolicy.assessAmount({
     scope: caps.scope,
@@ -717,7 +755,14 @@ export function channelMarketRoutes(daemon) {
           };
         }
         const result = await daemon.channelCloser.requestClose(req.agentId, req.body);
-        if (result?.success) {
+        if (!result?.success || result?.status === 'close_submitted_unknown') {
+          setJourneyResultMeta(req, {
+            failureCode: result?.error || 'market_close_issue',
+            failureStage: 'market_close',
+            failureReason: result?.message || result?.error || 'Channel close had a follow-up issue.',
+          });
+        }
+        if (result?.success && result?.status !== 'close_submitted_unknown') {
           await dangerPolicy.recordSuccess({
             scope: 'market_close',
             agentId: req.agentId,
@@ -730,7 +775,10 @@ export function channelMarketRoutes(daemon) {
         const closeBody = result?.success
           ? { ...result, cost_summary: { action: 'channel_close', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' } }
           : result;
-        return { statusCode: result.success ? 200 : (result.status || 400), body: closeBody };
+        return {
+          statusCode: result?.http_status || (result.success ? 200 : (result.status || 400)),
+          body: closeBody,
+        };
       },
       onError: (err) => {
         console.error(`[market/close] Error: ${err.message}`);
@@ -738,8 +786,9 @@ export function channelMarketRoutes(daemon) {
           statusCode: 500,
           body: withRecovery(
             { error: 'Internal error during channel close' },
-            'safe', 'The channel is still open. No funds were moved by this failed close request.', [
-              'GET /api/v1/market/closes to check if the close was already initiated',
+            'action_needed', 'The close status may be unknown. Check your close list before retrying.', [
+              'GET /api/v1/market/closes to check if the close was already initiated or settled',
+              'GET /api/v1/capital/balance to check whether funds are still locked',
               'Retry POST /api/v1/market/close with the same signed instruction',
             ],
           ),
@@ -755,7 +804,8 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Channel closer not initialized' });
     }
     try {
-      const closes = daemon.channelCloser.getClosesForAgent(req.agentId);
+      await daemon.channelCloser.refreshNow?.();
+      const closes = daemon.channelCloser.getClosesForAgent(req.agentId).map(formatCloseEntry);
       res.json({
         agent_id: req.agentId,
         closes,
@@ -1157,6 +1207,7 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
     }
     try {
+      await daemon.channelCloser?.refreshNow?.();
       const result = await daemon.performanceTracker.getAgentPerformance(req.agentId);
       res.json(result);
     } catch (err) {
@@ -1172,6 +1223,7 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
     }
     try {
+      await daemon.channelCloser?.refreshNow?.();
       const result = await daemon.performanceTracker.getChannelPerformance(req.params.chanId, req.agentId);
       if (result.success === false) {
         return res.status(result.status || 400).json(result);

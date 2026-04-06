@@ -622,6 +622,98 @@ export class CapitalLedger {
   }
 
   /**
+   * Reconcile a channel close after the node closed it but the first close
+   * request timed out or rolled back too early.
+   *
+   * If the ledger still has pending_close, settle from there.
+   * If the ledger was rolled back to locked, settle from locked instead.
+   */
+  async reconcileClosedChannel(agentId, {
+    settledAmount,
+    txid,
+    channelPoint,
+    originalLocked,
+    localBalanceAtClose,
+  }) {
+    assertAgentId(agentId);
+    assertNonNegativeSats(settledAmount, 'settledAmount');
+    assertPositiveSats(originalLocked, 'originalLocked');
+    assertNonNegativeSats(localBalanceAtClose, 'localBalanceAtClose');
+    if (!txid || typeof txid !== 'string') {
+      throw new Error('reconcileClosedChannel requires a txid string');
+    }
+    if (!channelPoint || typeof channelPoint !== 'string') {
+      throw new Error('reconcileClosedChannel requires a channelPoint string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+      let sourceBucket = null;
+      let closeFeeSats = 0;
+
+      if (state.pending_close >= localBalanceAtClose && localBalanceAtClose > 0) {
+        state.pending_close -= localBalanceAtClose;
+        state.available += settledAmount;
+        closeFeeSats = Math.max(0, localBalanceAtClose - settledAmount);
+        state.total_routing_pnl += closeFeeSats;
+        sourceBucket = 'pending_close';
+      } else if (state.locked >= originalLocked) {
+        state.locked -= originalLocked;
+        state.available += settledAmount;
+        state.total_routing_pnl += (originalLocked - settledAmount);
+        closeFeeSats = Math.max(0, localBalanceAtClose - settledAmount);
+        sourceBucket = 'locked';
+      } else {
+        throw new Error(
+          `Unable to reconcile closed channel for ${agentId}: ` +
+          `locked=${state.locked}, pending_close=${state.pending_close}, ` +
+          `originalLocked=${originalLocked}, localBalanceAtClose=${localBalanceAtClose}`
+        );
+      }
+
+      await this._writeState(agentId, state, `reconcileClosedChannel:${agentId}`);
+
+      await this._logActivity({
+        agent_id: agentId,
+        type: 'close_settled',
+        amount_sats: settledAmount,
+        from_bucket: sourceBucket,
+        to_bucket: 'available',
+        reference: txid,
+        balance_after: this._balanceSummary(state),
+      });
+
+      if (closeFeeSats > 0) {
+        await this._logActivity({
+          agent_id: agentId,
+          type: 'close_fee',
+          amount_sats: closeFeeSats,
+          from_bucket: sourceBucket,
+          to_bucket: null,
+          reference: channelPoint,
+          balance_after: this._balanceSummary(state),
+        });
+      }
+
+      await this._logAudit({
+        type: 'close_settled',
+        agent_id: agentId,
+        amount_sats: settledAmount,
+        txid,
+        channel_point: channelPoint,
+        source_bucket: sourceBucket,
+        close_fee_sats: closeFeeSats,
+        balance_after: this._balanceSummary(state),
+      });
+
+      return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
    * Undo initiateClose when the close request never actually reached LND.
    * pending_close -= localBalance, locked += originalLocked, routing_pnl reversal
    */

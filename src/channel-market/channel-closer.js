@@ -22,7 +22,7 @@ const STATE_PATH = 'data/channel-market/pending-closes.json';
 
 const CHANNEL_CLOSE_CONFIG = {
   cooperativeTimeoutMs: 600_000,       // 10m for cooperative close attempt
-  pollIntervalMs: 60_000,             // 1 minute — closes take time
+  pollIntervalMs: 15_000,             // 15s — closer state should refresh quickly
   maxPendingCloses: 50,
   defaultSatPerVbyte: null,           // null = let LND estimate
 };
@@ -38,6 +38,27 @@ function parsePositiveSats(value) {
 
 function isUntrackedPeerCloseLedgerError(err) {
   return /Insufficient locked balance/i.test(String(err?.message || ''));
+}
+
+function isIndeterminateCloseError(err) {
+  const code = String(err?.code || '').trim();
+  const message = String(err?.message || '').trim();
+  if (['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET'].includes(code)) return true;
+  return /timed out|timeout|socket|hang up|connection reset|network/i.test(message);
+}
+
+function normalizeCloseErrorMessage(err) {
+  const raw = String(err?.message || 'Channel close failed').trim();
+  if (/timed out|timeout/i.test(raw)) {
+    return 'The node did not answer before the close timeout. The channel may still be closing.';
+  }
+  if (/peer .*disconnected/i.test(raw)) {
+    return 'The node lost the peer during the real channel-close attempt.';
+  }
+  if (/channel not found/i.test(raw)) {
+    return 'The node could not find that channel.';
+  }
+  return raw || 'Channel close failed.';
 }
 
 /**
@@ -95,6 +116,8 @@ export class ChannelCloser {
     this._state = {};
     this._pollTimer = null;
     this._stopping = false;
+    this._refreshInFlight = null;
+    this._lastRefreshAt = 0;
 
     // Dedup cache (10-minute expiry window)
     this._dedup = new DedupCache(600_000, {
@@ -124,7 +147,7 @@ export class ChannelCloser {
       this._state = raw || {};
 
       const entries = Object.values(this._state);
-      const pending = entries.filter(e => e.status === 'pending_close').length;
+      const pending = entries.filter(e => e.status === 'pending_close' || e.status === 'close_submitted_unknown').length;
       const settling = entries.filter(e => e.status === 'settling').length;
       console.log(
         `[ChannelCloser] Loaded ${entries.length} entries ` +
@@ -181,13 +204,29 @@ export class ChannelCloser {
     }
   }
 
+  async refreshNow({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && this._refreshInFlight) return this._refreshInFlight;
+    if (!force && (now - this._lastRefreshAt) < 5_000) return;
+    this._refreshInFlight = (async () => {
+      await this._pollCycle();
+      this._lastRefreshAt = Date.now();
+    })().finally(() => {
+      this._refreshInFlight = null;
+    });
+    return this._refreshInFlight;
+  }
+
   // ---------------------------------------------------------------------------
   // Detect settled closes (agent-initiated)
   // ---------------------------------------------------------------------------
 
   async _detectSettledCloses() {
     const pendingEntries = Object.entries(this._state).filter(
-      ([, e]) => e.status === 'pending_close' || e.status === 'settling'
+      ([, e]) => e.status === 'pending_close'
+        || e.status === 'settling'
+        || e.status === 'close_submitted_unknown'
+        || e.status === 'close_failed'
     );
     if (pendingEntries.length === 0) return;
 
@@ -220,7 +259,13 @@ export class ChannelCloser {
       const closingTxid = closed.closing_tx_hash || 'unknown';
 
       try {
-        await this._capitalLedger.settleClose(entry.agent_id, settledBalance, closingTxid);
+        await this._capitalLedger.reconcileClosedChannel(entry.agent_id, {
+          settledAmount: settledBalance,
+          txid: closingTxid,
+          channelPoint,
+          originalLocked: parsePositiveSats(entry.original_locked) || 0,
+          localBalanceAtClose: Math.max(0, Number(entry.local_balance_at_close || 0)),
+        });
       } catch (err) {
         this._logError(`[ChannelCloser] settleClose failed for ${entry.agent_id}: ${err.message}`);
         continue;
@@ -251,6 +296,7 @@ export class ChannelCloser {
       entry.settled_at = Date.now();
       entry.settled_balance = settledBalance;
       entry.closing_txid = closingTxid;
+      delete entry.error;
       changed = true;
 
       console.log(
@@ -457,7 +503,11 @@ export class ChannelCloser {
     const force = params.force === true;
 
     // Already pending close?
-    if (this._state[channelPoint] && this._state[channelPoint].status === 'pending_close') {
+    if (this._state[channelPoint] && (
+      this._state[channelPoint].status === 'pending_close'
+      || this._state[channelPoint].status === 'settling'
+      || this._state[channelPoint].status === 'close_submitted_unknown'
+    )) {
       return {
         success: false,
         error: 'Channel close already in progress',
@@ -543,10 +593,41 @@ export class ChannelCloser {
         timeoutMs: this.config.cooperativeTimeoutMs,
       });
     } catch (err) {
-      // Close call failed — but the ledger already moved funds to pending_close.
-      // Roll the ledger all the way back so the channel funds stay locked.
+      const normalizedError = normalizeCloseErrorMessage(err);
+      if (isIndeterminateCloseError(err)) {
+        entry.status = 'close_submitted_unknown';
+        entry.error = normalizedError;
+        entry.last_error_at = Date.now();
+        await this._persist();
+
+        await this._auditLog.append({
+          type: 'channel_close_submission_unknown',
+          agent_id: agentId,
+          channel_point: channelPoint,
+          close_type: force ? 'force' : 'cooperative',
+          error: normalizedError,
+          original_error: String(err?.message || ''),
+        });
+
+        return {
+          success: true,
+          http_status: 202,
+          status: 'close_submitted_unknown',
+          channel_point: channelPoint,
+          close_type: force ? 'force' : 'cooperative',
+          local_balance_at_close: localBalance,
+          original_funding_sats: originalLocked,
+          routing_pnl_sats: -(originalLocked - localBalance),
+          message: normalizedError,
+          hint: 'Check GET /api/v1/market/closes and GET /api/v1/capital/balance. Do not retry the close right away.',
+          learn: 'Channel closes can finish after the first request times out. The system will keep checking the node and settle your balance when the close shows up.',
+        };
+      }
+
+      // Close call failed and looks definitive — roll the ledger back.
       entry.status = 'close_failed';
-      entry.error = err.message;
+      entry.error = normalizedError;
+      entry.last_error_at = Date.now();
       await this._persist();
 
       try {
@@ -563,7 +644,7 @@ export class ChannelCloser {
 
       return {
         success: false,
-        error: `Channel close failed: ${err.message}`,
+        error: `Channel close failed: ${normalizedError}`,
         status: 500,
       };
     }
@@ -607,7 +688,11 @@ export class ChannelCloser {
 
   getPendingForAgent(agentId) {
     return Object.values(this._state).filter(
-      e => e.agent_id === agentId && (e.status === 'pending_close' || e.status === 'settling')
+      e => e.agent_id === agentId && (
+        e.status === 'pending_close'
+        || e.status === 'settling'
+        || e.status === 'close_submitted_unknown'
+      )
     );
   }
 
@@ -617,7 +702,9 @@ export class ChannelCloser {
 
   getAllPending() {
     return Object.values(this._state).filter(
-      e => e.status === 'pending_close' || e.status === 'settling'
+      e => e.status === 'pending_close'
+        || e.status === 'settling'
+        || e.status === 'close_submitted_unknown'
     );
   }
 }

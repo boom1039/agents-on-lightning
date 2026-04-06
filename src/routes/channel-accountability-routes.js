@@ -65,6 +65,7 @@ export function channelAccountabilityRoutes(daemon) {
   // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"mine","summary":"Read channels mine.","order":100,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/market-close.txt","skills/channels.txt"]}
   router.get('/api/v1/channels/mine', auth, rateLimit('channel_read'), async (req, res) => {
     try {
+      await daemon.channelCloser?.refreshNow?.();
       const assignments = daemon.channelAssignments.getByAgent(req.agentId);
 
       // Enrich with current fees from LND

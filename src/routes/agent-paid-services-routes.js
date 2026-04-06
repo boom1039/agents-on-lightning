@@ -204,6 +204,7 @@ export function agentPaidServicesRoutes(daemon) {
       if (!daemon.capitalLedger) {
         return err503Service(res, 'Capital ledger');
       }
+      await daemon.channelCloser?.refreshNow?.();
       const balance = await daemon.capitalLedger.getBalance(req.agentId);
       res.json({
         agent_id: req.agentId,
@@ -233,6 +234,7 @@ export function agentPaidServicesRoutes(daemon) {
       if (!daemon.capitalLedger) {
         return err503Service(res, 'Capital ledger');
       }
+      await daemon.channelCloser?.refreshNow?.();
       const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 50), 500);
       const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
       const { entries, total } = await daemon.capitalLedger.readActivity({
