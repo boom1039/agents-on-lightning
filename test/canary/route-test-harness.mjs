@@ -1,7 +1,11 @@
 import express from 'express';
 import { createServer } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { agentGatewayRoutes } from '../../src/routes/agent-gateway.js';
+import { DataLayer } from '../../src/data-layer.js';
 import { configureRateLimiterPolicy, disableRateLimiterPersistence, resetCounters } from '../../src/identity/rate-limiter.js';
 import { handleJsonBodyError, requireJsonWriteContent } from '../../src/identity/request-security.js';
 
@@ -225,28 +229,48 @@ function createFakeNodeManager() {
   };
 }
 
-function createFakeAgentRegistry() {
+function createFakeAgentRegistry(seedAgents = []) {
   const agentsByApiKey = new Map();
   const agentsById = new Map();
+  const defaultAgents = [
+    {
+      id: 'test0001',
+      agent_id: 'test0001',
+      name: 'test-agent',
+      api_key: 'lb-agent-test-token',
+      referral_code: 'REFTEST1',
+    },
+    {
+      id: 'test0002',
+      agent_id: 'test0002',
+      name: 'other-agent',
+      api_key: 'lb-agent-test-token-2',
+      referral_code: 'REFTEST2',
+    },
+  ];
+  const initialAgents = seedAgents.length > 0 ? seedAgents : defaultAgents;
+  for (const agent of initialAgents) {
+    agentsByApiKey.set(agent.api_key, agent);
+    agentsById.set(agent.id, agent);
+  }
 
-  const seed = {
+  const fallback = {
     id: 'test0001',
     agent_id: 'test0001',
     name: 'test-agent',
     api_key: 'lb-agent-test-token',
     referral_code: 'REFTEST1',
   };
-  agentsByApiKey.set(seed.api_key, seed);
-  agentsById.set(seed.id, seed);
 
   return {
     register: async (body = {}) => {
+      const nextId = `test${String(agentsById.size + 1).padStart(4, '0')}`;
       const next = {
-        id: 'test0002',
-        agent_id: 'test0002',
-        name: body.name || 'test-agent-2',
-        api_key: 'lb-agent-test-token-2',
-        referral_code: 'REFTEST2',
+        id: nextId,
+        agent_id: nextId,
+        name: body.name || `test-agent-${agentsById.size + 1}`,
+        api_key: `lb-agent-test-token-${agentsById.size + 1}`,
+        referral_code: `REFTEST${agentsById.size + 1}`,
       };
       agentsByApiKey.set(next.api_key, next);
       agentsById.set(next.id, next);
@@ -257,21 +281,24 @@ function createFakeAgentRegistry() {
     getById: (id) => agentsById.get(id) || null,
     getFullProfile: async (id) => agentsById.get(id) || null,
     getPublicProfile: async (id) => agentsById.get(id) || null,
-    updateProfile: async (id, body = {}) => ({ ...(agentsById.get(id) || seed), ...body }),
+    updateProfile: async (id, body = {}) => ({ ...(agentsById.get(id) || fallback), ...body }),
     updateState: async () => {},
     getReputation: async () => ({ score: 0 }),
     getTopEvangelists: async () => [],
     logAction: async () => {},
     awardBadge: async () => {},
     getActions: async () => [],
+    _agentsById: agentsById,
+    _agentsByApiKey: agentsByApiKey,
   };
 }
 
-function createFakeDaemon() {
-  return {
+function createFakeDaemon({ dataLayer = null, agentRegistry = null, overrides = {} } = {}) {
+  const registry = agentRegistry || createFakeAgentRegistry();
+  const daemon = {
     config: TEST_DAEMON_CONFIG,
-    dataLayer: null,
-    agentRegistry: createFakeAgentRegistry(),
+    dataLayer,
+    agentRegistry: registry,
     nodeManager: createFakeNodeManager(),
     agentCashuWallet: {
       mintQuote: async () => ({ quote_id: 'q1' }),
@@ -407,14 +434,22 @@ function createFakeDaemon() {
       getChannels: async () => [],
     },
   };
+  return { ...daemon, ...overrides };
 }
 
-export async function createRouteTestHarness() {
+export async function createRouteTestHarness(options = {}) {
   disableRateLimiterPersistence();
   configureRateLimiterPolicy(TEST_RATE_LIMIT_POLICY);
   await resetCounters();
 
-  const daemon = createFakeDaemon();
+  const tempDir = options.withDataLayer ? await mkdtemp(join(tmpdir(), 'aol-route-test-')) : null;
+  const dataLayer = options.dataLayer || (tempDir ? new DataLayer(tempDir) : null);
+  const agentRegistry = options.agentRegistry || createFakeAgentRegistry(options.seedAgents || []);
+  const daemon = options.daemon || createFakeDaemon({
+    dataLayer,
+    agentRegistry,
+    overrides: options.daemonOverrides || {},
+  });
   const app = express();
   app.use(express.json({ limit: '16kb' }));
   app.use(handleJsonBodyError);
@@ -429,6 +464,12 @@ export async function createRouteTestHarness() {
   return {
     baseUrl,
     daemon,
+    dataLayer,
+    tempDir,
+    agents: {
+      primary: agentRegistry.getByApiKey('lb-agent-test-token'),
+      secondary: agentRegistry.getByApiKey('lb-agent-test-token-2'),
+    },
     async fetch(path, options = {}) {
       return fetch(new URL(path, baseUrl), options);
     },
@@ -436,6 +477,9 @@ export async function createRouteTestHarness() {
       await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       await resetCounters();
       disableRateLimiterPersistence();
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     },
   };
 }

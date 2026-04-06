@@ -361,7 +361,9 @@ export class SignedInstructionExecutor {
 
     if (!result.success) {
       return {
+        success: false,
         valid: false,
+        status: result.status,
         failed_at: result.failed_at,
         checks_passed: result.checks_passed,
         error: result.error,
@@ -389,6 +391,7 @@ export class SignedInstructionExecutor {
     }
 
     return {
+      success: true,
       valid: true,
       checks_passed,
       would_execute: {
