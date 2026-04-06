@@ -62,9 +62,7 @@ server {
     }
 
     location = /api/journey/events {
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 1h;
-        proxy_read_timeout 1h;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-1h.conf;
     }
 
     location ^~ /api/journey {
@@ -88,37 +86,27 @@ server {
 
     location = /api/v1/market/open {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location = /api/v1/market/close {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 10m;
-        proxy_read_timeout 10m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-10m.conf;
     }
 
     location = /api/v1/market/fund-from-ecash {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 5m;
-        proxy_read_timeout 5m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-5m.conf;
     }
 
     location = /api/v1/market/rebalance {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 5m;
-        proxy_read_timeout 5m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-5m.conf;
     }
 
     location = /api/v1/market/swap/lightning-to-onchain {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location ^~ /api/v1/channels/ {
@@ -138,15 +126,11 @@ server {
 
     location = /api/v1/help {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location = /api/analytics/query {
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location ^~ /api/ {
@@ -208,9 +192,7 @@ server {
     }
 
     location = /api/journey/events {
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 1h;
-        proxy_read_timeout 1h;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-1h.conf;
     }
 
     location ^~ /api/journey {
@@ -234,37 +216,27 @@ server {
 
     location = /api/v1/market/open {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location = /api/v1/market/close {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 10m;
-        proxy_read_timeout 10m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-10m.conf;
     }
 
     location = /api/v1/market/fund-from-ecash {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 5m;
-        proxy_read_timeout 5m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-5m.conf;
     }
 
     location = /api/v1/market/rebalance {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 5m;
-        proxy_read_timeout 5m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-5m.conf;
     }
 
     location = /api/v1/market/swap/lightning-to-onchain {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location ^~ /api/v1/channels/ {
@@ -284,15 +256,11 @@ server {
 
     location = /api/v1/help {
         limit_req zone=aol_danger burst=DANGER_BURST nodelay;
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location = /api/analytics/query {
-        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
-        proxy_send_timeout 2m;
-        proxy_read_timeout 2m;
+        include /etc/nginx/snippets/agents-on-lightning-proxy-2m.conf;
     }
 
     location ^~ /api/ {
