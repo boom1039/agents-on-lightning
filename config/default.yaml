@@ -17,6 +17,9 @@ dangerRoutes: {}
 # Keep real channel-open safety settings in config/local.yaml.
 channelOpen: {}
 
+# Channel close timing is safe to track in git.
+channelClose: {}
+
 # Keep real rebalance safety settings in config/local.yaml.
 rebalance: {}
 

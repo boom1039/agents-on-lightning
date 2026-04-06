@@ -19,7 +19,9 @@ import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
 
-const CHANNEL_OPEN_CONFIG = {};
+const CHANNEL_OPEN_CONFIG = {
+  openRequestTimeoutMs: 120_000,
+};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -264,6 +266,7 @@ export class ChannelOpener {
       maxPerAgent: Number.isFinite(this.config.maxPerAgent) ? this.config.maxPerAgent : 'unlimited',
       pendingOpenTimeoutBlocks: this.config.pendingOpenTimeoutBlocks,
       connectPeerTimeoutMs: this.config.connectPeerTimeoutMs,
+      openRequestTimeoutMs: this.config.openRequestTimeoutMs,
       defaultSatPerVbyte: this.config.defaultSatPerVbyte,
       peerSafety: {
         forceCloseLimit: this.config.peerSafety.forceCloseLimit,
@@ -955,6 +958,7 @@ export class ChannelOpener {
           baseFeeMsat: readOptionalInteger(startupPolicy?.base_fee_msat),
           feeRatePpm: readOptionalInteger(startupPolicy?.fee_rate_ppm),
           minHtlcMsat: readOptionalInteger(startupPolicy?.min_htlc_msat),
+          timeoutMs: this.config.openRequestTimeoutMs,
         });
       } catch (err) {
         // Rollback: unlock funds

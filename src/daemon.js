@@ -214,9 +214,11 @@ export class AgentDaemon {
       agentRegistry: this.agentRegistry,
       assignmentRegistry: this.channelAssignments,
       mutex: channelMutex,
+      config: this.config.channelClose || {},
     });
     await this.channelCloser.load();
     this.channelCloser.startPolling();
+    this.channelCloser.logStartupRules();
 
     this.revenueTracker = new RevenueAttributionTracker({
       capitalLedger: this.capitalLedger,

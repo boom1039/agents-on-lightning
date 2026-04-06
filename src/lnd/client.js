@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 500;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 // Error codes that warrant a retry
 const TRANSIENT_CODES = new Set([
@@ -22,6 +23,19 @@ function isTransientError(err) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeLndMessage(value, fallback = 'Unknown LND error') {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value && typeof value === 'object') {
+    if (typeof value.message === 'string' && value.message.trim()) return value.message;
+    if (typeof value.error === 'string' && value.error.trim()) return value.error;
+    try {
+      return JSON.stringify(value);
+    } catch {}
+  }
+  return fallback;
 }
 
 /**
@@ -137,7 +151,7 @@ export class NodeClient {
    * @param {Object|null} [body] - JSON body for POST/PUT/DELETE
    * @returns {Promise<Object>} Parsed JSON response
    */
-  async _request(method, path, query = null, body = null) {
+  async _request(method, path, query = null, body = null, requestOptions = {}) {
     if (!this._initialized) {
       throw new Error(`NodeClient "${this.name}" not initialized. Call init() first.`);
     }
@@ -160,7 +174,7 @@ export class NodeClient {
       const start = performance.now();
 
       try {
-        const result = await this._doRequest(method, url, jsonBody);
+        const result = await this._doRequest(method, url, jsonBody, requestOptions);
         const elapsed = (performance.now() - start).toFixed(1);
         console.debug(`[lnd:${this.name}] ${method} ${url} -> ${elapsed}ms`);
         return result;
@@ -190,8 +204,11 @@ export class NodeClient {
   /**
    * Single HTTP request (no retry logic).
    */
-  _doRequest(method, url, jsonBody) {
+  _doRequest(method, url, jsonBody, requestOptions = {}) {
     return new Promise((resolve, reject) => {
+      const timeoutMs = Number.isFinite(requestOptions.timeoutMs) && requestOptions.timeoutMs > 0
+        ? requestOptions.timeoutMs
+        : DEFAULT_REQUEST_TIMEOUT_MS;
       const options = {
         hostname: this.host,
         port: this.restPort,
@@ -201,7 +218,7 @@ export class NodeClient {
         headers: {
           'Grpc-Metadata-macaroon': this._macaroonHex,
         },
-        timeout: 30_000,
+        timeout: timeoutMs,
       };
 
       if (jsonBody != null) {
@@ -232,7 +249,7 @@ export class NodeClient {
             let lndCode = null;
             try {
               const errBody = JSON.parse(raw);
-              lndMsg = errBody.message || errBody.error || raw;
+              lndMsg = normalizeLndMessage(errBody.message, '') || normalizeLndMessage(errBody.error, '') || raw;
               lndCode = errBody.code || null;
             } catch {
               // raw text is fine as the error message
@@ -260,16 +277,16 @@ export class NodeClient {
   }
 
   // Convenience wrappers
-  _get(path, query) {
-    return this._request('GET', path, query);
+  _get(path, query, requestOptions) {
+    return this._request('GET', path, query, null, requestOptions);
   }
 
-  _post(path, body) {
-    return this._request('POST', path, null, body);
+  _post(path, body, requestOptions) {
+    return this._request('POST', path, null, body, requestOptions);
   }
 
-  _delete(path, query) {
-    return this._request('DELETE', path, query);
+  _delete(path, query, requestOptions) {
+    return this._request('DELETE', path, query, null, requestOptions);
   }
 
   // ---------------------------------------------------------------------------
@@ -464,7 +481,7 @@ export class NodeClient {
     if (opts.minConfs != null) body.min_confs = opts.minConfs;
     if (opts.spendUnconfirmed != null) body.spend_unconfirmed = opts.spendUnconfirmed;
 
-    return this._post('/v1/channels', body);
+    return this._post('/v1/channels', body, { timeoutMs: opts.timeoutMs });
   }
 
   /**
@@ -473,7 +490,7 @@ export class NodeClient {
    * @param {boolean} [force=false] - Force close (unilateral)
    * @param {number} [satPerVbyte] - Fee rate for the closing transaction
    */
-  closeChannel(channelPoint, force = false, satPerVbyte = null) {
+  closeChannel(channelPoint, force = false, satPerVbyte = null, requestOptions = {}) {
     const [fundingTxid, outputIndex] = channelPoint.split(':');
     if (!fundingTxid || outputIndex == null) {
       throw new Error(`Invalid channel point: "${channelPoint}". Expected "txid:index".`);
@@ -487,7 +504,8 @@ export class NodeClient {
     // alongside the output_index in the URL path.
     return this._delete(
       `/v1/channels/${fundingTxid}/${outputIndex}`,
-      query
+      query,
+      requestOptions,
     );
   }
 
@@ -552,7 +570,9 @@ export class NodeClient {
     if (feeLimitSat != null) {
       body.fee_limit = { fixed: String(feeLimitSat) };
     }
-    return this._post('/v1/channels/transactions', body);
+    return this._post('/v1/channels/transactions', body, {
+      timeoutMs: Math.max(DEFAULT_REQUEST_TIMEOUT_MS, (timeoutSeconds * 1000) + 5_000),
+    });
   }
 
   /**
@@ -789,7 +809,7 @@ export class NodeClient {
    * @param {Object} body - JSON body to POST
    * @returns {Promise<Object>} Final event with terminal status
    */
-  postStream(path, body) {
+  postStream(path, body, opts = {}) {
     if (!this._initialized) {
       throw new Error(`NodeClient "${this.name}" not initialized. Call init() first.`);
     }
@@ -797,6 +817,9 @@ export class NodeClient {
     const jsonBody = JSON.stringify(body);
 
     return new Promise((resolve, reject) => {
+      const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+        ? opts.timeoutMs
+        : 120_000;
       const options = {
         hostname: this.host,
         port: this.restPort,
@@ -809,7 +832,7 @@ export class NodeClient {
           'Content-Length': Buffer.byteLength(jsonBody),
         },
         // Long timeout for payment resolution (payments can take minutes)
-        timeout: 120_000,
+        timeout: timeoutMs,
       };
 
       const req = https.request(options, (res) => {
@@ -911,7 +934,9 @@ export class NodeClient {
     if (fee_limit_sat != null) body.fee_limit_sat = String(fee_limit_sat);
     if (outgoing_chan_id) body.outgoing_chan_id = outgoing_chan_id;
 
-    return this.postStream('/v2/router/send', body);
+    return this.postStream('/v2/router/send', body, {
+      timeoutMs: Math.max(120_000, (timeout_seconds * 1000) + 5_000),
+    });
   }
 
   /**

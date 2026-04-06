@@ -21,7 +21,7 @@ import { appendSignedValidationFailure } from '../channel-accountability/signed-
 const STATE_PATH = 'data/channel-market/pending-closes.json';
 
 const CHANNEL_CLOSE_CONFIG = {
-  cooperativeTimeoutMs: 30_000,        // 30s for cooperative close attempt
+  cooperativeTimeoutMs: 600_000,       // 10m for cooperative close attempt
   pollIntervalMs: 60_000,             // 1 minute — closes take time
   maxPendingCloses: 50,
   defaultSatPerVbyte: null,           // null = let LND estimate
@@ -74,7 +74,7 @@ export class ChannelCloser {
    * @param {import('../channel-accountability/channel-assignment-registry.js').ChannelAssignmentRegistry} opts.assignmentRegistry
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, config = {} }) {
     if (!capitalLedger) throw new Error('ChannelCloser requires capitalLedger');
     if (!nodeManager) throw new Error('ChannelCloser requires nodeManager');
     if (!dataLayer) throw new Error('ChannelCloser requires dataLayer');
@@ -102,7 +102,16 @@ export class ChannelCloser {
       path: 'data/channel-market/channel-close-dedup.json',
     });
 
-    this.config = { ...CHANNEL_CLOSE_CONFIG };
+    this.config = { ...CHANNEL_CLOSE_CONFIG, ...config };
+  }
+
+  logStartupRules() {
+    console.log(`[ChannelCloser] Live close rules ${JSON.stringify({
+      cooperativeTimeoutMs: this.config.cooperativeTimeoutMs,
+      pollIntervalMs: this.config.pollIntervalMs,
+      defaultSatPerVbyte: this.config.defaultSatPerVbyte,
+      maxPendingCloses: this.config.maxPendingCloses,
+    })}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -530,7 +539,9 @@ export class ChannelCloser {
 
     // Initiate LND close
     try {
-      await client.closeChannel(channelPoint, force, this.config.defaultSatPerVbyte);
+      await client.closeChannel(channelPoint, force, this.config.defaultSatPerVbyte, {
+        timeoutMs: this.config.cooperativeTimeoutMs,
+      });
     } catch (err) {
       // Close call failed — but the ledger already moved funds to pending_close.
       // Roll the ledger all the way back so the channel funds stay locked.
