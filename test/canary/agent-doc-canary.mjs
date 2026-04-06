@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { buildEndpointTestMatrix } from './endpoint-test-matrix.mjs';
+
 const BASE_URL = (process.env.AOL_CANARY_BASE_URL || 'http://127.0.0.1:3302').replace(/\/+$/, '');
 const TOKEN = `${process.env.AOL_CANARY_TOKEN || ''}`.trim();
 const REGISTER_AGENTS = process.env.AOL_CANARY_REGISTER_AGENTS === '1';
@@ -16,20 +18,12 @@ const DANGER_DELAY_MS = Number.parseInt(process.env.AOL_CANARY_DANGER_DELAY_MS |
 const ROUTE_RE = /\b(GET|POST|PUT|DELETE|PATCH)\s+`?(\/[^\s`'")\]},]*)/gi;
 const SKIP_LINE_TAGS = ['[not-live-route]', '[manifest-excluded-route]'];
 const nextAllowedAt = new Map();
-const SAFE_AUTH_ROUTE_KEYS = new Set([
-  'GET /api/v1/agents/me',
-  'GET /api/v1/agents/me/referral-code',
-  'GET /api/v1/agents/me/referral',
-  'GET /api/v1/agents/me/dashboard',
-  'GET /api/v1/agents/me/events',
-  'GET /api/v1/node/status',
-  'GET /api/v1/actions/history',
-  'GET /api/v1/messages',
-  'GET /api/v1/messages/inbox',
-  'GET /api/v1/alliances',
-  'GET /api/v1/wallet/balance',
-  'GET /api/v1/wallet/history',
-]);
+const ENDPOINT_MATRIX = buildEndpointTestMatrix();
+const SAFE_AUTO_ROUTE_KEYS = new Set(
+  ENDPOINT_MATRIX.rows
+    .filter((row) => row.prod_policy === 'safe-auto')
+    .map((row) => row.key),
+);
 
 function stripTrailingSlash(url) {
   return `${url}`.replace(/\/+$/, '');
@@ -72,6 +66,10 @@ function normalizeDocPathForMatch(path = '') {
     return segment;
   });
   return parts.join('/') || '/';
+}
+
+function isDynamicManifestPath(path = '') {
+  return `${path}`.includes(':');
 }
 
 function isDocTextPath(path = '') {
@@ -361,10 +359,15 @@ async function main() {
     else missingManifestRefs.push(ref);
   }
 
-  const probeTargets = uniqBy(
-    manifestRefs.filter((ref) => ref.method === 'GET' && !isDynamicDocPath(ref.path) && !ref.manifest.path.includes(':')),
-    (ref) => routeKey(ref.method, ref.path),
-  );
+  const probeTargets = ENDPOINT_MATRIX.rows
+    .filter((row) => row.method === 'GET')
+    .map((row) => ({
+      method: row.method,
+      path: row.path,
+      rawPath: row.path,
+      auth: row.auth,
+      matrix: row,
+    }));
 
   const agentPool = [];
   if (REGISTER_AGENTS) {
@@ -390,8 +393,28 @@ async function main() {
   const routeProbeResults = [];
   let agentCursor = 0;
   for (const target of probeTargets) {
+    if (isDynamicManifestPath(target.path)) {
+      routeProbeResults.push({
+        ...target,
+        level: 'skip',
+        reason: 'dynamic id required',
+        status: null,
+      });
+      continue;
+    }
+
+    if (target.matrix.prod_policy !== 'safe-auto') {
+      routeProbeResults.push({
+        ...target,
+        level: 'skip',
+        reason: target.matrix.prod_policy,
+        status: null,
+      });
+      continue;
+    }
+
     let agent = null;
-    if (target.manifest.auth === 'agent') {
+    if (target.auth === 'agent') {
       if (agentPool.length === 0) {
         routeProbeResults.push({
           ...target,
@@ -401,11 +424,11 @@ async function main() {
         });
         continue;
       }
-      if (SAFE_AUTH_ONLY && !SAFE_AUTH_ROUTE_KEYS.has(routeKey(target.method, target.path))) {
+      if (SAFE_AUTH_ONLY && !SAFE_AUTO_ROUTE_KEYS.has(routeKey(target.method, target.path))) {
         routeProbeResults.push({
           ...target,
           level: 'skip',
-          reason: 'safe auth subset only',
+          reason: 'safe-auto-only',
           status: null,
         });
         continue;
@@ -414,7 +437,7 @@ async function main() {
       agentCursor += 1;
     }
 
-    if (target.manifest.auth === 'agent' && !agent) {
+    if (target.auth === 'agent' && !agent) {
       routeProbeResults.push({
         ...target,
         level: 'skip',
@@ -425,12 +448,12 @@ async function main() {
     }
 
     const headers = {};
-    if (target.manifest.auth === 'agent' && agent?.token) headers.Authorization = `Bearer ${agent.token}`;
+    if (target.auth === 'agent' && agent?.token) headers.Authorization = `Bearer ${agent.token}`;
     const result = await fetchWithMeta(target.rawPath || target.path, { headers });
-    const verdict = classifyProbeResult(target.manifest, result, Boolean(agent?.token));
+    const verdict = classifyProbeResult(target, result, Boolean(agent?.token));
     routeProbeResults.push({
       ...target,
-      auth: target.manifest.auth,
+      auth: target.auth,
       agentName: agent?.name || null,
       agentId: agent?.id || null,
       status: result.status,
@@ -446,6 +469,7 @@ async function main() {
 
   console.log(`Base: ${BASE_URL}`);
   console.log(`Manifest routes: ${manifestRoutes.length}`);
+  console.log(`Matrix routes: ${ENDPOINT_MATRIX.total_routes}`);
   console.log(`Docs fetched: ${fetchedDocs.size}`);
   console.log(`Canary agents: ${agentPool.length}`);
   console.log(`Doc route refs matched to manifest: ${manifestRefs.length}`);
