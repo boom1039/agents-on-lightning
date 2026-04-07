@@ -329,7 +329,7 @@ export class ChannelOpener {
   // ---------------------------------------------------------------------------
 
   async _recoverSubmittingEntries() {
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('open');
     if (!client) {
       console.warn('[ChannelOpener] No LND client for crash recovery — will retry on next load');
       return;
@@ -688,7 +688,7 @@ export class ChannelOpener {
       };
     }
 
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('open');
     if (!client) {
       return {
         success: false,
@@ -943,7 +943,7 @@ export class ChannelOpener {
       await this._dedup.mark(instrHash);
 
       // Connect peer (best effort — may already be connected)
-      const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+      const client = this._nodeManager.getScopedDefaultNodeOrNull('open');
       if (client && safePeerAddress) {
         try {
           await client.connectPeer(peerPubkey, safePeerAddress);
@@ -1097,7 +1097,7 @@ export class ChannelOpener {
     );
     if (pendingEntries.length === 0) return;
 
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('open');
     if (!client) return;
 
     // Call listChannels once and build lookup by channel_point
@@ -1179,7 +1179,11 @@ export class ChannelOpener {
 
         if (entry.startup_policy_apply_status === 'pending' && entry.startup_policy) {
           try {
-            await this._applyStartupPolicy(client, channelPoint, activeChannel, entry.startup_policy);
+            const policyClient = this._nodeManager.getScopedDefaultNodeOrNull('policy');
+            if (!policyClient) {
+              throw new Error('LND fee-policy client not available');
+            }
+            await this._applyStartupPolicy(policyClient, channelPoint, activeChannel, entry.startup_policy);
             entry.startup_policy_apply_status = 'applied';
             delete entry.startup_policy_last_error;
             stateChanged = true;

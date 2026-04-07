@@ -230,7 +230,7 @@ export class ChannelCloser {
     );
     if (pendingEntries.length === 0) return;
 
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('close');
     if (!client) return;
 
     let closedResp;
@@ -312,7 +312,7 @@ export class ChannelCloser {
   // ---------------------------------------------------------------------------
 
   async _detectPeerInitiatedCloses() {
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('close');
     if (!client) return;
 
     let closedResp;
@@ -517,7 +517,7 @@ export class ChannelCloser {
     }
 
     // Get current local balance from LND
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('close');
     if (!client) {
       return { success: false, error: 'LND not available', status: 503 };
     }

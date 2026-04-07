@@ -203,7 +203,7 @@ export class SubmarineSwapProvider {
     }
 
     // Check node has sufficient outbound liquidity
-    const client = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('swap');
     if (!client) {
       return { success: false, error: 'LND not available', status: 503 };
     }

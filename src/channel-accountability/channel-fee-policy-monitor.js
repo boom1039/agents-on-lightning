@@ -64,7 +64,7 @@ export class ChannelFeePolicyMonitor {
   }
 
   async _poll(isBaseline) {
-    const node = this._nodeManager.getScopedDefaultNodeOrNull('operator');
+    const node = this._nodeManager.getScopedDefaultNodeOrNull('read');
     if (!node) {
       await this._handleLndDown();
       return;

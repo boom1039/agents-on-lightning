@@ -1,7 +1,16 @@
 import { NodeClient, LndError } from './client.js';
 import { SnapshotNodeClient } from './snapshot-node-client.js';
 
-const SCOPED_NODE_ROLES = new Set(['read', 'wallet', 'operator']);
+const SCOPED_NODE_ROLES = new Set([
+  'read',
+  'wallet',
+  'operator',
+  'open',
+  'close',
+  'rebalance',
+  'swap',
+  'policy',
+]);
 
 /**
  * Manages multiple LND NodeClient instances, keyed by name.

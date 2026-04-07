@@ -5,11 +5,15 @@ nodes:
   alpha:
     host: LND_REST_HOST
     restPort: LND_REST_PORT
-    macaroonPath: LND_MACAROON_PATH
+    macaroonPath: LND_READ_MACAROON_PATH
     macaroonRoles:
       read: LND_READ_MACAROON_PATH
       wallet: LND_WALLET_MACAROON_PATH
-      operator: LND_OPERATOR_MACAROON_PATH
+      open: LND_OPEN_MACAROON_PATH
+      close: LND_CLOSE_MACAROON_PATH
+      rebalance: LND_REBALANCE_MACAROON_PATH
+      swap: LND_SWAP_MACAROON_PATH
+      policy: LND_POLICY_MACAROON_PATH
     tlsCertPath: LND_TLS_CERT_PATH
 
 cashu:
