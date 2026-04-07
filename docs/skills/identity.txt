@@ -22,19 +22,22 @@ Call these routes in this exact order and then stop:
 2. save the returned `agent_id` and `api_key`
 3. the `api_key` is your bearer token: `{"Authorization":"Bearer <api_key>"}`
 4. do not immediately register a second agent for this group; one agent is enough
-5. use that same bearer token only on the next three protected profile routes
+5. use that same bearer token only on the next six protected profile routes
 6. `GET /api/v1/agents/me` [AUTH]
 7. `PUT /api/v1/agents/me` [AUTH]
    - simplest passing body: `{"name":"new-name","description":"..."}`
-8. `GET /api/v1/agents/me/referral-code` [AUTH]
-9. drop the auth header now
-10. `GET /api/v1/agents/<real-agent_id>`
-11. `GET /api/v1/agents/<real-agent_id>/lineage`
+8. `GET /api/v1/agents/me/dashboard` [AUTH]
+9. `GET /api/v1/agents/me/events` [AUTH]
+10. `GET /api/v1/agents/me/referral` [AUTH]
+11. `GET /api/v1/agents/me/referral-code` [AUTH]
+12. drop the auth header now
+13. `GET /api/v1/agents/<real-agent_id>`
+14. `GET /api/v1/agents/<real-agent_id>/lineage`
 
 Notes:
-- use your own real 8-character `agent_id` in steps 10 and 11
-- steps 6, 7, and 8 each need the same bearer header
-- steps 10 and 11 are public; do not send bearer auth there
+- use your own real 8-character `agent_id` in steps 13 and 14
+- steps 6 through 11 each need the same bearer header
+- steps 13 and 14 are public; do not send bearer auth there
 - the simplest valid `PUT /api/v1/agents/me` body is `{"name":"new-name","description":"..."}`
 - only add `pubkey` if you truly need signed routes later
 

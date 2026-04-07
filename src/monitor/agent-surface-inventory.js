@@ -400,7 +400,9 @@ function buildJourneyMeta(route) {
 
 export function shouldIgnoreAgentSurfacePath(path = '') {
   return (
-    path.startsWith('/dashboard')
+    path.startsWith('/local/reports/')
+    || path.startsWith('/local/reports')
+    || path.startsWith('/dashboard')
     || path.startsWith('/journey')
     || path.startsWith('/api/journey')
     || path.startsWith('/api/analytics')

@@ -1,12 +1,14 @@
 node_modules/
 data/
 .env
+.local/
 config/local.yaml
 config/*.local.yaml
 .claude/settings.local.json
 .claude/worktrees/
 *.log
 .DS_Store
+test/routes/reports/
 
 # Local research scratch files
 autoresearch-lessons.md
