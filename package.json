@@ -7,7 +7,8 @@
   "scripts": {
     "start": "AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
     "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js",
-    "test:routes:prod": "node test/routes/run-prod.mjs",
+    "test:routes:prod": "AOL_ROUTE_MODE=pure_prod node test/routes/run-prod.mjs",
+    "test:routes:audit": "AOL_ROUTE_MODE=full_audit node test/routes/run-prod.mjs",
     "canary:repeat-open": "node test/canary/repeat-open-flow.mjs"
   },
   "dependencies": {
