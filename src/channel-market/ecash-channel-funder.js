@@ -20,6 +20,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const STATE_PATH = 'data/channel-market/ecash-funding-flows.json';
 
@@ -227,7 +228,10 @@ export class EcashChannelFunder {
         return {
           success: false,
           status: 500,
-          error: `Channel open failed: ${err.message}`,
+          error: summarizeLndError(err.message, {
+            action: 'channel open',
+            fallback: 'Channel open failed.',
+          }),
           flow_id: flowId,
           ecash_spent_sats: amount,
           learn: 'The ecash-to-capital conversion succeeded but the channel open failed. ' +

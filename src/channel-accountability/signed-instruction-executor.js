@@ -8,6 +8,7 @@ import {
   buildSignedValidationFingerprint,
   classifyInvalidSignature,
 } from './signed-validation-fingerprint.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const INSTRUCTIONS_PATH = 'data/channel-accountability/instructions.jsonl';
 const ALLOWED_ACTIONS = new Set(['set_fee_policy', 'update_htlc_limits']);
@@ -94,7 +95,7 @@ const HINTS = {
     'GET /api/v1/channels/status shows current LND connectivity.',
 
   lnd_execution_failed: (errMsg) =>
-    `The instruction passed all validation but LND rejected the change: ${errMsg}. ` +
+    `The instruction passed all validation but LND rejected the change: ${summarizeLndError(errMsg, { action: 'channel policy change', fallback: 'LND rejected the change.' })}. ` +
     'Common causes: channel was closed between validation and execution, or the remote peer ' +
     'disconnected. Check GET /api/v1/channels/mine to verify channel is still active.',
 };
@@ -508,7 +509,10 @@ export class SignedInstructionExecutor {
         });
         return {
           success: false,
-          error: `LND execution failed: ${err.message}`,
+          error: summarizeLndError(err.message, {
+            action: 'channel policy change',
+            fallback: 'LND execution failed.',
+          }),
           hint: HINTS.lnd_execution_failed(err.message),
           status: 502,
           failed_at: 'lnd_execution',

@@ -17,6 +17,7 @@
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const STATE_PATH = 'data/channel-market/pending-closes.json';
 
@@ -48,17 +49,10 @@ function isIndeterminateCloseError(err) {
 }
 
 function normalizeCloseErrorMessage(err) {
-  const raw = String(err?.message || 'Channel close failed').trim();
-  if (/timed out|timeout/i.test(raw)) {
-    return 'The node did not answer before the close timeout. The channel may still be closing.';
-  }
-  if (/peer .*disconnected/i.test(raw)) {
-    return 'The node lost the peer during the real channel-close attempt.';
-  }
-  if (/channel not found/i.test(raw)) {
-    return 'The node could not find that channel.';
-  }
-  return raw || 'Channel close failed.';
+  return summarizeLndError(err?.message || 'Channel close failed', {
+    action: 'channel close',
+    fallback: 'Channel close failed.',
+  });
 }
 
 /**
@@ -553,7 +547,14 @@ export class ChannelCloser {
         };
       }
     } catch (err) {
-      return { success: false, error: `LND query failed: ${err.message}`, status: 503 };
+      return {
+        success: false,
+        error: summarizeLndError(err.message, {
+          action: 'channel close query',
+          fallback: 'LND query failed.',
+        }),
+        status: 503,
+      };
     }
 
     const originalLocked = assignment.capacity || 0;

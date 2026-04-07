@@ -15,6 +15,7 @@
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 import { pickSafePublicPeerAddress } from '../identity/request-security.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
@@ -83,72 +84,11 @@ function peerConnectFailureDetails(errMsg) {
   };
 }
 
-/**
- * LND error messages → agent-friendly explanations.
- */
-const LND_ERROR_MAP = [
-  {
-    pattern: /not enough witness outputs to create funding transaction/i,
-    message: "Node operator's wallet has insufficient funds for the mining fee. This is infrastructure, not your balance. Try later.",
-  },
-  {
-    pattern: /peer is not connected|peer not online|unable to locate/i,
-    message: 'Could not connect to peer. The node may be offline or unreachable.',
-  },
-  {
-    pattern: /peer .* disconnected/i,
-    message: 'The node lost the peer during the real channel-open attempt.',
-  },
-  {
-    pattern: /wallet is fully synced/i,
-    message: 'Node is syncing. Try again in a few minutes.',
-  },
-  {
-    pattern: /pending channels exceed maximum/i,
-    message: 'Too many channels pending confirmation. Wait for current opens to confirm.',
-  },
-  {
-    pattern: /chan size.*below min chan size/i,
-    message: 'Channel too small for this node’s current policy.',
-  },
-];
-
-function sanitizeLndDetail(errMsg) {
-  return String(errMsg || '').replace(/\/[^\s]+/g, '[path]').trim();
-}
-
-function btcStringToSats(value) {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
-  const [whole, fraction = ''] = normalized.split('.');
-  const sats = `${whole}${fraction.padEnd(8, '0').slice(0, 8)}`;
-  const parsed = Number.parseInt(sats, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function mapLndError(errMsg) {
-  const sanitizedDetail = sanitizeLndDetail(errMsg);
-  const minSizeMatch = /chan size of ([\d.]+) BTC is below min chan size of ([\d.]+) BTC/i.exec(errMsg);
-  if (minSizeMatch) {
-    const attemptedSats = btcStringToSats(minSizeMatch[1]);
-    const minSats = btcStringToSats(minSizeMatch[2]);
-    if (Number.isFinite(minSats)) {
-      if (Number.isFinite(attemptedSats)) {
-        return `Channel too small. You tried ${attemptedSats} sats, but this peer requires at least ${minSats} sats.`;
-      }
-      return `Channel too small. This peer requires at least ${minSats} sats.`;
-    }
-  }
-  for (const { pattern, message } of LND_ERROR_MAP) {
-    if (pattern.test(errMsg)) {
-      if (sanitizedDetail && !message.includes(sanitizedDetail)) {
-        return `${message} Details: ${sanitizedDetail}`;
-      }
-      return message;
-    }
-  }
-  return `Channel open failed: ${sanitizedDetail}`;
+  return summarizeLndError(errMsg, {
+    action: 'channel open',
+    fallback: 'Channel open failed.',
+  });
 }
 
 /**

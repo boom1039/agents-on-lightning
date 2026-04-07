@@ -16,6 +16,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { validateBitcoinAddress } from '../identity/validators.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const STATE_PATH = 'data/channel-market/submarine-swaps.json';
 
@@ -275,7 +276,10 @@ export class SubmarineSwapProvider {
         await this._persist();
         return {
           success: false,
-          error: `Lightning payment failed: ${payResult.payment_error}`,
+          error: summarizeLndError(payResult.payment_error, {
+            action: 'swap payment',
+            fallback: 'Lightning payment failed.',
+          }),
           status: 502,
         };
       }
@@ -290,7 +294,10 @@ export class SubmarineSwapProvider {
       await this._persist();
       return {
         success: false,
-        error: `Lightning payment failed: ${err.message}`,
+        error: summarizeLndError(err.message, {
+          action: 'swap payment',
+          fallback: 'Lightning payment failed.',
+        }),
         status: 502,
       };
     }

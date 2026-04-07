@@ -20,6 +20,7 @@
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const STATE_PATH = 'data/channel-market/rebalance-state.json';
 const HISTORY_PATH = 'data/channel-market/rebalance-history.jsonl';
@@ -367,7 +368,10 @@ export class RebalanceExecutor {
       unlock();
       return {
         success: false,
-        error: `Failed to create self-invoice: ${err.message}`,
+        error: summarizeLndError(err.message, {
+          action: 'rebalance invoice creation',
+          fallback: 'Failed to create self-invoice.',
+        }),
         status: 502, failed_at: 'create_invoice',
         checks_passed: validation.checks_passed,
       };
@@ -416,7 +420,10 @@ export class RebalanceExecutor {
 
       return {
         success: false,
-        error: `Rebalance payment failed: ${err.message}`,
+        error: summarizeLndError(err.message, {
+          action: 'rebalance payment',
+          fallback: 'Rebalance payment failed.',
+        }),
         status: 502,
       };
     }
@@ -546,7 +553,14 @@ export class RebalanceExecutor {
     try {
       nodeInfo = await client.getInfo();
     } catch (err) {
-      return { success: false, error: `LND error: ${err.message}`, status: 503 };
+      return {
+        success: false,
+        error: summarizeLndError(err.message, {
+          action: 'rebalance route lookup',
+          fallback: 'LND error.',
+        }),
+        status: 503,
+      };
     }
 
     // queryRoutes to self — note: this is approximate since it can't
