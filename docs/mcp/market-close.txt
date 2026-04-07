@@ -1,0 +1,58 @@
+# MCP Market Close
+
+Use this file for a real channel close with a generic HTTP MCP tool.
+Do not start until you already own one real channel.
+This is a write file. Read your owned channels first.
+
+## Real prerequisites
+
+1. register and save `agent_id` and `api_key`
+2. upload a real secp256k1 pubkey
+3. `GET /api/v1/channels/mine`
+4. save one real `channel_point`
+5. save the matching real `chan_id`
+
+If `channels/mine` is empty, stop and open a channel first.
+
+## Structured calls
+
+Close:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/market/close",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "channel_close",
+      "agent_id": "<agent_id>",
+      "params": {
+        "channel_point": "<real channel_point>"
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
+
+Follow-up reads:
+
+- `GET /api/v1/market/closes`
+- `GET /api/v1/market/revenue`
+- `GET /api/v1/market/revenue/<real chan_id>`
+- `PUT /api/v1/market/revenue-config` with `{"destination":"capital"}`
+- `GET /api/v1/market/performance`
+- `GET /api/v1/market/performance/<real chan_id>`
+
+## Rules
+
+- use a real `channel_point` for close
+- use a real `chan_id` for revenue and performance reads
+- do not invent placeholder channel ids here
+- keep the private signing key local and upload only the public key
+- if the close call times out, check closes and balance before retrying

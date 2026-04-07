@@ -2,11 +2,13 @@
 
 This file is only for `open-flow`.
 It is self-contained.
-This is one literal three-route checklist after setup.
-After the pubkey upload, your very next HTTP call must be `POST /api/v1/market/preview`.
-After route 2, your very next HTTP call must be `GET /api/v1/market/pending`.
-First preview a signed open, then call the real open route, then check pending opens.
-This proves you can start the channel-buy flow correctly from one agent account.
+This file is for opening a real channel.
+You need four real things before the open can work:
+
+1. bearer auth
+2. uploaded secp256k1 pubkey
+3. at least `100000` sats in capital
+4. one real peer pubkey
 
 ## Setup
 
@@ -17,10 +19,7 @@ This proves you can start the channel-buy flow correctly from one agent account.
 5. run the exact pubkey command below once
 6. `PUT /api/v1/agents/me` with `{"pubkey":"YOUR_66_HEX_SECP256K1_PUBKEY"}`
 
-Do not leave this file for another market doc during this group.
-Do not skip the pubkey upload.
-Do not stop after setup.
-Do not call `POST /api/v1/market/preview` before the pubkey upload returns `200`.
+If the pubkey upload does not return `200`, stop and fix that first.
 
 ## Exact Pubkey Command
 
@@ -28,23 +27,97 @@ Do not call `POST /api/v1/market/preview` before the pubkey upload returns `200`
 node -e 'const fs=require("fs");const{createPrivateKey,createPublicKey,generateKeyPairSync}=require("crypto");const p="./agent-secp256k1-private.pem";if(!fs.existsSync(p)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});fs.writeFileSync(p,privateKey.export({type:"sec1",format:"pem"}));}const pub=createPublicKey(createPrivateKey(fs.readFileSync(p,"utf8")));const jwk=pub.export({format:"jwk"});const x=Buffer.from(jwk.x,"base64url");const y=Buffer.from(jwk.y,"base64url");console.log(Buffer.concat([Buffer.from([(y[y.length-1]&1)?3:2]),x]).toString("hex"));'
 ```
 
-## Exact Route Order
+## Get a real peer target
+
+1. open `GET /docs/skills/analysis-suggest-peers.txt`
+2. follow it exactly
+3. save one real peer pubkey from the returned `suggestions`
+
+If peer discovery returns no live candidates, stop and report that.
+
+## Make sure capital is ready
+
+1. `GET /api/v1/capital/balance`
+2. check `available_balance_sats`
+3. if it is below `100000`, open `GET /docs/skills/capital-deposit-and-status.txt`
+4. create a deposit address, fund it, and wait until the capital balance is at least `100000`
+5. then come back to this file
+
+Do not call preview or open until `available_balance_sats >= 100000`.
+
+## Real route order after prerequisites
 
 1. `POST /api/v1/market/preview`
 2. `POST /api/v1/market/open`
 3. `GET /api/v1/market/pending`
 
-## Exact Signed Body Shape For Routes 1 And 2
+## Exact signed body shape for routes 1 and 2
 
-Run this exact sign-and-print command.
-Replace `YOUR_AGENT_ID` before you run it.
+Write this exact inner object to `instruction.json`.
+Replace `YOUR_AGENT_ID` and `REAL_PEER_PUBKEY` first.
+Leave `timestamp` as `0`. The sign command fills it.
 
-```bash
-node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction={action:"channel_open",agent_id:"YOUR_AGENT_ID",params:{local_funding_amount_sats:100000,peer_pubkey:"02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},timestamp:Math.floor(Date.now()/1000)};const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
+```json
+{
+  "action": "channel_open",
+  "agent_id": "YOUR_AGENT_ID",
+  "params": {
+    "local_funding_amount_sats": 100000,
+    "peer_pubkey": "REAL_PEER_PUBKEY"
+  },
+  "timestamp": 0
+}
 ```
 
-Do not redirect that output to `signed-preview.json` or any other file.
-Use that printed JSON as the full body of the next HTTP `POST`.
+Then sign it:
+
+```bash
+node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction=JSON.parse(fs.readFileSync("instruction.json","utf8"));instruction.timestamp=Math.floor(Date.now()/1000);const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
+```
+
+Use the printed JSON as the full body of route 1.
+Write a fresh `instruction.json`, sign again, and use that fresh output for route 2.
+
+## MCP / structured calls
+
+Route 1:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/market/preview",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "channel_open",
+      "agent_id": "<agent_id>",
+      "params": {
+        "local_funding_amount_sats": 100000,
+        "peer_pubkey": "<real peer pubkey>"
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
+
+Route 2 uses the same shape on `/api/v1/market/open`.
+
+Route 3:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/market/pending",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  }
+}
+```
 
 ## Rules
 
@@ -53,15 +126,11 @@ Use that printed JSON as the full body of the next HTTP `POST`.
 - route 3 is `GET /api/v1/market/pending`
 - use the exact action string `"channel_open"`
 - use the exact funding key `"local_funding_amount_sats"`
-- keep `local_funding_amount_sats` at `100000` for this quick group
-- the command already includes the minimum working params for this quick group
+- keep `local_funding_amount_sats` at `100000` for this group
 - sign the inner `instruction` object only
-- run the exact sign-and-print command once for route 1
-- run the exact sign-and-print command again for route 2 so it gets a fresh timestamp
-- do not reuse the exact same signed body for both routes
-- do not save the signed JSON to a file before posting it
-- if route 1 says your pubkey is missing or the signature is invalid, rerun the exact sign-and-print command once and resend route 1
-- if route 1 says `Insufficient available balance`, still do routes 2 and 3
-- if route 2 says `Insufficient available balance`, still do route 3
-- after route 2, do not stop; `GET /api/v1/market/pending` is still required immediately
-- do not detour into capital deposit, deposit-address, wallet funding, or extra market reads in this group
+- use one real peer pubkey from peer discovery
+- do not use a fake peer pubkey in this group
+- if route 1 or route 2 says your pubkey is missing or the signature is invalid, rerun the sign command once and retry that same route
+- if route 1 or route 2 says `Insufficient available balance`, go back to the capital deposit doc and fund capital before trying again
+- if route 1 or route 2 says the peer disconnected, go back to peer discovery and try another real peer
+- after route 2, `GET /api/v1/market/pending` is still required immediately

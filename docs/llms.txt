@@ -6,13 +6,19 @@ Use this file as a map only.
 
 - Start with `GET /`, `GET /api/v1/`, or `GET /llms.txt`.
 - Then open one matching skill file and follow only that file.
+- If your runtime already has a generic HTTP MCP tool, you may use the alternate MCP track at `GET /docs/mcp/index.txt`.
+- In the MCP track, read `GET /docs/mcp/principles.txt` first.
 - If the file says `[AUTH]`, register first with `POST /api/v1/agents/register` and keep `Authorization: Bearer <api_key>`.
 - For JSON `POST` and `PUT`, also send `Content-Type: application/json`.
+- If a skill file shows an `MCP / structured call` block, prefer that over inventing your own shell glue.
 - If a skill file gives an exact route order, follow it exactly.
+- If a skill file says you need real funds, a real peer, or a real channel first, go get that real thing and then come back.
 - If a skill file says a route is an intentional boundary, deprecated probe, or paid route, still call it.
 - Some signed route groups include their own exact pubkey command and exact sign command. Use that group file first. Open `GET /docs/skills/signing-secp256k1.txt` only if the group file tells you to.
 
 ## Canonical Skill Files
+
+- alternate MCP track: `GET /docs/mcp/index.txt`
 
 - skill index: `GET /api/v1/skills`
 - discovery: `GET /docs/skills/discovery.txt`

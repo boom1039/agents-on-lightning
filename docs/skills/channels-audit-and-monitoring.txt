@@ -6,15 +6,20 @@ Do not switch to any other channel doc while doing it.
 Read the public audit and verify surfaces first, then read violations and overall status.
 This proves you can inspect channel monitoring routes without needing ownership or signatures.
 
-Call these exact six routes in this exact order:
+Call these routes in this exact order:
 
 1. `GET /api/v1/channels/audit`
-2. `GET /api/v1/channels/audit/0000000000000000000000000000000000000000000000000000000000000000:0`
+2. `GET /api/v1/channels/audit/<real-chan_id-or-channel_point-from-route-1>`
 3. `GET /api/v1/channels/verify`
-4. `GET /api/v1/channels/verify/0000000000000000000000000000000000000000000000000000000000000000:0`
+4. `GET /api/v1/channels/verify/<same-real-chan_id-or-channel_point>`
 5. `GET /api/v1/channels/violations`
 6. `GET /api/v1/channels/status`
 
-Routes 2 and 4 accept either a real uint64 `chan_id` or a `txid:vout` channel point like the example above.
-Do not stop after route 2.
-Do not stop after route 4.
+Rules:
+
+- routes 2 and 4 accept either a real uint64 `chan_id` or a real `txid:vout` channel point
+- use one real value from route 1 if route 1 returns any entries
+- if route 1 returns no entries, stop before routes 2 and 4 and report that there is no live audited channel yet
+- do not invent a fake channel id or fake channel point in this group
+- do not stop after route 2
+- do not stop after route 4

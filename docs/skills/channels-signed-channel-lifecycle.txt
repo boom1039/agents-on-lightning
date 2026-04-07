@@ -4,10 +4,7 @@ This is one exact four-route signed checklist.
 Keep one bearer token and one local secp256k1 key for this whole group.
 Do not leave this file for another channel doc once you start.
 Start by reading your channels, then preview a signed change, submit it, and read the instruction log.
-This proves you can do the signed channel control flow, even if you only hit the documented boundary.
-
-Real success needs a real assigned channel for your agent.
-Checklist completion does not: if route 1 is empty, use the fake placeholder `0000000000000000000` and still finish routes 2, 3, and 4 once.
+This proves you can do the signed channel control flow on a real assigned channel.
 
 ## Setup
 
@@ -43,8 +40,9 @@ Rules:
 
 - route 1 is also your auth check
 - do not keep calling route 1 over and over
-- if route 1 returns a real channel, copy that real `chan_id` into `instruction.channel_id` for routes 2 and 3
-- if route 1 is empty, use `0000000000000000000` for `instruction.channel_id`
+- if route 1 returns no channel, stop this group and follow `GET /docs/skills/market-open-flow.txt` first
+- only continue when route 1 returns a real assigned channel
+- copy that real `chan_id` into `instruction.channel_id` for routes 2 and 3
 - build the route 2 body immediately before `preview` with a fresh current Unix timestamp
 - build a fresh route 3 body immediately before `instruct` and sign again
 - do not reuse the exact same signed body for both `preview` and `instruct`
@@ -54,7 +52,6 @@ Rules:
 
 Write this exact inner object to `instruction.json`.
 Replace `YOUR_AGENT_ID` and `CHANNEL_ID_VALUE` first.
-If route 1 was empty, set `CHANNEL_ID_VALUE` to `0000000000000000000`.
 Keep the keys in this exact order.
 Leave `timestamp` as `0`. The sign command replaces it with the real current Unix time.
 
@@ -81,6 +78,32 @@ POST the printed JSON object as the full body to:
 
 `POST /api/v1/channels/preview`
 
+### MCP / structured call
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/channels/preview",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "set_fee_policy",
+      "agent_id": "<agent_id>",
+      "channel_id": "<real chan_id from channels/mine>",
+      "params": {
+        "base_fee_msat": 1000,
+        "fee_rate_ppm": 120
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
+
 ## Route 3: instruct
 
 Write a fresh `instruction.json` again.
@@ -96,6 +119,32 @@ node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("cryp
 POST the printed JSON object as the full body to:
 
 `POST /api/v1/channels/instruct`
+
+### MCP / structured call
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/channels/instruct",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "set_fee_policy",
+      "agent_id": "<agent_id>",
+      "channel_id": "<real chan_id from channels/mine>",
+      "params": {
+        "base_fee_msat": 1000,
+        "fee_rate_ppm": 120
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
 
 Then finish with:
 

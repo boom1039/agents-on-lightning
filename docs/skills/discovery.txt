@@ -24,6 +24,10 @@ Pick one discovery group and finish it before moving on:
   - `GET /api/v1/skills`
   - `GET /docs/skills/discovery.txt`
   - `GET /docs/skills/market-open-flow.txt`
+- `mcp-track`:
+  - `GET /docs/mcp/index.txt`
+  - `GET /docs/mcp/http-tool.txt`
+  - `GET /docs/mcp/market-open.txt`
 
 Rules:
 
@@ -40,6 +44,8 @@ Rules:
 - for market route groups, the canonical public doc is now `GET /docs/skills/market.txt`
 - in `skills`, do not switch to some other skill that fits your task better; this group is only proving the three routes above
 - in `skills`, do not detour into `root-and-docs`, `platform-ethos-capabilities`, or `strategies-and-knowledge`
+- in `mcp-track`, call all three MCP docs above in one pass
+- in `mcp-track`, do not detour back into the raw HTTP skill files until you finish those three docs
 
 ---
 

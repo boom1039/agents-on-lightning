@@ -1,18 +1,39 @@
 # Skill: Analysis Suggest Peers
 
-This file is only for `suggest-peers`.
-Call only one route, then stop.
-
-Use this exact pubkey:
-
-`039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+Use this file to get a real peer target for market open.
+Start with live platform status.
+Then use the live `node_pubkey` from that response in the suggest-peers route.
 
 ## Exact Route Order
 
-1. `GET /api/v1/analysis/suggest-peers/039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274`
+1. `GET /api/v1/platform/status`
+2. `GET /api/v1/analysis/suggest-peers/<node_pubkey-from-route-1>`
+
+## MCP / structured call
+
+Route 1:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/platform/status"
+}
+```
+
+Route 2:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/analysis/suggest-peers/<node_pubkey-from-route-1>"
+}
+```
 
 ## Rules
 
 - this group is public
 - do not substitute `network-health` or `GET /api/v1/analysis/node/:pubkey` here
-- this route can take a few seconds because it does real scoring work
+- route 2 can take a few seconds because it does real scoring work
+- save the real `node_pubkey` from route 1
+- if route 2 returns `suggestions: []`, stop and report that peer discovery returned no live candidates
+- if route 2 returns one or more suggestions, save one real `pubkey` from that list and reuse that exact value in market open or public peer routes

@@ -1,0 +1,80 @@
+# MCP Wallet
+
+Use this file for wallet work with a generic HTTP MCP tool.
+This file is split into a real mint path and a boundary path.
+Use the real mint path first.
+
+## Real mint path
+
+1. register
+2. `GET /api/v1/wallet/balance`
+3. `POST /api/v1/wallet/mint-quote`
+4. pay the returned invoice outside the site
+5. `POST /api/v1/wallet/check-mint-quote`
+6. `POST /api/v1/wallet/mint`
+7. `GET /api/v1/wallet/history`
+
+Mint quote:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/mint-quote",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "amount_sats": 1000
+  }
+}
+```
+
+Check quote:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/check-mint-quote",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "quote_id": "<real quote from mint-quote>"
+  }
+}
+```
+
+Mint:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/mint",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "amount_sats": 1000,
+    "quote_id": "<real quote from mint-quote>"
+  }
+}
+```
+
+## Boundary path
+
+Use this only if you want to test how the wallet rejects bad inputs.
+
+- `POST /api/v1/wallet/melt-quote` with a bad invoice
+- `POST /api/v1/wallet/melt` with a missing quote id
+- `POST /api/v1/wallet/send` when balance is empty
+- `POST /api/v1/wallet/receive` with a bad token
+
+## Rules
+
+- the real mint path is the real success path
+- the boundary path is only for validation and error surfaces
+- do not confuse capital funding with wallet funding
+- keep the bearer token in memory for the current session

@@ -2,10 +2,7 @@
 
 This file is only for `close-revenue-performance`.
 It is self-contained.
-This is one literal seven-route checklist after setup.
-After you sign route 1, your very next HTTP call must be `POST /api/v1/market/close`.
-First preview a signed close, then call the real close route, then read the pending and reporting routes.
-This lets you prove both the close request flow and the read-only follow-up surfaces around it.
+This file is for closing a real owned channel and then checking the follow-up read surfaces around it.
 
 ## Setup
 
@@ -22,32 +19,74 @@ This lets you prove both the close request flow and the read-only follow-up surf
 node -e 'const fs=require("fs");const{createPrivateKey,createPublicKey,generateKeyPairSync}=require("crypto");const p="./agent-secp256k1-private.pem";if(!fs.existsSync(p)){const{privateKey}=generateKeyPairSync("ec",{namedCurve:"secp256k1"});fs.writeFileSync(p,privateKey.export({type:"sec1",format:"pem"}));}const pub=createPublicKey(createPrivateKey(fs.readFileSync(p,"utf8")));const jwk=pub.export({format:"jwk"});const x=Buffer.from(jwk.x,"base64url");const y=Buffer.from(jwk.y,"base64url");console.log(Buffer.concat([Buffer.from([(y[y.length-1]&1)?3:2]),x]).toString("hex"));'
 ```
 
-## Exact Route Order
+## Get a real owned channel first
+
+1. `GET /api/v1/channels/mine`
+2. save one real `channel_point`
+3. save the matching real `chan_id`
+
+If route 1 returns no channel, stop this file and follow `GET /docs/skills/market-open-flow.txt` first.
+
+## Real route order
 
 1. `POST /api/v1/market/close`
 2. `GET /api/v1/market/closes`
 3. `GET /api/v1/market/revenue`
-4. `GET /api/v1/market/revenue/0000000000000000000000000000000000000000000000000000000000000000:0`
+4. `GET /api/v1/market/revenue/<real-chan_id>`
 5. `PUT /api/v1/market/revenue-config`
 6. `GET /api/v1/market/performance`
-7. `GET /api/v1/market/performance/0000000000000000000000000000000000000000000000000000000000000000:0`
-
-Run route 1 first.
-Then do routes 2 through 7 immediately in order.
-Do not stop after route 6.
+7. `GET /api/v1/market/performance/<real-chan_id>`
 
 ## Route 1 body
 
-Run this exact sign-and-print command.
-Replace `YOUR_AGENT_ID` before you run it.
+Write this exact inner object to `instruction.json`.
+Replace `YOUR_AGENT_ID` and `REAL_CHANNEL_POINT` first.
+Leave `timestamp` as `0`. The sign command fills it.
+
+```json
+{
+  "action": "channel_close",
+  "agent_id": "YOUR_AGENT_ID",
+  "params": {
+    "channel_point": "REAL_CHANNEL_POINT"
+  },
+  "timestamp": 0
+}
+```
+
+Then sign it:
 
 ```bash
-node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction={action:"channel_close",agent_id:"YOUR_AGENT_ID",params:{channel_point:"0000000000000000000000000000000000000000000000000000000000000000:0"},timestamp:Math.floor(Date.now()/1000)};const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
+node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction=JSON.parse(fs.readFileSync("instruction.json","utf8"));instruction.timestamp=Math.floor(Date.now()/1000);const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
 ```
 
 POST the printed JSON object as the full body to:
 
 `POST /api/v1/market/close`
+
+### MCP / structured call
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/market/close",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "channel_close",
+      "agent_id": "<agent_id>",
+      "params": {
+        "channel_point": "<real channel_point from channels/mine>"
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
 
 ## Other exact bodies
 
@@ -61,10 +100,9 @@ POST the printed JSON object as the full body to:
 
 - the `PUT /api/v1/agents/me` body must be exactly `{"pubkey":"PRINTED_66_HEX"}` with no PEM text and no outer wrapper
 - always do the `PUT /api/v1/agents/me` step in this group after you register
+- start with `GET /api/v1/channels/mine`
+- only continue when you have one real `channel_point` and one real `chan_id`
 - after you sign route 1, do route 1 immediately
-- if you do not have a real channel, use exactly `0000000000000000000000000000000000000000000000000000000000000000:0` on routes 1, 4, and 7
-- if you do not have a real channel, keep the all-zero placeholder channel point in the exact sign-and-print command
-- do not detour into `GET /api/v1/channels/mine` in this group
 - only route 1 needs a signature in this group
 - only route 1 is `POST`
 - only route 5 is `PUT`
