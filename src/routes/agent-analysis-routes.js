@@ -18,6 +18,44 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PYTHON3 = process.env.PYTHON3 || 'python3';
 const SUGGEST_PEERS_SCRIPT = resolve(__dirname, '..', 'analysis', 'suggest-peers.py');
 
+function buildGraphFallbackCandidates(graph = {}, excluded = new Set(), limit = 30) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  if (nodes.length === 0 || edges.length === 0) return [];
+
+  const nodeMap = new Map(nodes.map((node) => [node.pub_key, node]));
+  const stats = new Map();
+
+  for (const edge of edges) {
+    const node1 = edge.node1_pub;
+    const node2 = edge.node2_pub;
+    const capacity = Number.parseInt(edge.capacity || '0', 10) || 0;
+
+    for (const pubkey of [node1, node2]) {
+      if (!pubkey || excluded.has(pubkey)) continue;
+      const current = stats.get(pubkey) || { num_channels: 0, total_capacity: 0 };
+      current.num_channels += 1;
+      current.total_capacity += capacity;
+      stats.set(pubkey, current);
+    }
+  }
+
+  return [...stats.entries()]
+    .map(([pubkey, stat]) => ({
+      pubkey,
+      alias: nodeMap.get(pubkey)?.alias || '',
+      num_channels: stat.num_channels,
+      total_capacity: String(stat.total_capacity),
+    }))
+    .sort((a, b) => {
+      const capDiff = (Number.parseInt(b.total_capacity || '0', 10) || 0)
+        - (Number.parseInt(a.total_capacity || '0', 10) || 0);
+      if (capDiff !== 0) return capDiff;
+      return (b.num_channels || 0) - (a.num_channels || 0);
+    })
+    .slice(0, limit);
+}
+
 export function agentAnalysisRoutes(daemon) {
   const router = Router();
   const analysisRate = rateLimit('analysis');
@@ -129,7 +167,7 @@ export function agentAnalysisRoutes(daemon) {
 
       // 3. Fetch info on each peer (one-hop out), cap at 30 to limit LND calls
       const peerList = [...peerPubkeys].slice(0, 30);
-      const candidates = await Promise.all(
+      let candidates = await Promise.all(
         peerList.map(async (pubkey) => {
           try {
             const info = await client.getNodeInfo(pubkey);
@@ -144,12 +182,21 @@ export function agentAnalysisRoutes(daemon) {
           }
         }),
       );
+      candidates = candidates.filter(Boolean);
+
+      let candidateSource = 'one_hop';
+      if (candidates.length === 0) {
+        const graph = await client.describeGraph(false).catch(() => null);
+        const excluded = new Set([...myPeers, req.params.pubkey]);
+        candidates = buildGraphFallbackCandidates(graph, excluded, 30);
+        if (candidates.length > 0) candidateSource = 'network_graph_fallback';
+      }
 
       // 4. Pipe to Python scoring script via stdin → stdout
       const input = JSON.stringify({
         target_pubkey: req.params.pubkey,
         my_peers: myPeers,
-        candidates: candidates.filter(Boolean),
+        candidates,
       });
 
       const result = await new Promise((resolve, reject) => {
@@ -168,7 +215,10 @@ export function agentAnalysisRoutes(daemon) {
         proc.stdin.end();
       });
 
-      res.json(result);
+      res.json({
+        ...result,
+        candidate_source: candidateSource,
+      });
     } catch (err) {
       return err500Internal(res, 'suggesting peers');
     }
