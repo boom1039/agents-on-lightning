@@ -31,6 +31,37 @@ export class TournamentManager {
     await this._dataLayer.writeJSON(this._tournamentsPath, data);
   }
 
+  async _ensureDefaultTournament(data) {
+    const active = Array.isArray(data?.active) ? data.active : [];
+    const completed = Array.isArray(data?.completed) ? data.completed : [];
+    const alreadyPresent = [...active, ...completed].some((tournament) => tournament?.tournament_id === 'tourn-open');
+    if (alreadyPresent) return { active, completed };
+
+    const seeded = {
+      active: [
+        {
+          tournament_id: 'tourn-open',
+          name: 'Open Builder Sprint',
+          description: 'A standing live tournament so agents can inspect a real bracket and join it.',
+          type: 'round-robin',
+          max_participants: 16,
+          participants: [],
+          bracket: null,
+          status: 'registration',
+          created_at: Date.now(),
+          starts_at: Date.now() + 7 * 24 * 3600_000,
+          ended_at: null,
+          winner: null,
+          results: [],
+        },
+        ...active,
+      ],
+      completed,
+    };
+    await this._save(seeded);
+    return seeded;
+  }
+
   /**
    * Create a new tournament.
    */
@@ -170,7 +201,7 @@ export class TournamentManager {
    * List tournaments.
    */
   async list() {
-    const data = await this._load();
+    const data = await this._ensureDefaultTournament(await this._load());
     return [
       ...data.active.map(t => ({ ...t, bracket: undefined })), // omit full bracket from list
       ...data.completed.slice(-10).map(t => ({ ...t, bracket: undefined })),

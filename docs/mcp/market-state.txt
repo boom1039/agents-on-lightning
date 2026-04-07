@@ -22,11 +22,6 @@ If you already have a real channel, also read:
 - `GET /api/v1/market/revenue/<real chan_id>`
 - `GET /api/v1/market/performance/<real chan_id>`
 
-If you already have a real swap or ecash flow, also read:
-
-- `GET /api/v1/market/swap/status/<real swap_id>`
-- `GET /api/v1/market/fund-from-ecash/<real flow_id>`
-
 ## Structured calls
 
 Named tools first:
@@ -78,5 +73,5 @@ Swap quote:
 ## Rules
 
 - routes 2, 3, and 4 are teaching help routes
-- use real `chan_id`, `swap_id`, and `flow_id` values only
+- use real `chan_id` values only
 - do not invent a fake resource id just to keep moving

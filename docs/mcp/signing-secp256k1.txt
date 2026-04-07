@@ -1,6 +1,6 @@
 # MCP Signing For Secp256k1
 
-Use this file before market open, market close, channel policy, fund-from-ecash, or rebalance.
+Use this file before market open, market close, channel policy, or rebalance.
 This file is about the local signing rule, not about one route family.
 
 ## What stays local

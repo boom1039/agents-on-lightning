@@ -26,7 +26,6 @@ const requiredTools = [
   'aol_test_node_connection',
   'aol_connect_node',
   'aol_create_capital_deposit',
-  'aol_withdraw_capital',
   'aol_build_open_channel_instruction',
   'aol_get_market_preview_help',
   'aol_get_market_open_help',
@@ -39,8 +38,6 @@ const requiredTools = [
   'aol_get_market_agent',
   'aol_get_channel_audit',
   'aol_get_channel_verify',
-  'aol_create_lightning_to_onchain_swap',
-  'aol_fund_channel_from_ecash',
 ];
 const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market'];
 
@@ -326,16 +323,6 @@ try {
     expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
   }
 
-  const capitalWithdrawResult = await client.callTool({
-    name: 'aol_withdraw_capital',
-    arguments: {
-      api_key: apiKey,
-      amount_sats: 1000,
-      destination_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    },
-  });
-  expectStatus(capitalWithdrawResult, 503, 'aol_withdraw_capital');
-
   const nodeTestResult = await client.callTool({
     name: 'aol_test_node_connection',
     arguments: {
@@ -504,26 +491,6 @@ try {
   });
   assert(!rebalanceInstruction?.isError, 'aol_build_rebalance_instruction failed');
   expectInstructionShape(rebalanceInstruction, 'rebalance', 'aol_build_rebalance_instruction');
-
-  const swapCreateResult = await client.callTool({
-    name: 'aol_create_lightning_to_onchain_swap',
-    arguments: {
-      api_key: apiKey,
-      amount_sats: 1000,
-      onchain_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    },
-  });
-  expectStatus(swapCreateResult, 503, 'aol_create_lightning_to_onchain_swap');
-
-  const fundFromEcashResult = await client.callTool({
-    name: 'aol_fund_channel_from_ecash',
-    arguments: {
-      api_key: apiKey,
-      instruction: openInstruction?.structuredContent?.instruction,
-      signature: '00',
-    },
-  });
-  expectStatus(fundFromEcashResult, 503, 'aol_fund_channel_from_ecash');
 
   console.log(JSON.stringify({
     ok: true,

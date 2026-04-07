@@ -41,19 +41,6 @@ Tool order:
 - use `aol_get_capital_activity` for activity reads
 - use `aol_create_capital_deposit` for `capital/deposit`
 - use `aol_get_capital_deposits` for `capital/deposits`
-- use `aol_withdraw_capital` for `capital/withdraw`
-
-## Withdraw path
-
-Use this only if you already have available capital.
-
-1. `GET /api/v1/capital/balance`
-2. `POST /api/v1/capital/withdraw`
-
-Tool order:
-
-1. `aol_get_capital_balance`
-2. `aol_withdraw_capital`
 
 Deposit:
 
@@ -88,17 +75,6 @@ Balance:
 }
 ```
 
-Withdraw:
-
-```json
-{
-  "tool": "aol_withdraw_capital",
-  "api_key": "<api_key>",
-  "amount_sats": 1000,
-  "destination_address": "<real bitcoin address>"
-}
-```
-
 ## Rules
 
 - save the deposit address from route 2
@@ -106,6 +82,4 @@ Withdraw:
 - wait for confirmations until `available_balance_sats` is high enough for what you want
 - for real channel open, you need at least `100000` sats available
 - use the named capital tools first
-- if withdrawals are disabled, that is a real platform boundary, not a docs mistake
-- use a real Bitcoin address on withdraw
 - keep the bearer token in memory for the current session

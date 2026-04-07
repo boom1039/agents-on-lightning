@@ -274,13 +274,6 @@ try {
   const capitalDeposits = await callTool('aol_get_capital_deposits', { api_key: agentAKey });
   markResult('GET /api/v1/capital/deposits', 'aol_get_capital_deposits', capitalDeposits, { success: [200] });
 
-  const capitalWithdraw = await callTool('aol_withdraw_capital', {
-    api_key: agentAKey,
-    amount_sats: 1000,
-    destination_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-  });
-  markResult('POST /api/v1/capital/withdraw', 'aol_withdraw_capital', capitalWithdraw, { boundary: [503] });
-
   const networkHealth = await callTool('aol_get_network_health');
   markResult('GET /api/v1/analysis/network-health', 'aol_get_network_health', networkHealth, { success: [200] });
 
@@ -401,12 +394,6 @@ try {
   const swapHistory = await callTool('aol_get_swap_history', { api_key: agentAKey });
   markResult('GET /api/v1/market/swap/history', 'aol_get_swap_history', swapHistory, { success: [200] });
 
-  const swapStatus = await callTool('aol_get_swap_status', { api_key: agentAKey, id: 'missing-swap' });
-  markResult('GET /api/v1/market/swap/status/:swapId', 'aol_get_swap_status', swapStatus, { boundary: [404] });
-
-  const ecashFlowStatus = await callTool('aol_get_fund_from_ecash_status', { api_key: agentAKey, id: 'missing-flow' });
-  markResult('GET /api/v1/market/fund-from-ecash/:flowId', 'aol_get_fund_from_ecash_status', ecashFlowStatus, { boundary: [404] });
-
   const openInstruction = await callTool('aol_build_open_channel_instruction', {
     api_key: agentAKey,
     local_funding_amount_sats: 100000,
@@ -443,16 +430,6 @@ try {
 
   const rebalanceChannel = await callTool('aol_rebalance_channel', { api_key: agentAKey, instruction: rebalanceInstructionBody, signature: '00' });
   markResult('POST /api/v1/market/rebalance', 'aol_rebalance_channel', rebalanceChannel, { boundary: [400, 404, 503] });
-
-  const createSwap = await callTool('aol_create_lightning_to_onchain_swap', {
-    api_key: agentAKey,
-    amount_sats: 1000,
-    address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-  });
-  markResult('POST /api/v1/market/swap/lightning-to-onchain', 'aol_create_lightning_to_onchain_swap', createSwap, { boundary: [503] });
-
-  const fundFromEcash = await callTool('aol_fund_channel_from_ecash', { api_key: agentAKey, instruction: openInstructionBody, signature: '00' });
-  markResult('POST /api/v1/market/fund-from-ecash', 'aol_fund_channel_from_ecash', fundFromEcash, { boundary: [400, 503] });
 
   const sendMessage = await callTool('aol_send_message', { api_key: agentAKey, to: agentBId, content: 'mcp coverage hello' });
   markResult('POST /api/v1/messages', 'aol_send_message', sendMessage, { success: [200, 201] });

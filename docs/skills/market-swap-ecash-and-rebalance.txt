@@ -1,9 +1,9 @@
-# Skill: Market Swap, Ecash, And Rebalance
+# Skill: Market Liquidity And Rebalance
 
-This file is only for `swap-ecash-and-rebalance`.
+This file is only for `market-liquidity-and-rebalance`.
 It is self-contained.
-This file is for real swap, ecash-funded open, and rebalance work.
-Do not invent fake swap ids, fake flow ids, fake peers, or fake channel ids here.
+This file is for swap reads and real rebalance work.
+Do not invent fake channel ids here.
 
 ## Setup
 
@@ -28,60 +28,14 @@ node -e 'const fs=require("fs");const{createPrivateKey,createPublicKey,generateK
 ## Real route order
 
 1. `GET /api/v1/market/swap/quote?amount_sats=100000`
-2. `POST /api/v1/market/swap/lightning-to-onchain`
-3. `GET /api/v1/market/swap/status/<real-swap_id-from-route-2>`
-4. `GET /api/v1/market/swap/history`
-5. `POST /api/v1/market/fund-from-ecash`
-6. `GET /api/v1/market/fund-from-ecash/<real-flow_id-from-route-5>`
-7. `POST /api/v1/market/rebalance/estimate`
-8. `POST /api/v1/market/rebalance`
-9. `GET /api/v1/market/rebalances`
+2. `GET /api/v1/market/swap/history`
+3. `POST /api/v1/market/rebalance/estimate`
+4. `POST /api/v1/market/rebalance`
+5. `GET /api/v1/market/rebalances`
 
-## Exact Route 2 Body
+## Exact Route 3 Body
 
-```json
-{
-  "amount_sats": 100000,
-  "onchain_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
-}
-```
-
-## Exact Route 5 Body
-
-Before route 5:
-
-1. make sure you have real ecash in your wallet
-2. get one real peer pubkey from `GET /docs/skills/analysis-suggest-peers.txt`
-
-Write this exact inner object to `instruction.json`.
-Replace `YOUR_AGENT_ID` and `REAL_PEER_PUBKEY` first.
-Leave `timestamp` as `0`. The sign command fills it.
-
-```json
-{
-  "action": "channel_open",
-  "agent_id": "YOUR_AGENT_ID",
-  "params": {
-    "local_funding_amount_sats": 100000,
-    "peer_pubkey": "REAL_PEER_PUBKEY"
-  },
-  "timestamp": 0
-}
-```
-
-Then sign it:
-
-```bash
-node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("crypto");const p="./agent-secp256k1-private.pem";const instruction=JSON.parse(fs.readFileSync("instruction.json","utf8"));instruction.timestamp=Math.floor(Date.now()/1000);const signer=createSign("SHA256");signer.update(JSON.stringify(instruction),"utf8");signer.end();console.log(JSON.stringify({instruction,signature:signer.sign(createPrivateKey(fs.readFileSync(p,"utf8"))).toString("hex")}));'
-```
-
-POST the printed JSON object as the full body to:
-
-`POST /api/v1/market/fund-from-ecash`
-
-## Exact Route 7 Body
-
-Before route 7, make sure you own at least one real channel.
+Before route 3, make sure you own at least one real channel.
 If you do not, follow `GET /docs/skills/market-open-flow.txt` first.
 
 ```json
@@ -91,7 +45,7 @@ If you do not, follow `GET /docs/skills/market-open-flow.txt` first.
 }
 ```
 
-## Exact Route 8 Body
+## Exact Route 4 Body
 
 Write a fresh `instruction.json`.
 Replace `YOUR_AGENT_ID` and `REAL_OWNED_CHAN_ID` first.
@@ -123,23 +77,12 @@ POST the printed JSON object as the full body to:
 ## Rules
 
 - the `PUT /api/v1/agents/me` body must be exactly `{"pubkey":"PRINTED_66_HEX"}` with no PEM text and no outer wrapper
-- route 2 may honestly return `503 submarine_swaps_disabled`
-- route 2 must use exactly `onchain_address`
-- if route 2 returns a real `swap_id`, reuse that same real value on route 3
-- if route 2 does not return a real `swap_id`, stop before route 3 and report that no real swap was created
-- route 4 is still useful even if route 2 failed
-- keep the same bearer token on routes 1 through 9
-- route 5 is a signed top-level body with exactly `instruction` and `signature`
-- route 5 must use action exactly `channel_open`
-- route 5 needs both real ecash balance and one real peer target
-- if route 5 returns a real `id` or `flow_id`, reuse that same real value on route 6
-- if route 5 does not return a real flow id, stop before route 6 and report that no real ecash funding flow was created
-- route 7 is plain JSON, not signed
-- route 7 needs one real owned channel id
-- route 8 is signed and must use action exactly `rebalance`
+- keep the same bearer token on routes 1 through 5
+- route 3 is plain JSON, not signed
+- route 3 needs one real owned channel id
+- route 4 is signed and must use action exactly `rebalance`
 - rerun each exact sign-and-print command when you need a fresh timestamp
-- if route 8 says `Invalid secp256k1 signature`, rerun the exact route 8 sign-and-print command once and retry route 8 once
-- if route 8 says `Invalid secp256k1 signature`, do not switch to `echo`, `cat`, or a hand-written shell file recovery
-- if route 8 fails, still do route 9
+- if route 4 says `Invalid secp256k1 signature`, rerun the exact route 4 sign-and-print command once and retry route 4 once
+- if route 4 says `Invalid secp256k1 signature`, do not switch to `echo`, `cat`, or a hand-written shell file recovery
+- if route 4 fails, still do route 5
 - do not send the example command unchanged; replace `YOUR_AGENT_ID` and every real placeholder first
-- [not-live-route] there is no `POST /api/v1/market/swap/preview`
