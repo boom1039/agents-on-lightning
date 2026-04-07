@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { resolve, dirname } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { getAgentSurfaceManifest, getAgentSurfaceSummary } from '../monitor/agent-surface-inventory.js';
 import { getJourneyMonitor } from '../monitor/journey-monitor.js';
@@ -37,12 +38,116 @@ function rejectLocalOnlyRoute(req, res) {
   return null;
 }
 
+function getJourneyUpstreamOrigin(env = process.env) {
+  const raw = typeof env.AOL_JOURNEY_UPSTREAM_ORIGIN === 'string'
+    ? env.AOL_JOURNEY_UPSTREAM_ORIGIN.trim()
+    : '';
+  return raw || null;
+}
+
+function getJourneySource(req) {
+  const raw = typeof req.query?.source === 'string' ? req.query.source.trim().toLowerCase() : '';
+  if (raw === 'local' || raw === 'prod') return raw;
+  return null;
+}
+
+function shouldProxyJourney(req) {
+  if (!isLoopbackRequest(req)) return false;
+  const source = getJourneySource(req);
+  if (source === 'local') return false;
+  if (source === 'prod') return Boolean(getJourneyUpstreamOrigin());
+  return Boolean(getJourneyUpstreamOrigin());
+}
+
+function buildJourneyUpstreamUrl(req, origin) {
+  const upstreamUrl = new URL(req.originalUrl || req.url, origin);
+  upstreamUrl.searchParams.delete('source');
+  return upstreamUrl;
+}
+
+function copyResponseHeaders(from, to, extra = {}) {
+  for (const [key, value] of from.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (lower === 'content-length' || lower === 'transfer-encoding' || lower === 'connection') continue;
+    to.setHeader(key, value);
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    to.setHeader(key, value);
+  }
+}
+
+async function proxyJourneyJson(req, res, origin) {
+  const upstream = await fetch(buildJourneyUpstreamUrl(req, origin), {
+    headers: {
+      Accept: req.get('accept') || 'application/json',
+      'User-Agent': 'agents-on-lightning-local-journey-proxy',
+    },
+  });
+  const body = Buffer.from(await upstream.arrayBuffer());
+  copyResponseHeaders(upstream, res);
+  res.status(upstream.status).send(body);
+}
+
+async function proxyJourneyStream(req, res, origin) {
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
+  const upstream = await fetch(buildJourneyUpstreamUrl(req, origin), {
+    headers: {
+      Accept: req.get('accept') || 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'User-Agent': 'agents-on-lightning-local-journey-proxy',
+    },
+    signal: controller.signal,
+  });
+  copyResponseHeaders(upstream, res, {
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.status(upstream.status);
+  res.flushHeaders();
+  if (!upstream.body) {
+    return res.end();
+  }
+  const upstreamStream = Readable.fromWeb(upstream.body);
+  upstreamStream.on('error', () => {
+    if (!res.writableEnded) res.end();
+  });
+  upstreamStream.pipe(res);
+}
+
 export function journeyRoutes() {
   const router = Router();
+  const journeyUpstreamOrigin = getJourneyUpstreamOrigin();
 
   router.use('/journey', express.static(JOURNEY_DIR, { etag: false, maxAge: 0 }));
   router.get('/journey', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'index.html')));
   router.get('/journey/three', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'three.html')));
+
+  router.use(async (req, res, next) => {
+    if (!journeyUpstreamOrigin || req.method !== 'GET' || !shouldProxyJourney(req)) {
+      return next();
+    }
+    try {
+      if (req.path === '/api/journey/events') {
+        await proxyJourneyStream(req, res, journeyUpstreamOrigin);
+        return;
+      }
+      if (
+        req.path === '/api/journey'
+        || req.path === '/api/journey/manifest'
+        || req.path.startsWith('/api/analytics/')
+      ) {
+        await proxyJourneyJson(req, res, journeyUpstreamOrigin);
+        return;
+      }
+    } catch (err) {
+      return res.status(502).json({
+        error: 'journey upstream unavailable',
+        detail: err.message || 'proxy failed',
+      });
+    }
+    return next();
+  });
 
   router.get('/api/journey', async (_req, res) => {
     const monitor = getJourneyMonitor();
