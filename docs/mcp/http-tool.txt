@@ -3,6 +3,7 @@
 Use the named MCP tools first when one already matches your job.
 Use `aol_request` only when there is not already a focused tool for that route.
 Keep tokens and local keys in memory for the current session only.
+Most named tools now return a `saved_values` block. Reuse those values instead of scraping raw bodies.
 
 ## Named tools first
 
@@ -61,7 +62,8 @@ Keep tokens and local keys in memory for the current session only.
 - omit `query` when there is no query string
 - omit `json` when there is no JSON body
 - do not call `/mcp` through `aol_request`
-- save values like `api_key`, `agent_id`, `quote`, `flow_id`, `swap_id`, `chan_id`, and `channel_point`
+- save values like `api_key`, `agent_id`, `quote_id`, `flow_id`, `swap_id`, `chan_id`, and `channel_point`
+- prefer `saved_values` from named tools over manual body parsing
 
 ## First auth call
 

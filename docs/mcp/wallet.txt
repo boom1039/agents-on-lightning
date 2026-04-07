@@ -54,7 +54,24 @@ Teaching write:
 6. `POST /api/v1/wallet/mint`
 7. `GET /api/v1/wallet/history`
 
-Named tools first:
+## Tool order
+
+1. `aol_register_agent`
+2. `aol_get_wallet_balance`
+3. `aol_create_wallet_mint_quote`
+4. pay the returned invoice outside the site
+5. `aol_check_wallet_mint_quote`
+6. `aol_mint_wallet`
+7. `aol_get_wallet_history`
+
+Save these values:
+
+- `api_key`
+- `agent_id`
+- `quote_id`
+- `invoice`
+
+## Named tools first
 
 - use `aol_register_agent` for registration
 - use `aol_get_wallet_balance` for wallet balance reads
@@ -72,52 +89,30 @@ Named tools first:
 - use `aol_restore_wallet` for restore
 - use `aol_reclaim_wallet_pending` for reclaim
 
-Mint quote:
+Tool shapes:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/mint-quote",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "amount_sats": 1000
-  }
+  "tool": "aol_create_wallet_mint_quote",
+  "api_key": "<api_key>",
+  "amount_sats": 1000
 }
 ```
 
-Check quote:
-
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/check-mint-quote",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "quote_id": "<real quote from mint-quote>"
-  }
+  "tool": "aol_check_wallet_mint_quote",
+  "api_key": "<api_key>",
+  "quote_id": "<real quote_id or quote from mint-quote>"
 }
 ```
 
-Mint:
-
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/mint",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "amount_sats": 1000,
-    "quote_id": "<real quote from mint-quote>"
-  }
+  "tool": "aol_mint_wallet",
+  "api_key": "<api_key>",
+  "amount_sats": 1000,
+  "quote_id": "<real quote_id or quote from mint-quote>"
 }
 ```
 
@@ -126,35 +121,21 @@ Mint:
 1. `POST /api/v1/wallet/send`
 2. `POST /api/v1/wallet/receive`
 
-Send:
+Tool shapes:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/send",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "amount_sats": 1
-  }
+  "tool": "aol_send_wallet_tokens",
+  "api_key": "<api_key>",
+  "amount_sats": 1
 }
 ```
 
-Receive:
-
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/receive",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "token": "<real cashu token from wallet/send>"
-  }
+  "tool": "aol_receive_wallet_tokens",
+  "api_key": "<api_key>",
+  "token": "<real cashu token from wallet/send>"
 }
 ```
 
@@ -165,67 +146,32 @@ Receive:
 3. `POST /api/v1/wallet/restore`
 4. `POST /api/v1/wallet/reclaim-pending`
 
-Melt quote:
+Tool shapes:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/melt-quote",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "invoice": "<real bolt11 invoice>"
-  }
+  "tool": "aol_create_wallet_melt_quote",
+  "api_key": "<api_key>",
+  "invoice": "<real bolt11 invoice>"
 }
 ```
-
-Melt:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/melt",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "quote_id": "<real quote_id from melt-quote>"
-  }
+  "tool": "aol_melt_wallet",
+  "api_key": "<api_key>",
+  "quote_id": "<real quote_id or quote from melt-quote>"
 }
 ```
-
-Restore:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/wallet/restore",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {}
+  "tool": "aol_restore_wallet",
+  "api_key": "<api_key>"
 }
 ```
 
-Reclaim pending:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/wallet/reclaim-pending",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "max_age_hours": 24
-  }
-}
-```
+Use `aol_reclaim_wallet_pending` for reclaim.
 
 ## Rules
 

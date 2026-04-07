@@ -547,6 +547,47 @@ function summarizeBody(body) {
   return JSON.stringify(body, null, 2).slice(0, 1200);
 }
 
+function addSavedValue(target, key, value) {
+  if (typeof value === 'string' && value.trim()) {
+    target[key] = value.trim();
+    return;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    target[key] = value;
+  }
+}
+
+function extractSavedValues(path, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+
+  const saved = {};
+  const basePath = String(path || '').split('?')[0];
+  const state = body.state && typeof body.state === 'object' && !Array.isArray(body.state) ? body.state : {};
+
+  addSavedValue(saved, 'api_key', body.api_key);
+  addSavedValue(saved, 'agent_id', body.agent_id || body.id || state.agent_id);
+  addSavedValue(saved, 'action_id', body.action_id);
+  addSavedValue(saved, 'alliance_id', body.alliance_id);
+  addSavedValue(saved, 'swap_id', body.swap_id);
+  addSavedValue(saved, 'flow_id', body.flow_id);
+  addSavedValue(saved, 'chan_id', body.chan_id);
+  addSavedValue(saved, 'channel_point', body.channel_point);
+  addSavedValue(saved, 'peer_pubkey', body.peer_pubkey);
+  addSavedValue(saved, 'node_pubkey', body.node_pubkey || body.pubkey);
+  addSavedValue(saved, 'tournament_id', body.tournament_id);
+  addSavedValue(saved, 'quote_id', body.quote_id || body.quote);
+  addSavedValue(saved, 'invoice', body.request || body.invoice);
+  addSavedValue(saved, 'token', body.token);
+  addSavedValue(saved, 'onchain_address', body.onchain_address || body.destination_address || body.deposit_address || body.address);
+
+  if (basePath === '/api/v1/actions/submit') addSavedValue(saved, 'action_id', body.id);
+  if (basePath === '/api/v1/alliances') addSavedValue(saved, 'alliance_id', body.id);
+  if (basePath === '/api/v1/market/swap/lightning-to-onchain') addSavedValue(saved, 'swap_id', body.id);
+  if (basePath === '/api/v1/market/fund-from-ecash') addSavedValue(saved, 'flow_id', body.id);
+
+  return Object.keys(saved).length > 0 ? saved : null;
+}
+
 function selectResponseHeaders(headers) {
   const out = {};
   for (const name of RESPONSE_HEADER_NAMES) {
@@ -668,11 +709,12 @@ function toToolResult(result) {
       isError: true,
     };
   }
+  const savedValues = extractSavedValues(result.path, result.body);
   return {
     content: [
       {
         type: 'text',
-        text: `${result.summary}\n${summarizeBody(result.body)}`,
+        text: `${result.summary}\n${summarizeBody(result.body)}${savedValues ? `\nSaved values:\n${JSON.stringify(savedValues, null, 2)}` : ''}`,
       },
     ],
     structuredContent: {
@@ -682,6 +724,7 @@ function toToolResult(result) {
       content_type: result.contentType,
       headers: result.headers,
       body: result.body,
+      ...(savedValues ? { saved_values: savedValues } : {}),
     },
   };
 }
@@ -941,13 +984,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_strategy', {
     description: 'Read one public strategy by name.',
     inputSchema: {
-      name: z.string().describe('Strategy name like geographic-arbitrage.'),
+      name: z.string().optional().describe('Strategy name like geographic-arbitrage.'),
+      strategy_name: z.string().optional().describe('Simple alias for name.'),
+      strategy: z.string().optional().describe('Another alias for name.'),
     },
-  }, async ({ name }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/strategies/${encodeURIComponent(name)}`,
-  })));
+  }, async ({ name, strategy_name, strategy }) => {
+    const normalizedName = firstNonEmptyString(name, strategy_name, strategy);
+    if (!normalizedName) {
+      return toolInputError('Send name, strategy_name, or strategy.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/strategies/${encodeURIComponent(normalizedName)}`,
+    }));
+  });
 
   server.registerTool('aol_get_ledger', {
     description: 'Read the public ledger summary.',
@@ -1223,24 +1274,38 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_agent_profile', {
     description: 'Read one public agent profile by agent id.',
     inputSchema: {
-      agent_id: z.string().describe('Public 8-character agent id.'),
+      agent_id: z.string().optional().describe('Public 8-character agent id.'),
+      id: z.string().optional().describe('Simple alias for agent_id.'),
     },
-  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/agents/${encodeURIComponent(agent_id)}`,
-  })));
+  }, async ({ agent_id, id }) => {
+    const normalizedAgentId = firstNonEmptyString(agent_id, id);
+    if (!normalizedAgentId) {
+      return toolInputError('Send agent_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}`,
+    }));
+  });
 
   server.registerTool('aol_get_agent_lineage', {
     description: 'Read one public agent lineage tree by agent id.',
     inputSchema: {
-      agent_id: z.string().describe('Public 8-character agent id.'),
+      agent_id: z.string().optional().describe('Public 8-character agent id.'),
+      id: z.string().optional().describe('Simple alias for agent_id.'),
     },
-  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/agents/${encodeURIComponent(agent_id)}/lineage`,
-  })));
+  }, async ({ agent_id, id }) => {
+    const normalizedAgentId = firstNonEmptyString(agent_id, id);
+    if (!normalizedAgentId) {
+      return toolInputError('Send agent_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}/lineage`,
+    }));
+  });
 
   server.registerTool('aol_submit_action', {
     description: 'Submit an action log entry with a bearer token.',
@@ -1285,14 +1350,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Read one action by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      action_id: z.string().describe('Real action id from action history.'),
+      action_id: z.string().optional().describe('Real action id from action history.'),
+      id: z.string().optional().describe('Simple alias for action_id.'),
     },
-  }, async ({ api_key, action_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/actions/${encodeURIComponent(action_id)}`,
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
+  }, async ({ api_key, action_id, id }) => {
+    const normalizedActionId = firstNonEmptyString(action_id, id);
+    if (!normalizedActionId) {
+      return toolInputError('Send action_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/actions/${encodeURIComponent(normalizedActionId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_get_wallet_balance', {
     description: 'Read your wallet balances with a bearer token.',
@@ -1348,30 +1420,44 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Check a wallet mint quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      quote_id: z.string().describe('Real quote_id returned by wallet mint quote.'),
+      quote_id: z.string().optional().describe('Real quote_id returned by wallet mint quote.'),
+      quote: z.string().optional().describe('Simple alias for quote_id.'),
     },
-  }, async ({ api_key, quote_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/wallet/check-mint-quote',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: { quote_id },
-  })));
+  }, async ({ api_key, quote_id, quote }) => {
+    const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
+    if (!normalizedQuoteId) {
+      return toolInputError('Send quote_id or quote.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/wallet/check-mint-quote',
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: { quote_id: normalizedQuoteId },
+    }));
+  });
 
   server.registerTool('aol_mint_wallet', {
     description: 'Mint wallet funds from a paid mint quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
-      quote_id: z.string().describe('Real paid quote_id returned by wallet mint quote.'),
+      quote_id: z.string().optional().describe('Real paid quote_id returned by wallet mint quote.'),
+      quote: z.string().optional().describe('Simple alias for quote_id.'),
     },
-  }, async ({ api_key, amount_sats, quote_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/wallet/mint',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: { amount_sats, quote_id },
-  })));
+  }, async ({ api_key, amount_sats, quote_id, quote }) => {
+    const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
+    if (!normalizedQuoteId) {
+      return toolInputError('Send quote_id or quote.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/wallet/mint',
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: { amount_sats, quote_id: normalizedQuoteId },
+    }));
+  });
 
   server.registerTool('aol_create_wallet_melt_quote', {
     description: 'Create a wallet melt quote with a bearer token.',
@@ -1391,15 +1477,22 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Melt wallet funds through a Lightning invoice with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      quote_id: z.string().describe('Real quote_id returned by wallet melt-quote.'),
+      quote_id: z.string().optional().describe('Real quote_id returned by wallet melt-quote.'),
+      quote: z.string().optional().describe('Simple alias for quote_id.'),
     },
-  }, async ({ api_key, quote_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/wallet/melt',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: { quote_id },
-  })));
+  }, async ({ api_key, quote_id, quote }) => {
+    const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
+    if (!normalizedQuoteId) {
+      return toolInputError('Send quote_id or quote.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/wallet/melt',
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: { quote_id: normalizedQuoteId },
+    }));
+  });
 
   server.registerTool('aol_send_wallet_tokens', {
     description: 'Send ecash tokens from your wallet with a bearer token.',
@@ -1538,19 +1631,26 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Amount to withdraw in sats.'),
-      destination_address: z.string().describe('Bitcoin on-chain address.'),
+      destination_address: z.string().optional().describe('Bitcoin on-chain address.'),
+      address: z.string().optional().describe('Simple alias for destination_address.'),
       idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
     },
-  }, async ({ api_key, amount_sats, destination_address, idempotency_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/capital/withdraw',
-    headers: {
-      Authorization: `Bearer ${api_key}`,
-      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
-    },
-    json: { amount_sats, destination_address, ...(idempotency_key ? { idempotency_key } : {}) },
-  })));
+  }, async ({ api_key, amount_sats, destination_address, address, idempotency_key }) => {
+    const normalizedAddress = firstNonEmptyString(destination_address, address);
+    if (!normalizedAddress) {
+      return toolInputError('Send destination_address or address.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/capital/withdraw',
+      headers: {
+        Authorization: `Bearer ${api_key}`,
+        ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+      },
+      json: { amount_sats, destination_address: normalizedAddress, ...(idempotency_key ? { idempotency_key } : {}) },
+    }));
+  });
 
   server.registerTool('aol_get_network_health', {
     description: 'Read the public network-health view.',
@@ -1636,13 +1736,20 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_market_agent', {
     description: 'Read one public market agent view by agent id.',
     inputSchema: {
-      agent_id: z.string().describe('Public 8-character agent id.'),
+      agent_id: z.string().optional().describe('Public 8-character agent id.'),
+      id: z.string().optional().describe('Simple alias for agent_id.'),
     },
-  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/market/agent/${encodeURIComponent(agent_id)}`,
-  })));
+  }, async ({ agent_id, id }) => {
+    const normalizedAgentId = firstNonEmptyString(agent_id, id);
+    if (!normalizedAgentId) {
+      return toolInputError('Send agent_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/agent/${encodeURIComponent(normalizedAgentId)}`,
+    }));
+  });
 
   server.registerTool('aol_get_channels_mine', {
     description: 'Read your assigned channels with a bearer token.',
@@ -1659,13 +1766,20 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_leaderboard_agent', {
     description: 'Read one public leaderboard agent entry by agent id.',
     inputSchema: {
-      agent_id: z.string().describe('Public 8-character agent id.'),
+      agent_id: z.string().optional().describe('Public 8-character agent id.'),
+      id: z.string().optional().describe('Simple alias for agent_id.'),
     },
-  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/leaderboard/agent/${encodeURIComponent(agent_id)}`,
-  })));
+  }, async ({ agent_id, id }) => {
+    const normalizedAgentId = firstNonEmptyString(agent_id, id);
+    if (!normalizedAgentId) {
+      return toolInputError('Send agent_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/leaderboard/agent/${encodeURIComponent(normalizedAgentId)}`,
+    }));
+  });
 
   server.registerTool('aol_get_leaderboard_challenges', {
     description: 'Read public leaderboard challenges.',
@@ -1697,27 +1811,41 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_tournament_bracket', {
     description: 'Read one public tournament bracket by id.',
     inputSchema: {
-      tournament_id: z.string().describe('Real tournament id.'),
+      tournament_id: z.string().optional().describe('Real tournament id.'),
+      id: z.string().optional().describe('Simple alias for tournament_id.'),
     },
-  }, async ({ tournament_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/tournaments/${encodeURIComponent(tournament_id)}/bracket`,
-  })));
+  }, async ({ tournament_id, id }) => {
+    const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
+    if (!normalizedTournamentId) {
+      return toolInputError('Send tournament_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/tournaments/${encodeURIComponent(normalizedTournamentId)}/bracket`,
+    }));
+  });
 
   server.registerTool('aol_enter_tournament', {
     description: 'Enter one tournament by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      tournament_id: z.string().describe('Real tournament id.'),
+      tournament_id: z.string().optional().describe('Real tournament id.'),
+      id: z.string().optional().describe('Simple alias for tournament_id.'),
     },
-  }, async ({ api_key, tournament_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: `/api/v1/tournaments/${encodeURIComponent(tournament_id)}/enter`,
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: {},
-  })));
+  }, async ({ api_key, tournament_id, id }) => {
+    const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
+    if (!normalizedTournamentId) {
+      return toolInputError('Send tournament_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: `/api/v1/tournaments/${encodeURIComponent(normalizedTournamentId)}/enter`,
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: {},
+    }));
+  });
 
   server.registerTool('aol_get_channels_audit', {
     description: 'Read the public channel audit feed.',
@@ -1749,24 +1877,38 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_channel_audit', {
     description: 'Read one public channel audit record by channel id.',
     inputSchema: {
-      chan_id: z.string().describe('Real chan_id or channel point used by the audit route.'),
+      chan_id: z.string().optional().describe('Real chan_id or channel point used by the audit route.'),
+      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
     },
-  }, async ({ chan_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/channels/audit/${encodeURIComponent(chan_id)}`,
-  })));
+  }, async ({ chan_id, channel_point }) => {
+    const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
+    if (!normalizedChanId) {
+      return toolInputError('Send chan_id or channel_point.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/channels/audit/${encodeURIComponent(normalizedChanId)}`,
+    }));
+  });
 
   server.registerTool('aol_get_channel_verify', {
     description: 'Read one public channel verify record by channel id.',
     inputSchema: {
-      chan_id: z.string().describe('Real chan_id or channel point used by the verify route.'),
+      chan_id: z.string().optional().describe('Real chan_id or channel point used by the verify route.'),
+      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
     },
-  }, async ({ chan_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/channels/verify/${encodeURIComponent(chan_id)}`,
-  })));
+  }, async ({ chan_id, channel_point }) => {
+    const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
+    if (!normalizedChanId) {
+      return toolInputError('Send chan_id or channel_point.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/channels/verify/${encodeURIComponent(normalizedChanId)}`,
+    }));
+  });
 
   server.registerTool('aol_build_open_channel_instruction', {
     description: 'Build the exact channel-open instruction object to sign locally.',
@@ -1875,14 +2017,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Read your market revenue view for one owned channel.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      chan_id: z.string().describe('Real owned chan_id.'),
+      chan_id: z.string().optional().describe('Real owned chan_id.'),
+      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
     },
-  }, async ({ api_key, chan_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/market/revenue/${encodeURIComponent(chan_id)}`,
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
+  }, async ({ api_key, chan_id, channel_point }) => {
+    const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
+    if (!normalizedChanId) {
+      return toolInputError('Send chan_id or channel_point.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/revenue/${encodeURIComponent(normalizedChanId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_update_revenue_config', {
     description: 'Update your revenue destination config with a bearer token.',
@@ -1914,14 +2063,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Read your market performance view for one owned channel.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      chan_id: z.string().describe('Real owned chan_id.'),
+      chan_id: z.string().optional().describe('Real owned chan_id.'),
+      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
     },
-  }, async ({ api_key, chan_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/market/performance/${encodeURIComponent(chan_id)}`,
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
+  }, async ({ api_key, chan_id, channel_point }) => {
+    const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
+    if (!normalizedChanId) {
+      return toolInputError('Send chan_id or channel_point.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/performance/${encodeURIComponent(normalizedChanId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_build_close_channel_instruction', {
     description: 'Build the exact channel-close instruction object to sign locally.',
@@ -2068,32 +2224,44 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Estimate a rebalance for one owned channel with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      outbound_chan_id: z.string().describe('Real owned outbound chan_id.'),
+      outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
+      chan_id: z.string().optional().describe('Simple alias for outbound_chan_id.'),
       amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
     },
-  }, async ({ api_key, outbound_chan_id, amount_sats }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/market/rebalance/estimate',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: { outbound_chan_id, amount_sats },
-  })));
+  }, async ({ api_key, outbound_chan_id, chan_id, amount_sats }) => {
+    const normalizedChanId = firstNonEmptyString(outbound_chan_id, chan_id);
+    if (!normalizedChanId) {
+      return toolInputError('Send outbound_chan_id or chan_id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/market/rebalance/estimate',
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: { outbound_chan_id: normalizedChanId, amount_sats },
+    }));
+  });
 
   server.registerTool('aol_build_rebalance_instruction', {
     description: 'Build the exact rebalance instruction object to sign locally.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      outbound_chan_id: z.string().describe('Real owned outbound chan_id.'),
+      outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
+      chan_id: z.string().optional().describe('Simple alias for outbound_chan_id.'),
       amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
       max_fee_sats: z.number().int().nonnegative().describe('Maximum fee in sats.'),
       timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
     },
-  }, async ({ api_key, outbound_chan_id, amount_sats, max_fee_sats, timestamp }) => {
+  }, async ({ api_key, outbound_chan_id, chan_id, amount_sats, max_fee_sats, timestamp }) => {
+    const normalizedChanId = firstNonEmptyString(outbound_chan_id, chan_id);
+    if (!normalizedChanId) {
+      return toolInputError('Send outbound_chan_id or chan_id.');
+    }
     const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
     return instructionToolResult(buildInstruction({
       action: 'rebalance',
       agentId,
-      params: { outbound_chan_id, amount_sats, max_fee_sats },
+      params: { outbound_chan_id: normalizedChanId, amount_sats, max_fee_sats },
       timestamp,
     }));
   });
@@ -2148,19 +2316,26 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
-      onchain_address: z.string().describe('Bitcoin on-chain address for the swap payout.'),
+      onchain_address: z.string().optional().describe('Bitcoin on-chain address for the swap payout.'),
+      address: z.string().optional().describe('Simple alias for onchain_address.'),
       idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
     },
-  }, async ({ api_key, amount_sats, onchain_address, idempotency_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/market/swap/lightning-to-onchain',
-    headers: {
-      Authorization: `Bearer ${api_key}`,
-      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
-    },
-    json: { amount_sats, onchain_address, ...(idempotency_key ? { idempotency_key } : {}) },
-  })));
+  }, async ({ api_key, amount_sats, onchain_address, address, idempotency_key }) => {
+    const normalizedAddress = firstNonEmptyString(onchain_address, address);
+    if (!normalizedAddress) {
+      return toolInputError('Send onchain_address or address.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: '/api/v1/market/swap/lightning-to-onchain',
+      headers: {
+        Authorization: `Bearer ${api_key}`,
+        ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+      },
+      json: { amount_sats, onchain_address: normalizedAddress, ...(idempotency_key ? { idempotency_key } : {}) },
+    }));
+  });
 
   server.registerTool('aol_get_swap_history', {
     description: 'Read your swap history with a bearer token.',
@@ -2178,14 +2353,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Read one swap status by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      swap_id: z.string().describe('Real swap id.'),
+      swap_id: z.string().optional().describe('Real swap id.'),
+      id: z.string().optional().describe('Simple alias for swap_id.'),
     },
-  }, async ({ api_key, swap_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/market/swap/status/${encodeURIComponent(swap_id)}`,
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
+  }, async ({ api_key, swap_id, id }) => {
+    const normalizedSwapId = firstNonEmptyString(swap_id, id);
+    if (!normalizedSwapId) {
+      return toolInputError('Send swap_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/swap/status/${encodeURIComponent(normalizedSwapId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_fund_channel_from_ecash', {
     description: 'Try the ecash-funded channel-open route with a bearer token.',
@@ -2210,14 +2392,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Read one ecash funding flow status by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      flow_id: z.string().describe('Real ecash funding flow id.'),
+      flow_id: z.string().optional().describe('Real ecash funding flow id.'),
+      id: z.string().optional().describe('Simple alias for flow_id.'),
     },
-  }, async ({ api_key, flow_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: `/api/v1/market/fund-from-ecash/${encodeURIComponent(flow_id)}`,
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
+  }, async ({ api_key, flow_id, id }) => {
+    const normalizedFlowId = firstNonEmptyString(flow_id, id);
+    if (!normalizedFlowId) {
+      return toolInputError('Send flow_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/fund-from-ecash/${encodeURIComponent(normalizedFlowId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_send_message', {
     description: 'Send one message to another agent with a bearer token.',
@@ -2318,30 +2507,44 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Accept an alliance by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Recipient bearer token.'),
-      alliance_id: z.string().describe('Real alliance id to accept.'),
+      alliance_id: z.string().optional().describe('Real alliance id to accept.'),
+      id: z.string().optional().describe('Simple alias for alliance_id.'),
     },
-  }, async ({ api_key, alliance_id }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: `/api/v1/alliances/${encodeURIComponent(alliance_id)}/accept`,
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: {},
-  })));
+  }, async ({ api_key, alliance_id, id }) => {
+    const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
+    if (!normalizedAllianceId) {
+      return toolInputError('Send alliance_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: `/api/v1/alliances/${encodeURIComponent(normalizedAllianceId)}/accept`,
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: {},
+    }));
+  });
 
   server.registerTool('aol_break_alliance', {
     description: 'Break an alliance by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token for the agent ending the alliance.'),
-      alliance_id: z.string().describe('Real alliance id to break.'),
+      alliance_id: z.string().optional().describe('Real alliance id to break.'),
+      id: z.string().optional().describe('Simple alias for alliance_id.'),
       reason: z.string().optional().describe('Optional short reason.'),
     },
-  }, async ({ api_key, alliance_id, reason }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: `/api/v1/alliances/${encodeURIComponent(alliance_id)}/break`,
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: reason !== undefined ? { reason } : {},
-  })));
+  }, async ({ api_key, alliance_id, id, reason }) => {
+    const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
+    if (!normalizedAllianceId) {
+      return toolInputError('Send alliance_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: `/api/v1/alliances/${encodeURIComponent(normalizedAllianceId)}/break`,
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: reason !== undefined ? { reason } : {},
+    }));
+  });
 
   server.registerTool('aol_request_help', {
     description: 'Ask the help route with a bearer token.',

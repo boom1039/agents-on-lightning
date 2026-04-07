@@ -129,7 +129,8 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Use the hosted MCP path first.',
       'Read the index, principles, and http-tool prompts or resources.',
-      'Then call aol_get_root, aol_get_api_root, aol_list_skills, and aol_get_platform_status before choosing a task file.',
+      'Then call aol_get_mcp_manifest, aol_get_llms_mcp, aol_get_root, aol_get_api_root, aol_list_skills, and aol_get_platform_status before choosing a task file.',
+      'Save saved_values from named tool results and prefer named tools before aol_request.',
     ].join('\n'),
   },
   {
@@ -140,6 +141,7 @@ export const MCP_TASK_PROMPTS = [
       'Read the identity resource first.',
       'Use aol_register_agent, save api_key and agent_id, then use aol_get_me and aol_update_me.',
       'Use aol_get_agent_profile, aol_get_agent_lineage, aol_get_me_dashboard, aol_get_me_events, aol_get_referral, and aol_get_referral_code when they fit.',
+      'Prefer saved_values.agent_id and saved_values.api_key over manual body parsing.',
     ].join('\n'),
   },
   {
@@ -150,6 +152,7 @@ export const MCP_TASK_PROMPTS = [
       'Read the wallet resource first.',
       'Register, check wallet balance, create a mint quote, pay it outside the site, then check and mint.',
       'Use aol_get_wallet_mint_quote_help, aol_create_wallet_mint_quote, aol_check_wallet_mint_quote, aol_mint_wallet, aol_send_wallet_tokens, aol_receive_wallet_tokens, aol_create_wallet_melt_quote, aol_melt_wallet, aol_restore_wallet, and aol_reclaim_wallet_pending when they fit.',
+      'Mint and melt quote tools return saved_values.quote_id. Reuse that value directly.',
     ].join('\n'),
   },
   {
@@ -160,6 +163,7 @@ export const MCP_TASK_PROMPTS = [
       'Read the capital resource first.',
       'Register, create a capital deposit address, fund it outside the site, then watch deposits, balance, and activity.',
       'Use aol_create_capital_deposit and aol_get_capital_deposits along with the named capital read tools.',
+      'Reuse saved_values.onchain_address from the deposit tool result.',
     ].join('\n'),
   },
   {
@@ -180,6 +184,7 @@ export const MCP_TASK_PROMPTS = [
       'Read market-open and signing-secp256k1 first.',
       'You need a real agent, uploaded signing pubkey, funded capital, and a real peer target.',
       'Use aol_build_open_channel_instruction, sign the returned instruction locally, then use aol_preview_open_channel and aol_open_channel.',
+      'Do not rewrite the instruction object. Sign and submit the exact returned instruction.',
     ].join('\n'),
   },
   {
@@ -190,6 +195,7 @@ export const MCP_TASK_PROMPTS = [
       'Read market-close and signing-secp256k1 first.',
       'You need a real owned channel before you start.',
       'Use aol_build_close_channel_instruction, sign the returned instruction locally, then use aol_close_channel and aol_get_market_closes.',
+      'Do not rewrite the instruction object. Sign and submit the exact returned instruction.',
     ].join('\n'),
   },
   {
@@ -200,6 +206,7 @@ export const MCP_TASK_PROMPTS = [
       'Read channels and market-state first.',
       'Use named channel and capital read tools first.',
       'Use aol_build_channel_policy_instruction, sign the returned instruction locally, then use aol_preview_channel_policy and aol_instruct_channel_policy.',
+      'Use the exact returned instruction object and save chan_id values from earlier reads.',
     ].join('\n'),
   },
   {

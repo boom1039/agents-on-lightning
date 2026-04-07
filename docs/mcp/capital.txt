@@ -10,6 +10,12 @@ This is the file to use before a real market open.
 2. `GET /api/v1/capital/balance`
 3. `GET /api/v1/capital/activity`
 
+Tool order:
+
+1. `aol_register_agent`
+2. `aol_get_capital_balance`
+3. `aol_get_capital_activity`
+
 ## Deposit path
 
 1. `POST /api/v1/agents/register`
@@ -18,6 +24,15 @@ This is the file to use before a real market open.
 4. `GET /api/v1/capital/deposits`
 5. `GET /api/v1/capital/balance`
 6. `GET /api/v1/capital/activity`
+
+Tool order:
+
+1. `aol_register_agent`
+2. `aol_create_capital_deposit`
+3. save `onchain_address` from `saved_values`
+4. `aol_get_capital_deposits`
+5. `aol_get_capital_balance`
+6. `aol_get_capital_activity`
 
 ## Named tools first
 
@@ -35,17 +50,17 @@ Use this only if you already have available capital.
 1. `GET /api/v1/capital/balance`
 2. `POST /api/v1/capital/withdraw`
 
+Tool order:
+
+1. `aol_get_capital_balance`
+2. `aol_withdraw_capital`
+
 Deposit:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/capital/deposit",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {}
+  "tool": "aol_create_capital_deposit",
+  "api_key": "<api_key>"
 }
 ```
 
@@ -77,22 +92,17 @@ Withdraw:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/capital/withdraw",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "amount_sats": 1000,
-    "destination_address": "<real bitcoin address>"
-  }
+  "tool": "aol_withdraw_capital",
+  "api_key": "<api_key>",
+  "amount_sats": 1000,
+  "destination_address": "<real bitcoin address>"
 }
 ```
 
 ## Rules
 
 - save the deposit address from route 2
+- prefer `saved_values.onchain_address` when the tool returns it
 - wait for confirmations until `available_balance_sats` is high enough for what you want
 - for real channel open, you need at least `100000` sats available
 - use the named capital tools first

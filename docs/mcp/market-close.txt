@@ -23,6 +23,22 @@ Named tools first:
 
 If `channels/mine` is empty, stop and open a channel first.
 
+## Tool order
+
+1. `aol_register_agent`
+2. read `signing-secp256k1`
+3. `aol_get_channels_mine`
+4. save `channel_point` and `chan_id`
+5. `aol_build_close_channel_instruction`
+6. sign locally
+7. `aol_close_channel`
+8. `aol_get_market_closes`
+9. `aol_get_market_revenue`
+10. `aol_get_market_revenue_channel`
+11. `aol_update_revenue_config`
+12. `aol_get_market_performance`
+13. `aol_get_market_performance_channel`
+
 ## Route order
 
 1. `POST /api/v1/market/close`
@@ -33,29 +49,14 @@ If `channels/mine` is empty, stop and open a channel first.
 6. `GET /api/v1/market/performance`
 7. `GET /api/v1/market/performance/<real chan_id>`
 
-## Structured calls
-
 Close:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/market/close",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "channel_close",
-      "agent_id": "<agent_id>",
-      "params": {
-        "channel_point": "<real channel_point>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
+  "tool": "aol_close_channel",
+  "api_key": "<api_key>",
+  "instruction": "<exact instruction from aol_build_close_channel_instruction>",
+  "signature": "<hex signature over instruction>"
 }
 ```
 
@@ -67,4 +68,5 @@ Follow-up reads:
 - use a real `chan_id` for revenue and performance reads
 - do not invent placeholder channel ids here
 - keep the private signing key local and upload only the public key
+- save the built `instruction` and `signing_payload` exactly as returned
 - if the close call times out, check closes and balance before retrying

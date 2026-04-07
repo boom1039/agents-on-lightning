@@ -14,7 +14,12 @@ const requiredTools = [
   'aol_register_agent',
   'aol_update_me',
   'aol_get_me',
+  'aol_get_agent_profile',
+  'aol_get_agent_lineage',
+  'aol_get_strategy',
   'aol_get_wallet_mint_quote_help',
+  'aol_create_wallet_mint_quote',
+  'aol_check_wallet_mint_quote',
   'aol_try_wallet_deposit',
   'aol_try_wallet_withdraw',
   'aol_restore_wallet',
@@ -32,6 +37,9 @@ const requiredTools = [
   'aol_build_rebalance_instruction',
   'aol_get_channels_audit',
   'aol_get_market_performance',
+  'aol_get_market_agent',
+  'aol_get_channel_audit',
+  'aol_get_channel_verify',
   'aol_create_lightning_to_onchain_swap',
   'aol_fund_channel_from_ecash',
 ];
@@ -58,9 +66,20 @@ function getStructuredStatus(result) {
   return result?.structuredContent?.status ?? null;
 }
 
+function getSavedValues(result) {
+  return result?.structuredContent?.saved_values || {};
+}
+
 function expectStatus(result, expectedStatus, label) {
   const actual = getStructuredStatus(result);
   assert(actual === expectedStatus, `${label} returned ${actual}, expected ${expectedStatus}`);
+}
+
+function expectSavedValue(result, key, label) {
+  const savedValues = getSavedValues(result);
+  const value = savedValues?.[key];
+  assert(typeof value === 'string' && value.length > 0, `${label} did not return saved_values.${key}`);
+  return value;
 }
 
 function expectNodeAnalysisBoundary(result, label) {
@@ -69,6 +88,13 @@ function expectNodeAnalysisBoundary(result, label) {
   const noNode = actual === 200 && body.error === 'No LND node connected';
   const missingNode = actual === 404;
   assert(noNode || missingNode, `${label} returned unexpected status ${actual}`);
+}
+
+function expectCapitalDepositBoundary(result, label) {
+  const actual = getStructuredStatus(result);
+  const body = getStructuredBody(result) || {};
+  const missingWalletNode = actual === 503 && body.error === 'service_unavailable';
+  assert(missingWalletNode, `${label} returned unexpected status ${actual}`);
 }
 
 function getToolNames(listResult) {
@@ -134,8 +160,10 @@ try {
   assert(!registerResult?.isError, 'aol_register_agent failed');
 
   const registerBody = getStructuredBody(registerResult);
-  const apiKey = registerBody?.api_key;
+  const apiKey = registerBody?.api_key || getSavedValues(registerResult)?.api_key;
+  const agentId = registerBody?.agent_id || getSavedValues(registerResult)?.agent_id;
   assert(typeof apiKey === 'string' && apiKey.length > 10, 'Registration did not return api_key');
+  assert(typeof agentId === 'string' && agentId.length > 3, 'Registration did not return agent_id');
 
   const meResult = await client.callTool({
     name: 'aol_get_me',
@@ -154,6 +182,33 @@ try {
     },
   });
   assert(!updateResult?.isError, 'aol_update_me failed');
+
+  const strategyResult = await client.callTool({
+    name: 'aol_get_strategy',
+    arguments: {
+      strategy: 'geographic-arbitrage',
+    },
+  });
+  assert(!strategyResult?.isError, 'aol_get_strategy failed');
+  expectStatus(strategyResult, 200, 'aol_get_strategy');
+
+  const agentProfileResult = await client.callTool({
+    name: 'aol_get_agent_profile',
+    arguments: {
+      id: agentId,
+    },
+  });
+  assert(!agentProfileResult?.isError, 'aol_get_agent_profile failed');
+  expectStatus(agentProfileResult, 200, 'aol_get_agent_profile');
+
+  const agentLineageResult = await client.callTool({
+    name: 'aol_get_agent_lineage',
+    arguments: {
+      id: agentId,
+    },
+  });
+  assert(!agentLineageResult?.isError, 'aol_get_agent_lineage failed');
+  expectStatus(agentLineageResult, 200, 'aol_get_agent_lineage');
 
   const walletResult = await client.callTool({
     name: 'aol_get_wallet_balance',
@@ -188,6 +243,28 @@ try {
     },
   });
   expectStatus(walletMintQuoteHelp, 405, 'aol_get_wallet_mint_quote_help');
+
+  const walletMintQuoteResult = await client.callTool({
+    name: 'aol_create_wallet_mint_quote',
+    arguments: {
+      api_key: apiKey,
+      amount_sats: 1000,
+    },
+  });
+  assert(!walletMintQuoteResult?.isError, 'aol_create_wallet_mint_quote failed');
+  expectStatus(walletMintQuoteResult, 200, 'aol_create_wallet_mint_quote');
+  const mintQuoteId = expectSavedValue(walletMintQuoteResult, 'quote_id', 'aol_create_wallet_mint_quote');
+  expectSavedValue(walletMintQuoteResult, 'invoice', 'aol_create_wallet_mint_quote');
+
+  const walletCheckMintQuoteResult = await client.callTool({
+    name: 'aol_check_wallet_mint_quote',
+    arguments: {
+      api_key: apiKey,
+      quote: mintQuoteId,
+    },
+  });
+  assert(!walletCheckMintQuoteResult?.isError, 'aol_check_wallet_mint_quote failed');
+  expectStatus(walletCheckMintQuoteResult, 200, 'aol_check_wallet_mint_quote');
 
   const walletDepositBoundary = await client.callTool({
     name: 'aol_try_wallet_deposit',
@@ -244,6 +321,17 @@ try {
     },
   });
   assert(!capitalDepositResult?.isError, 'aol_create_capital_deposit failed');
+  if (baseUrl.startsWith('http://127.0.0.1')) {
+    const depositStatus = getStructuredStatus(capitalDepositResult);
+    if (depositStatus === 200) {
+      expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
+    } else {
+      expectCapitalDepositBoundary(capitalDepositResult, 'aol_create_capital_deposit');
+    }
+  } else {
+    expectStatus(capitalDepositResult, 200, 'aol_create_capital_deposit');
+    expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
+  }
 
   const capitalWithdrawResult = await client.callTool({
     name: 'aol_withdraw_capital',
@@ -333,6 +421,27 @@ try {
     arguments: {},
   });
   assert(!channelsAuditResult?.isError, 'aol_get_channels_audit failed');
+  const auditEntries = getStructuredBody(channelsAuditResult)?.entries || [];
+  const realAuditChannelId = auditEntries.find((entry) => entry?.chan_id)?.chan_id || null;
+  if (realAuditChannelId) {
+    const channelAuditResult = await client.callTool({
+      name: 'aol_get_channel_audit',
+      arguments: {
+        channel_point: realAuditChannelId,
+      },
+    });
+    assert(!channelAuditResult?.isError, 'aol_get_channel_audit failed');
+    expectStatus(channelAuditResult, 200, 'aol_get_channel_audit');
+
+    const channelVerifyResult = await client.callTool({
+      name: 'aol_get_channel_verify',
+      arguments: {
+        channel_point: realAuditChannelId,
+      },
+    });
+    assert(!channelVerifyResult?.isError, 'aol_get_channel_verify failed');
+    expectStatus(channelVerifyResult, 200, 'aol_get_channel_verify');
+  }
 
   const marketPerformanceResult = await client.callTool({
     name: 'aol_get_market_performance',
@@ -341,6 +450,15 @@ try {
     },
   });
   assert(!marketPerformanceResult?.isError, 'aol_get_market_performance failed');
+
+  const marketAgentResult = await client.callTool({
+    name: 'aol_get_market_agent',
+    arguments: {
+      id: agentId,
+    },
+  });
+  assert(!marketAgentResult?.isError, 'aol_get_market_agent failed');
+  expectStatus(marketAgentResult, 200, 'aol_get_market_agent');
 
   const openInstruction = await client.callTool({
     name: 'aol_build_open_channel_instruction',

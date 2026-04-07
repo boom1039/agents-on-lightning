@@ -44,6 +44,11 @@ function buildCooldownError(message, hint) {
   };
 }
 
+function isMissingNodeConnectionError(err) {
+  const message = String(err?.message || '');
+  return message.includes('No LND node available') || message.includes('No LND node connected');
+}
+
 export function agentPaidServicesRoutes(daemon) {
   const router = Router();
   const auth = requireAuth(daemon.agentRegistry);
@@ -494,6 +499,20 @@ export function agentPaidServicesRoutes(daemon) {
       },
       onError: (err) => {
         console.error(`[Gateway] ${req.path}: ${err.message}`);
+        if (isMissingNodeConnectionError(err)) {
+          return {
+            statusCode: 503,
+            body: withRecovery(
+              {
+                error: 'service_unavailable',
+                message: 'Deposit address generation is unavailable because no wallet node is connected.',
+              },
+              'safe', 'No deposit address was generated. No funds are at risk.', [
+                'Connect a wallet-capable node and retry POST /api/v1/capital/deposit',
+              ],
+            ),
+          };
+        }
         return {
           statusCode: 500,
           body: withRecovery(

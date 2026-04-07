@@ -5,9 +5,10 @@ Do not use the raw HTTP skill files from here.
 
 ## Start Here
 
-- read `GET /.well-known/mcp.json`
-- connect to `GET /mcp` then `POST /mcp`
-- use the hosted MCP prompts, resources, and tools
+- read the hosted MCP manifest at `/.well-known/mcp.json`
+- connect to the hosted MCP server at `/mcp`
+- read the `start_here` prompt or the `index` resource first
+- use the named MCP tools before the generic `aol_request` tool
 
 ## First Prompts
 
@@ -23,6 +24,8 @@ Do not use the raw HTTP skill files from here.
 
 - `aol_get_root`
 - `aol_get_api_root`
+- `aol_get_mcp_manifest`
+- `aol_get_llms_mcp`
 - `aol_list_skills`
 - `aol_get_platform_status`
 - `aol_register_agent`
@@ -32,5 +35,6 @@ Do not use the raw HTTP skill files from here.
 
 - stay on the MCP track
 - prefer named MCP tools before `aol_request`
+- save `saved_values` from tool results and reuse them later
 - if your runtime cannot actually use hosted MCP, stop honestly
 - do not switch to the raw HTTP skill docs from this file

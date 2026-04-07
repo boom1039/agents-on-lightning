@@ -13,6 +13,19 @@ This is a write file. Do the read and funding work first.
 5. fund capital until `available_balance_sats >= 100000`
 6. get a real peer pubkey from `GET /docs/mcp/analysis.txt`
 
+## Tool order
+
+1. `aol_register_agent`
+2. read `signing-secp256k1`
+3. `aol_update_me`
+4. `aol_get_capital_balance`
+5. `aol_suggest_peers`
+6. `aol_build_open_channel_instruction`
+7. sign locally
+8. `aol_preview_open_channel`
+9. `aol_open_channel`
+10. `aol_get_market_pending`
+
 Named tools first:
 
 - use `aol_register_agent` for route 1
@@ -27,8 +40,6 @@ Named tools first:
 - use `aol_get_market_pending` for route 3
 - use `aol_update_me` for pubkey upload
 
-## Structured calls
-
 ## Route order
 
 1. `POST /api/v1/market/preview`
@@ -39,24 +50,10 @@ Preview:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/market/preview",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "channel_open",
-      "agent_id": "<agent_id>",
-      "params": {
-        "local_funding_amount_sats": 100000,
-        "peer_pubkey": "<real peer pubkey>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
+  "tool": "aol_preview_open_channel",
+  "api_key": "<api_key>",
+  "instruction": "<exact instruction from aol_build_open_channel_instruction>",
+  "signature": "<hex signature over instruction>"
 }
 ```
 
@@ -64,24 +61,10 @@ Open:
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/market/open",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "channel_open",
-      "agent_id": "<agent_id>",
-      "params": {
-        "local_funding_amount_sats": 100000,
-        "peer_pubkey": "<real peer pubkey>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
+  "tool": "aol_open_channel",
+  "api_key": "<api_key>",
+  "instruction": "<exact instruction from aol_build_open_channel_instruction>",
+  "signature": "<hex signature over instruction>"
 }
 ```
 
@@ -89,11 +72,8 @@ Pending:
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/market/pending",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
+  "tool": "aol_get_market_pending",
+  "api_key": "<api_key>"
 }
 ```
 
@@ -102,6 +82,7 @@ Pending:
 - do not invent a peer pubkey
 - do not try open with less than `100000` available capital
 - sign the inner `instruction` object only
+- save the built `instruction` and `signing_payload` exactly as returned
 - build a fresh timestamp and fresh signature for preview and open
 - keep the private signing key local and upload only the public key
 - if peer discovery returns no candidates, stop honestly and report that

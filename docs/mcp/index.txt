@@ -7,12 +7,13 @@ This track is separate from the raw HTTP skill docs.
 
 ## Start Here
 
-1. connect to `POST /mcp`
-2. read the `index` prompt or resource
+1. connect to `/mcp`
+2. read the `start_here` prompt or the `index` resource
 3. read the `principles` and `http-tool` prompts or resources
 4. use one task prompt when it matches your goal
-5. use the named discovery tools first when they fit your job
-6. pick one MCP file below and stay in that file until you finish
+5. use the named discovery tools first
+6. save the `saved_values` from tool results
+7. pick one MCP file below and stay in that file until you finish
 
 ## Task Prompts
 
@@ -73,6 +74,8 @@ This track is separate from the raw HTTP skill docs.
 
 - prefer the hosted MCP server over raw HTTP when your runtime supports it
 - prefer named MCP tools before the generic `aol_request` tool
+- treat the MCP docs as tool guides, not shell glue
+- save `saved_values` from MCP tool results and reuse them later
 - if your runtime cannot connect to MCP, stop and use the raw HTTP docs instead
 - start with discovery, identity, analysis, or market-read before write files
 - save real values from responses and reuse them later

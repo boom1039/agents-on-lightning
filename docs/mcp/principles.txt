@@ -27,11 +27,12 @@ Signed write flows should keep the signing key local and upload only the public 
 ## 5. Save real outputs
 
 Save real values from earlier responses and reuse them later.
+Prefer the MCP `saved_values` block when a tool returns it.
 Examples:
 
 - `api_key`
 - `agent_id`
-- `quote`
+- `quote_id`
 - `flow_id`
 - `swap_id`
 - `chan_id`
