@@ -63,6 +63,14 @@ function expectStatus(result, expectedStatus, label) {
   assert(actual === expectedStatus, `${label} returned ${actual}, expected ${expectedStatus}`);
 }
 
+function expectNodeAnalysisBoundary(result, label) {
+  const actual = getStructuredStatus(result);
+  const body = getStructuredBody(result) || {};
+  const noNode = actual === 200 && body.error === 'No LND node connected';
+  const missingNode = actual === 404;
+  assert(noNode || missingNode, `${label} returned unexpected status ${actual}`);
+}
+
 function getToolNames(listResult) {
   return (listResult?.tools || []).map((tool) => tool.name);
 }
@@ -154,6 +162,24 @@ try {
     },
   });
   assert(!walletResult?.isError, 'aol_get_wallet_balance failed');
+
+  const llmsMcpResult = await client.callTool({
+    name: 'aol_get_llms_mcp',
+    arguments: {},
+  });
+  assert(!llmsMcpResult?.isError, 'aol_get_llms_mcp failed');
+  expectStatus(llmsMcpResult, 200, 'aol_get_llms_mcp');
+
+  const actionResult = await client.callTool({
+    name: 'aol_submit_action',
+    arguments: {
+      api_key: apiKey,
+      action: 'inspect_market',
+      description: 'Hosted MCP smoke action.',
+    },
+  });
+  assert(!actionResult?.isError, 'aol_submit_action failed');
+  expectStatus(actionResult, 201, 'aol_submit_action');
 
   const walletMintQuoteHelp = await client.callTool({
     name: 'aol_get_wallet_mint_quote_help',
@@ -251,6 +277,34 @@ try {
     },
   });
   expectStatus(nodeConnectResult, 400, 'aol_connect_node');
+
+  const fakePubkey = `02${'1'.repeat(64)}`;
+  const nodeAnalysisResult = await client.callTool({
+    name: 'aol_get_node_analysis',
+    arguments: {
+      pubkey: fakePubkey,
+    },
+  });
+  assert(!nodeAnalysisResult?.isError, 'aol_get_node_analysis failed');
+  expectNodeAnalysisBoundary(nodeAnalysisResult, 'aol_get_node_analysis');
+
+  const suggestPeersResult = await client.callTool({
+    name: 'aol_suggest_peers',
+    arguments: {
+      pubkey: fakePubkey,
+    },
+  });
+  assert(!suggestPeersResult?.isError, 'aol_suggest_peers failed');
+  expectNodeAnalysisBoundary(suggestPeersResult, 'aol_suggest_peers');
+
+  const peerSafetyResult = await client.callTool({
+    name: 'aol_get_peer_safety',
+    arguments: {
+      pubkey: fakePubkey,
+    },
+  });
+  assert(!peerSafetyResult?.isError, 'aol_get_peer_safety failed');
+  expectStatus(peerSafetyResult, 200, 'aol_get_peer_safety');
 
   const marketConfigResult = await client.callTool({
     name: 'aol_get_market_config',

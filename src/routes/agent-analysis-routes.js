@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { validatePubkey } from '../identity/validators.js';
-import { err400Validation, err500Internal } from '../identity/agent-friendly-errors.js';
+import { err400Validation, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -17,6 +17,11 @@ import { spawn } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PYTHON3 = process.env.PYTHON3 || 'python3';
 const SUGGEST_PEERS_SCRIPT = resolve(__dirname, '..', 'analysis', 'suggest-peers.py');
+
+function isMissingNodeError(err) {
+  const message = String(err?.message || '').toLowerCase();
+  return message.includes('unable to find node') || message.includes('node not found');
+}
 
 async function buildPeerOfPeerFallbackCandidates(client, firstHopPubkeys = [], excluded = new Set(), limit = 30) {
   const secondHopPubkeys = new Set();
@@ -68,7 +73,7 @@ export function agentAnalysisRoutes(daemon) {
   // @agent-route {"auth":"public","domain":"analysis","subgroup":"Network","label":"network-health","summary":"Read analysis network health.","order":100,"tags":["analysis","read","public"],"doc":["skills/analysis-network-health.txt","skills/analysis.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/analysis/network-health', analysisRate, async (_req, res) => {
     try {
-      const client = daemon.nodeManager?.getScopedDefaultNode('read');
+      const client = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
       if (!client) {
         return res.json({
           error: 'No LND node connected',
@@ -122,7 +127,7 @@ export function agentAnalysisRoutes(daemon) {
     if (!check.valid) return err400Validation(res, check.reason, { see: 'GET /api/v1/analysis/network-health' });
 
     try {
-      const client = daemon.nodeManager?.getScopedDefaultNode('read');
+      const client = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
       if (!client) return res.json({ error: 'No LND node connected' });
 
       const nodeInfo = await client.getNodeInfo(req.params.pubkey);
@@ -138,6 +143,9 @@ export function agentAnalysisRoutes(daemon) {
         last_update: n.last_update,
       });
     } catch (err) {
+      if (isMissingNodeError(err)) {
+        return err404NotFound(res, 'Node', { see: 'GET /api/v1/analysis/network-health' });
+      }
       return err500Internal(res, 'reading node profile');
     }
   });
@@ -151,7 +159,7 @@ export function agentAnalysisRoutes(daemon) {
     if (!check.valid) return err400Validation(res, check.reason);
 
     try {
-      const client = daemon.nodeManager?.getScopedDefaultNode('read');
+      const client = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
       if (!client) return res.json({ error: 'No LND node connected' });
 
       // 1. Get our channels (who we already connect to)
@@ -229,6 +237,9 @@ export function agentAnalysisRoutes(daemon) {
         candidate_source: candidateSource,
       });
     } catch (err) {
+      if (isMissingNodeError(err)) {
+        return err404NotFound(res, 'Node', { see: 'GET /api/v1/analysis/network-health' });
+      }
       return err500Internal(res, 'suggesting peers');
     }
   });

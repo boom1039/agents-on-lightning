@@ -507,11 +507,18 @@ async function readDoc(file) {
 }
 
 function isAllowedToolPath(pathname) {
-  if (pathname === '/' || pathname === '/health' || pathname === '/llms.txt') return true;
+  if (pathname === '/' || pathname === '/health' || pathname === '/llms.txt' || pathname === '/llms-mcp.txt') return true;
   if (pathname === '/.well-known/mcp.json' || pathname === '/.well-known/agent-card.json') return true;
   if (pathname.startsWith('/docs/')) return true;
   if (pathname.startsWith('/api/v1/')) return true;
   return false;
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function sanitizeHeaders(headers = {}) {
@@ -676,6 +683,13 @@ function toToolResult(result) {
       headers: result.headers,
       body: result.body,
     },
+  };
+}
+
+function toolInputError(message) {
+  return {
+    content: [{ type: 'text', text: message }],
+    isError: true,
   };
 }
 
@@ -1232,21 +1246,28 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Submit an action log entry with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      action_type: z.string().describe('Action type like open_channel.'),
+      action_type: z.string().optional().describe('Action type like open_channel.'),
+      action: z.string().optional().describe('Simple alias for action_type.'),
       params: z.record(z.string(), z.any()).optional().describe('Optional action params object.'),
       description: z.string().optional().describe('Optional human-readable action summary.'),
     },
-  }, async ({ api_key, action_type, params, description }) => toToolResult(await performSiteRequest({
+  }, async ({ api_key, action_type, action, params, description }) => {
+    const normalizedActionType = firstNonEmptyString(action_type, action);
+    if (!normalizedActionType) {
+      return toolInputError('Send action_type or action.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'POST',
     path: '/api/v1/actions/submit',
     headers: { Authorization: `Bearer ${api_key}` },
     json: {
-      action_type,
+      action_type: normalizedActionType,
       ...(params !== undefined ? { params } : {}),
       ...(description !== undefined ? { description } : {}),
     },
-  })));
+    }));
+  });
 
   server.registerTool('aol_get_action_history', {
     description: 'Read your action history with a bearer token.',
@@ -1543,46 +1564,74 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   server.registerTool('aol_get_node_analysis', {
     description: 'Read one public node analysis view by pubkey.',
     inputSchema: {
-      node_pubkey: z.string().describe('Real node pubkey to inspect.'),
+      node_pubkey: z.string().optional().describe('Real node pubkey to inspect.'),
+      pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
     },
-  }, async ({ node_pubkey }) => toToolResult(await performSiteRequest({
+  }, async ({ node_pubkey, pubkey }) => {
+    const normalizedPubkey = firstNonEmptyString(node_pubkey, pubkey);
+    if (!normalizedPubkey) {
+      return toolInputError('Send node_pubkey or pubkey.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'GET',
-    path: `/api/v1/analysis/node/${node_pubkey}`,
-  })));
+    path: `/api/v1/analysis/node/${normalizedPubkey}`,
+    }));
+  });
 
   server.registerTool('aol_suggest_peers', {
     description: 'Read suggested peer candidates for a node pubkey.',
     inputSchema: {
-      node_pubkey: z.string().describe('Node pubkey to analyze.'),
+      node_pubkey: z.string().optional().describe('Node pubkey to analyze.'),
+      pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
     },
-  }, async ({ node_pubkey }) => toToolResult(await performSiteRequest({
+  }, async ({ node_pubkey, pubkey }) => {
+    const normalizedPubkey = firstNonEmptyString(node_pubkey, pubkey);
+    if (!normalizedPubkey) {
+      return toolInputError('Send node_pubkey or pubkey.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'GET',
-    path: `/api/v1/analysis/suggest-peers/${node_pubkey}`,
-  })));
+    path: `/api/v1/analysis/suggest-peers/${normalizedPubkey}`,
+    }));
+  });
 
   server.registerTool('aol_get_peer_safety', {
     description: 'Read public peer safety information by pubkey.',
     inputSchema: {
-      peer_pubkey: z.string().describe('Real peer pubkey to inspect.'),
+      peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
+      pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
     },
-  }, async ({ peer_pubkey }) => toToolResult(await performSiteRequest({
+  }, async ({ peer_pubkey, pubkey }) => {
+    const normalizedPubkey = firstNonEmptyString(peer_pubkey, pubkey);
+    if (!normalizedPubkey) {
+      return toolInputError('Send peer_pubkey or pubkey.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'GET',
-    path: `/api/v1/market/peer-safety/${peer_pubkey}`,
-  })));
+    path: `/api/v1/market/peer-safety/${normalizedPubkey}`,
+    }));
+  });
 
   server.registerTool('aol_get_market_fees', {
     description: 'Read public market fee competition for a peer pubkey.',
     inputSchema: {
-      peer_pubkey: z.string().describe('Real peer pubkey to inspect.'),
+      peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
+      pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
     },
-  }, async ({ peer_pubkey }) => toToolResult(await performSiteRequest({
+  }, async ({ peer_pubkey, pubkey }) => {
+    const normalizedPubkey = firstNonEmptyString(peer_pubkey, pubkey);
+    if (!normalizedPubkey) {
+      return toolInputError('Send peer_pubkey or pubkey.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'GET',
-    path: `/api/v1/market/fees/${peer_pubkey}`,
-  })));
+    path: `/api/v1/market/fees/${normalizedPubkey}`,
+    }));
+  });
 
   server.registerTool('aol_get_market_agent', {
     description: 'Read one public market agent view by agent id.',
@@ -2220,25 +2269,38 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Create an alliance proposal with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Sender bearer token.'),
-      to: z.string().describe('Recipient agent id.'),
-      description: z.string().describe('Alliance description.'),
+      to: z.string().optional().describe('Recipient agent id.'),
+      target_agent_id: z.string().optional().describe('Simple alias for to.'),
+      recipient_agent_id: z.string().optional().describe('Another alias for to.'),
+      description: z.string().optional().describe('Alliance description.'),
+      terms: z.string().optional().describe('Simple alias for description.'),
       duration_hours: z.number().int().positive().optional().describe('Optional alliance duration in hours.'),
       conditions: z.string().optional().describe('Optional alliance conditions text.'),
     },
-  }, async ({ api_key, to, description, duration_hours, conditions }) => toToolResult(await performSiteRequest({
+  }, async ({ api_key, to, target_agent_id, recipient_agent_id, description, terms, duration_hours, conditions }) => {
+    const normalizedRecipient = firstNonEmptyString(to, target_agent_id, recipient_agent_id);
+    const normalizedDescription = firstNonEmptyString(description, terms);
+    if (!normalizedRecipient) {
+      return toolInputError('Send to, target_agent_id, or recipient_agent_id.');
+    }
+    if (!normalizedDescription) {
+      return toolInputError('Send description or terms.');
+    }
+    return toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'POST',
     path: '/api/v1/alliances',
     headers: { Authorization: `Bearer ${api_key}` },
     json: {
-      to,
+      to: normalizedRecipient,
       terms: {
-        description,
+        description: normalizedDescription,
         ...(duration_hours !== undefined ? { duration_hours } : {}),
         ...(conditions !== undefined ? { conditions } : {}),
       },
     },
-  })));
+    }));
+  });
 
   server.registerTool('aol_get_alliances', {
     description: 'Read your alliances with a bearer token.',
