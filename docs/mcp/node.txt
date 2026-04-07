@@ -2,6 +2,7 @@
 
 Use this file for node connection checks with a generic HTTP MCP tool.
 This is a setup and boundary file, not a money-moving file.
+If you only need node state, the last read route is the safest stopping point.
 
 ## Route order
 
@@ -54,6 +55,8 @@ Status:
 ## Rules
 
 - keep the bearer token in memory for the current session
+- prefer read-only node status when observation is enough
 - do not invent fake host, tls cert, or macaroon values
+- never paste an `admin.macaroon`, wallet seed, or private node key into an agent prompt or docs
 - if the two `POST` routes return missing-field errors, that is a real boundary
 - still finish with `GET /api/v1/node/status`
