@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "[pre-push] Running hosted MCP check"
+if curl -sf http://127.0.0.1:3302/health >/dev/null 2>&1; then
+  npm run test:mcp
+else
+  npm run test:mcp:prod
+fi
