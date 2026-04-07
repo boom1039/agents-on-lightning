@@ -167,7 +167,7 @@ export function agentAnalysisRoutes(daemon) {
 
       // 3. Fetch info on each peer (one-hop out), cap at 30 to limit LND calls
       const peerList = [...peerPubkeys].slice(0, 30);
-      let candidates = await Promise.all(
+      const oneHopCandidates = await Promise.all(
         peerList.map(async (pubkey) => {
           try {
             const info = await client.getNodeInfo(pubkey);
@@ -182,40 +182,48 @@ export function agentAnalysisRoutes(daemon) {
           }
         }),
       );
-      candidates = candidates.filter(Boolean);
+      const scoreCandidates = async (candidates) => {
+        const input = JSON.stringify({
+          target_pubkey: req.params.pubkey,
+          my_peers: myPeers,
+          candidates,
+        });
 
+        return new Promise((resolve, reject) => {
+          const proc = spawn(PYTHON3, [SUGGEST_PEERS_SCRIPT], { timeout: 10_000 });
+          let stdout = '';
+          let stderr = '';
+          proc.stdout.on('data', d => { stdout += d; });
+          proc.stderr.on('data', d => { stderr += d; });
+          proc.on('close', code => {
+            if (code !== 0) return reject(new Error(stderr || `Python exit ${code}`));
+            try { resolve(JSON.parse(stdout)); }
+            catch { reject(new Error('Invalid JSON from Python')); }
+          });
+          proc.on('error', reject);
+          proc.stdin.write(input);
+          proc.stdin.end();
+        });
+      };
+
+      let candidates = oneHopCandidates.filter(Boolean);
       let candidateSource = 'one_hop';
-      if (candidates.length === 0) {
+      let result = await scoreCandidates(candidates);
+
+      if (result.total_candidates_considered === 0) {
         const graph = await client.describeGraph(false).catch(() => null);
         const excluded = new Set([...myPeers, req.params.pubkey]);
-        candidates = buildGraphFallbackCandidates(graph, excluded, 30);
-        if (candidates.length > 0) candidateSource = 'network_graph_fallback';
+        const fallbackCandidates = buildGraphFallbackCandidates(graph, excluded, 30);
+        if (fallbackCandidates.length > 0) {
+          candidates = fallbackCandidates;
+          candidateSource = 'network_graph_fallback';
+          result = await scoreCandidates(candidates);
+        }
       }
 
-      // 4. Pipe to Python scoring script via stdin → stdout
-      const input = JSON.stringify({
-        target_pubkey: req.params.pubkey,
-        my_peers: myPeers,
-        candidates,
-      });
-
-      const result = await new Promise((resolve, reject) => {
-        const proc = spawn(PYTHON3, [SUGGEST_PEERS_SCRIPT], { timeout: 10_000 });
-        let stdout = '';
-        let stderr = '';
-        proc.stdout.on('data', d => { stdout += d; });
-        proc.stderr.on('data', d => { stderr += d; });
-        proc.on('close', code => {
-          if (code !== 0) return reject(new Error(stderr || `Python exit ${code}`));
-          try { resolve(JSON.parse(stdout)); }
-          catch { reject(new Error('Invalid JSON from Python')); }
-        });
-        proc.on('error', reject);
-        proc.stdin.write(input);
-        proc.stdin.end();
-      });
-
+      // 4. Return scored suggestions
       res.json({
+        target_pubkey: req.params.pubkey,
         ...result,
         candidate_source: candidateSource,
       });
