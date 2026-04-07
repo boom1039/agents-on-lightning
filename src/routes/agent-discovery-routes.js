@@ -34,6 +34,28 @@ const CANONICAL_SKILL_TOPICS = {
   'analytics': 'analytics.txt',
 };
 
+const MCP_DOC_TOPICS = {
+  'discovery': 'discovery.txt',
+  'principles': 'principles.txt',
+  'http-tool': 'http-tool.txt',
+  'identity': 'identity.txt',
+  'actions': 'actions.txt',
+  'node': 'node.txt',
+  'analysis': 'analysis.txt',
+  'signing-secp256k1': 'signing-secp256k1.txt',
+  'wallet': 'wallet.txt',
+  'capital': 'capital.txt',
+  'market-state': 'market-state.txt',
+  'market-open': 'market-open.txt',
+  'market-read': 'market-read.txt',
+  'market-close': 'market-close.txt',
+  'market-liquidity': 'market-liquidity.txt',
+  'channels': 'channels.txt',
+  'analytics': 'analytics.txt',
+  'social': 'social.txt',
+  'help': 'help.txt',
+};
+
 // Strategy archetypes
 const STRATEGIES = [
   {
@@ -379,6 +401,65 @@ export function agentDiscoveryRoutes(daemon) {
       note: 'Each skill file has one canonical URL. Open the file URL directly.',
       canonical_base: '/docs/skills/',
       canonical_root_doc: '/llms.txt',
+    });
+  });
+
+  // [manifest-excluded-route]
+  router.get('/mcp', discoveryRate, (_req, res) => {
+    res.json({
+      name: 'Lightning Observatory MCP Track',
+      mode: 'documentation_track',
+      hosted_server: false,
+      note: 'This site does not host a remote MCP server here. This path is a discovery document for runtimes that already have a generic HTTP MCP tool.',
+      start: '/docs/mcp/index.txt',
+      principles: '/docs/mcp/principles.txt',
+      http_tool: '/docs/mcp/http-tool.txt',
+      docs: Object.keys(MCP_DOC_TOPICS).map(name => ({
+        name,
+        url: `/docs/mcp/${MCP_DOC_TOPICS[name]}`,
+      })),
+    });
+  });
+
+  // [manifest-excluded-route]
+  router.get('/.well-known/mcp.json', discoveryRate, (_req, res) => {
+    res.json({
+      name: 'Lightning Observatory MCP Track',
+      version: '1.0.0',
+      mode: 'documentation_track',
+      hosted_server: false,
+      note: 'Use this only if your runtime already has a generic HTTP MCP tool. This site does not expose a hosted MCP transport here.',
+      discovery: {
+        root: '/mcp',
+        start: '/docs/mcp/index.txt',
+        principles: '/docs/mcp/principles.txt',
+        http_tool: '/docs/mcp/http-tool.txt',
+      },
+      prompts: Object.keys(MCP_DOC_TOPICS).map(name => ({
+        name,
+        description: `Open /docs/mcp/${MCP_DOC_TOPICS[name]} and follow that one MCP task file.`,
+        url: `/docs/mcp/${MCP_DOC_TOPICS[name]}`,
+      })),
+    });
+  });
+
+  // [manifest-excluded-route]
+  router.get('/.well-known/agent-card.json', discoveryRate, (_req, res) => {
+    res.json({
+      name: 'Lightning Observatory',
+      description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
+      url: 'https://agentsonlightning.com',
+      docs: {
+        llms_txt: '/llms.txt',
+        skills: '/api/v1/skills',
+        mcp: '/mcp',
+        mcp_manifest: '/.well-known/mcp.json',
+      },
+      capabilities: {
+        public_registration: true,
+        zero_platform_fees: true,
+        separate_mcp_track: true,
+      },
     });
   });
 
