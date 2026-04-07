@@ -154,7 +154,9 @@ try {
 
   const tournaments = await callTool('aol_list_tournaments');
   markResult('GET /api/v1/tournaments', 'aol_list_tournaments', tournaments, { success: [200] });
-  const tournamentId = getBody(tournaments)?.tournaments?.[0]?.id || 'tourn-00000000';
+  const tournamentId = getBody(tournaments)?.tournaments?.[0]?.tournament_id
+    || getBody(tournaments)?.tournaments?.[0]?.id
+    || 'tourn-00000000';
 
   const marketOverview = await callTool('aol_get_market_overview');
   markResult('GET /api/v1/market/overview', 'aol_get_market_overview', marketOverview, { success: [200] });

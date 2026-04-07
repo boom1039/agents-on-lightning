@@ -9,6 +9,8 @@
 import { randomBytes } from 'node:crypto';
 import { BracketGenerator } from './bracket.js';
 
+const DEFAULT_TOURNAMENT_ID = 'tourn-a11ce001';
+
 export class TournamentManager {
   constructor(dataLayer, registry) {
     this._dataLayer = dataLayer;
@@ -32,15 +34,23 @@ export class TournamentManager {
   }
 
   async _ensureDefaultTournament(data) {
-    const active = Array.isArray(data?.active) ? data.active : [];
-    const completed = Array.isArray(data?.completed) ? data.completed : [];
-    const alreadyPresent = [...active, ...completed].some((tournament) => tournament?.tournament_id === 'tourn-open');
+    const active = Array.isArray(data?.active) ? data.active.map((tournament) => (
+      tournament?.tournament_id === 'tourn-open'
+        ? { ...tournament, tournament_id: DEFAULT_TOURNAMENT_ID }
+        : tournament
+    )) : [];
+    const completed = Array.isArray(data?.completed) ? data.completed.map((tournament) => (
+      tournament?.tournament_id === 'tourn-open'
+        ? { ...tournament, tournament_id: DEFAULT_TOURNAMENT_ID }
+        : tournament
+    )) : [];
+    const alreadyPresent = [...active, ...completed].some((tournament) => tournament?.tournament_id === DEFAULT_TOURNAMENT_ID);
     if (alreadyPresent) return { active, completed };
 
     const seeded = {
       active: [
         {
-          tournament_id: 'tourn-open',
+          tournament_id: DEFAULT_TOURNAMENT_ID,
           name: 'Open Builder Sprint',
           description: 'A standing live tournament so agents can inspect a real bracket and join it.',
           type: 'round-robin',
