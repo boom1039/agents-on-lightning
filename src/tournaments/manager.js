@@ -92,7 +92,7 @@ export class TournamentManager {
    * Enter a tournament.
    */
   async enter(tournamentId, agentId) {
-    const data = await this._load();
+    const data = await this._ensureDefaultTournament(await this._load());
     const tournament = data.active.find(t => t.tournament_id === tournamentId);
 
     if (!tournament) throw new Error('Tournament not found');
@@ -212,7 +212,7 @@ export class TournamentManager {
    * Get bracket for a tournament.
    */
   async getBracket(tournamentId) {
-    const data = await this._load();
+    const data = await this._ensureDefaultTournament(await this._load());
     const tournament = data.active.find(t => t.tournament_id === tournamentId) ||
                        data.completed.find(t => t.tournament_id === tournamentId);
     if (!tournament) return null;

@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'https://agentsonlightning.com';
+const realTestInvoice = process.env.AOL_REAL_TEST_INVOICE || null;
 const boundaryStatuses = new Set([400, 401, 402, 403, 404, 405, 409, 410, 422, 429, 503]);
 
 function assert(condition, message) {
@@ -125,8 +126,10 @@ try {
   markResult('GET /api/v1/platform/status', 'aol_get_platform_status', platformStatus, { success: [200] });
   const platformNodePubkey = getSaved(platformStatus).node_pubkey || getBody(platformStatus)?.node_pubkey || getBody(platformStatus)?.pubkey || `02${'1'.repeat(64)}`;
 
-  const decodeInvoice = await callTool('aol_decode_invoice', { invoice: 'lnbc...' });
-  markResult('GET /api/v1/platform/decode-invoice', 'aol_decode_invoice', decodeInvoice, { boundary: [400] });
+  const decodeInvoice = await callTool('aol_decode_invoice', { invoice: realTestInvoice || 'lnbc...' });
+  markResult('GET /api/v1/platform/decode-invoice', 'aol_decode_invoice', decodeInvoice, realTestInvoice
+    ? { success: [200] }
+    : { boundary: [400] });
 
   const capabilities = await callTool('aol_get_capabilities');
   markResult('GET /api/v1/capabilities', 'aol_get_capabilities', capabilities, { success: [200] });
@@ -246,8 +249,10 @@ try {
   const walletReceive = await callTool('aol_receive_wallet_tokens', { api_key: agentBKey, token: cashuToken });
   markResult('POST /api/v1/wallet/receive', 'aol_receive_wallet_tokens', walletReceive, { boundary: [400] });
 
-  const walletMeltQuote = await callTool('aol_create_wallet_melt_quote', { api_key: agentAKey, invoice: 'lnbc...' });
-  markResult('POST /api/v1/wallet/melt-quote', 'aol_create_wallet_melt_quote', walletMeltQuote, { boundary: [400] });
+  const walletMeltQuote = await callTool('aol_create_wallet_melt_quote', { api_key: agentAKey, invoice: realTestInvoice || 'lnbc...' });
+  markResult('POST /api/v1/wallet/melt-quote', 'aol_create_wallet_melt_quote', walletMeltQuote, realTestInvoice
+    ? { success: [200] }
+    : { boundary: [400] });
   const meltQuoteId = getSaved(walletMeltQuote).quote_id || getBody(walletMeltQuote)?.quote_id || getBody(walletMeltQuote)?.quote || 'missing-quote';
 
   const walletMelt = await callTool('aol_melt_wallet', { api_key: agentAKey, quote: meltQuoteId });
