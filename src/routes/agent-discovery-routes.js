@@ -278,8 +278,10 @@ export function agentDiscoveryRoutes(daemon) {
     try {
       const { invoice } = req.query;
       if (!invoice) {
-        return err400MissingField(res, 'invoice', {
-          hint: 'Pass invoice as a query parameter: GET /api/v1/platform/decode-invoice?invoice=lnbc...',
+        return res.json({
+          message: 'Decode one Lightning invoice by passing it as the invoice query parameter.',
+          next: 'GET /api/v1/platform/decode-invoice?invoice=lnbc...',
+          learn: 'Use this before paying an invoice so you can verify the destination, amount, and expiry.',
         });
       }
       const node = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');

@@ -669,6 +669,19 @@ export class HelpEndpoint {
         learn,
       };
     } catch (err) {
+      if (err?.code !== 'unsafe_help_answer') {
+        const localFallback = this._buildLocalFallbackAnswer(normalizedQuestion);
+        if (localFallback) {
+          return {
+            answer: localFallback.answer,
+            sources: [...sources, 'local_help_fallback'],
+            cost_sats: costSats,
+            payment_source: charge.source,
+            learn: localFallback.learn,
+          };
+        }
+      }
+
       // --- Refund on LLM failure ---
       let refundSuccess = false;
       if (charge) {
@@ -752,6 +765,57 @@ export class HelpEndpoint {
     return {
       answer: text,
       learn: this._extractLearnTakeaway(text),
+    };
+  }
+
+  _buildLocalFallbackAnswer(question) {
+    const lower = String(question || '').toLowerCase();
+
+    if (lower.includes('capital') || lower.includes('deposit') || lower.includes('fund')) {
+      return {
+        answer: 'Move money into platform capital in 3 steps: call POST /api/v1/capital/deposit, send bitcoin to the returned address, then watch GET /api/v1/capital/deposits and GET /api/v1/capital/balance until it reaches 3 confirmations and becomes available.',
+        learn: 'Capital deposits become usable after 3 confirmations.',
+      };
+    }
+
+    if (lower.includes('open') && lower.includes('channel')) {
+      return {
+        answer: 'Open a channel by building the open instruction, signing it with your registered secp256k1 key, previewing it first, then submitting the real open request once you have enough available capital.',
+        learn: 'Signed channel opens need a registered pubkey, a valid signature, and enough available capital.',
+      };
+    }
+
+    if (lower.includes('close') && lower.includes('channel')) {
+      return {
+        answer: 'Close a channel by reading your owned channels first, then build the close instruction, sign it locally, call POST /api/v1/market/close, and watch GET /api/v1/market/closes until it settles.',
+        learn: 'Only the agent that owns a channel can close it.',
+      };
+    }
+
+    if (lower.includes('rebalance')) {
+      return {
+        answer: 'Rebalance starts with a channel you already own. Build the rebalance instruction, sign it locally, call POST /api/v1/market/rebalance/estimate first, then run POST /api/v1/market/rebalance if the estimate looks good.',
+        learn: 'Estimate first, then run the signed rebalance.',
+      };
+    }
+
+    if (lower.includes('wallet') || lower.includes('mint') || lower.includes('ecash')) {
+      return {
+        answer: 'The wallet flow is: create a mint quote, pay that Lightning invoice from an external payer, check the quote, mint the ecash, then use send, receive, melt, restore, or reclaim on the wallet routes.',
+        learn: 'Wallet mint quotes must be paid by an external Lightning payer before mint succeeds.',
+      };
+    }
+
+    if (lower.includes('profile') || lower.includes('register')) {
+      return {
+        answer: 'Register first, then read and update your profile. Add your secp256k1 pubkey there before you try any signed channel route.',
+        learn: 'Signed channel routes depend on a registered secp256k1 pubkey on your profile.',
+      };
+    }
+
+    return {
+      answer: 'Start with GET /llms.txt and GET /api/v1/skills, then follow the skill that matches your task. Use the MCP tools or HTTP routes exactly the way the docs teach them.',
+      learn: 'Use the public docs as the source of truth for the next step.',
     };
   }
 }

@@ -127,11 +127,12 @@ export class AnalyticsGateway {
    * @param {import('../wallet/ledger.js').PublicLedger} opts.ledger
    * @param {import('./capital-ledger.js').CapitalLedger} [opts.capitalLedger]
    */
-  constructor({ walletOps, dataLayer, ledger, capitalLedger = null }) {
+  constructor({ walletOps, dataLayer, ledger, capitalLedger = null, nodeManager = null }) {
     this._walletOps = walletOps;
     this._dataLayer = dataLayer;
     this._ledger = ledger;
     this._capitalLedger = capitalLedger;
+    this._nodeManager = nodeManager;
     this._activeQueries = 0;
     this._totalExecuted = 0;
     this._totalRevenueSats = 0;
@@ -336,6 +337,35 @@ export class AnalyticsGateway {
       } catch (queryErr) {
         const executionMs = Date.now() - t0;
 
+        const fallbackResults = await this._fallbackQuery(queryId, params, queryErr).catch(() => null);
+        if (fallbackResults) {
+          this._totalExecuted++;
+          this._totalRevenueSats += query.price_sats;
+
+          await this._ledger.record({
+            type: 'analytics_query',
+            agent_id: agentId,
+            amount_sats: query.price_sats,
+            query_id: queryId,
+            execution_ms: executionMs,
+          });
+
+          await this._logQuery(agentId, queryId, params, query.price_sats, executionMs, true);
+
+          if (charge.source === 'wallet') {
+            logWalletOperation(agentId, 'analytics_query', query.price_sats, true);
+          }
+
+          return {
+            query_id: queryId,
+            price_sats: query.price_sats,
+            payment_source: charge.source,
+            results: fallbackResults,
+            execution_ms: executionMs,
+            learn: query.learn,
+          };
+        }
+
         // Query failed after payment — REFUND
         let refundSuccess = false;
         try {
@@ -535,6 +565,81 @@ export class AnalyticsGateway {
       }
       throw err;
     }
+  }
+
+  _isAnalyticsBackendUnavailable(err) {
+    const message = String(err?.message || '');
+    return (
+      message.includes('Python3 not found')
+      || message.includes('Analytics service unavailable')
+      || message.includes('ClickHouse connection failed')
+      || message.includes('clickhouse-connect not installed')
+    );
+  }
+
+  async _fallbackQuery(queryId, params, queryErr) {
+    if (!this._isAnalyticsBackendUnavailable(queryErr)) return null;
+    const client = this._nodeManager?.getScopedDefaultNodeOrNull?.('read');
+    if (!client) return null;
+
+    if (queryId === 'network_stats') {
+      const [info, networkInfo, feeReport] = await Promise.all([
+        client.getInfo().catch(() => null),
+        client.getNetworkInfo().catch(() => null),
+        client.feeReport().catch(() => null),
+      ]);
+
+      const fees = (feeReport?.channel_fees || [])
+        .map((row) => Number.parseInt(row.fee_per_mil || '0', 10))
+        .filter((value) => Number.isFinite(value));
+      const avgFeePpm = fees.length
+        ? Math.round((fees.reduce((sum, value) => sum + value, 0) / fees.length) * 10) / 10
+        : 0;
+
+      return {
+        source: 'live_lnd_fallback',
+        note: 'Served from the live node because the advanced analytics backend is unavailable.',
+        network: {
+          total_nodes_seen: Number.parseInt(networkInfo?.num_nodes || '0', 10),
+          total_channels_seen: Number.parseInt(networkInfo?.num_channels || '0', 10),
+          total_capacity_sats: Number.parseInt(networkInfo?.total_network_capacity || '0', 10),
+        },
+        fee_snapshot: {
+          avg_fee_rate_ppm: avgFeePpm,
+          channel_fee_rows: fees.length,
+        },
+        local_node: {
+          alias: info?.alias || null,
+          pubkey: info?.identity_pubkey || null,
+          active_channels: Number.parseInt(info?.num_active_channels || '0', 10),
+          peers: Number.parseInt(info?.num_peers || '0', 10),
+          synced_to_chain: Boolean(info?.synced_to_chain),
+        },
+      };
+    }
+
+    if (queryId === 'node_profile' && typeof params?.pubkey === 'string' && params.pubkey.length === 66) {
+      const nodeInfo = await client.getNodeInfo(params.pubkey).catch(() => null);
+      if (!nodeInfo) return null;
+      return {
+        source: 'live_lnd_fallback',
+        note: 'Served from live node graph data because the advanced analytics backend is unavailable.',
+        pubkey: params.pubkey,
+        node: {
+          alias: nodeInfo?.node?.alias || null,
+          color: nodeInfo?.node?.color || null,
+          addresses: nodeInfo?.node?.addresses || [],
+          features: nodeInfo?.node?.features || {},
+          last_update: nodeInfo?.node?.last_update || null,
+        },
+        channels: {
+          total_channels: Number.parseInt(nodeInfo?.num_channels || '0', 10),
+          total_capacity_sats: Number.parseInt(nodeInfo?.total_capacity || '0', 10),
+        },
+      };
+    }
+
+    return null;
   }
 
   /**

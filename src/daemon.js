@@ -169,6 +169,7 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       ledger: this.publicLedger,
       capitalLedger: this.capitalLedger,
+      nodeManager: this.nodeManager,
     });
 
     this.spendingVelocity = new SpendingVelocityTracker(getSpendingVelocitySettings(this.config));
