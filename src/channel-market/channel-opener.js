@@ -113,6 +113,10 @@ const LND_ERROR_MAP = [
   },
 ];
 
+function sanitizeLndDetail(errMsg) {
+  return String(errMsg || '').replace(/\/[^\s]+/g, '[path]').trim();
+}
+
 function btcStringToSats(value) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -124,6 +128,7 @@ function btcStringToSats(value) {
 }
 
 function mapLndError(errMsg) {
+  const sanitizedDetail = sanitizeLndDetail(errMsg);
   const minSizeMatch = /chan size of ([\d.]+) BTC is below min chan size of ([\d.]+) BTC/i.exec(errMsg);
   if (minSizeMatch) {
     const attemptedSats = btcStringToSats(minSizeMatch[1]);
@@ -136,10 +141,14 @@ function mapLndError(errMsg) {
     }
   }
   for (const { pattern, message } of LND_ERROR_MAP) {
-    if (pattern.test(errMsg)) return message;
+    if (pattern.test(errMsg)) {
+      if (sanitizedDetail && !message.includes(sanitizedDetail)) {
+        return `${message} Details: ${sanitizedDetail}`;
+      }
+      return message;
+    }
   }
-  // Sanitize: strip internal paths, keep useful info
-  return `Channel open failed: ${errMsg.replace(/\/[^\s]+/g, '[path]')}`;
+  return `Channel open failed: ${sanitizedDetail}`;
 }
 
 /**
