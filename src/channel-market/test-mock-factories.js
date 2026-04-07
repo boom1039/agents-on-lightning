@@ -140,8 +140,10 @@ export function mockCapitalLedger(overrides = {}) {
   const calls = [];
   const credits = [];
   const ecashCredits = [];
+  const serviceSpends = [];
+  const serviceRefunds = [];
   return {
-    getBalance: async (agentId) => ({ available: 1_000_000, locked: 0, pending_close: 0 }),
+    getBalance: async (_agentId) => ({ available: 1_000_000, locked: 0, pending_deposit: 0, pending_close: 0, total_service_spent: 0 }),
     lockForChannel: async (agentId, amount, ref) => {
       calls.push({ method: 'lockForChannel', agentId, amount, ref });
     },
@@ -163,6 +165,12 @@ export function mockCapitalLedger(overrides = {}) {
     creditEcashFunding: async (agentId, amount, reference) => {
       ecashCredits.push({ agentId, amount, reference });
     },
+    spendOnService: async (agentId, amount, reference, service) => {
+      serviceSpends.push({ agentId, amount, reference, service });
+    },
+    refundServiceSpend: async (agentId, amount, reference, service, reason) => {
+      serviceRefunds.push({ agentId, amount, reference, service, reason });
+    },
     settleRebalance: async (agentId, maxFeeLocked, actualFee, reference) => {
       calls.push({ method: 'settleRebalance', agentId, maxFeeLocked, actualFee, reference });
     },
@@ -170,6 +178,8 @@ export function mockCapitalLedger(overrides = {}) {
     calls,
     credits,
     ecashCredits,
+    serviceSpends,
+    serviceRefunds,
   };
 }
 
@@ -223,6 +233,7 @@ export function mockNodeManager(clientOverrides = {}) {
   };
   return {
     getDefaultNodeOrNull: () => client,
+    getScopedDefaultNodeOrNull: () => client,
     _client: client,
   };
 }

@@ -132,7 +132,14 @@ export function agentPaidServicesRoutes(daemon) {
           statusCode: 200,
           body: {
             ...result,
-            cost_summary: { action: 'analytics_execute', amount_sats: result.price_sats, fee_sats: 0, total_sats: result.price_sats, unit: 'sat' },
+            cost_summary: {
+              action: 'analytics_execute',
+              amount_sats: result.price_sats,
+              fee_sats: 0,
+              total_sats: result.price_sats,
+              unit: 'sat',
+              source: result.payment_source || 'wallet',
+            },
           },
         };
       },
@@ -216,8 +223,9 @@ export function agentPaidServicesRoutes(daemon) {
             locked: 'Sats committed to open channels. Returns to available when the channel closes.',
             pending_deposit: 'Deposit detected on-chain but not yet confirmed.',
             pending_close: 'Channel closing — funds return to available after on-chain confirmation.',
+            total_service_spent: 'Lifetime sats spent from capital on paid site services.',
           },
-          invariant: 'total_deposited + total_revenue_credited = available + locked + pending_deposit + pending_close + total_withdrawn + total_routing_pnl',
+          invariant: 'total_deposited + total_revenue_credited + total_ecash_funded = available + locked + pending_deposit + pending_close + total_withdrawn + total_service_spent + total_routing_pnl',
           flow: 'deposit → pending_deposit → available → locked → pending_close → available → withdraw',
         },
       });
@@ -353,7 +361,7 @@ export function agentPaidServicesRoutes(daemon) {
   // =========================================================================
 
   // Request help for help.
-  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Help","label":"help","summary":"Request help for help.","order":200,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Help","label":"help","summary":"Request help for help.","order":200,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
   router.post('/api/v1/help', auth, rateLimit('wallet_write'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['question', 'context', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -376,7 +384,20 @@ export function agentPaidServicesRoutes(daemon) {
       handler: async () => {
         const { question, context } = req.body;
         const result = await daemon.helpEndpoint.ask(req.agentId, question, context || {});
-        return { statusCode: 200, body: result };
+        return {
+          statusCode: 200,
+          body: {
+            ...result,
+            cost_summary: {
+              action: 'help',
+              amount_sats: result.cost_sats,
+              fee_sats: 0,
+              total_sats: result.cost_sats,
+              unit: 'sat',
+              source: result.payment_source || 'wallet',
+            },
+          },
+        };
       },
       onError: (err) => {
         const status = err.status || 500;

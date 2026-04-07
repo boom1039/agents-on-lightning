@@ -4,7 +4,7 @@
  * Manages the full lifecycle of paid ClickHouse analytics queries:
  *   1. Agent browses the query catalog (getCatalog)
  *   2. Agent requests a quote for a specific query (getQuote)
- *   3. Agent executes the query — Cashu ecash is debited atomically,
+ *   3. Agent executes the query — wallet ecash or capital is debited atomically,
  *      Python child process runs the ClickHouse query, result returned (execute)
  *   4. If the Python process fails after payment, ecash is refunded automatically
  *
@@ -125,11 +125,13 @@ export class AnalyticsGateway {
    * @param {import('../wallet/agent-cashu-wallet-operations.js').AgentCashuWalletOperations} opts.walletOps
    * @param {import('../data-layer.js').DataLayer} opts.dataLayer
    * @param {import('../wallet/ledger.js').PublicLedger} opts.ledger
+   * @param {import('./capital-ledger.js').CapitalLedger} [opts.capitalLedger]
    */
-  constructor({ walletOps, dataLayer, ledger }) {
+  constructor({ walletOps, dataLayer, ledger, capitalLedger = null }) {
     this._walletOps = walletOps;
     this._dataLayer = dataLayer;
     this._ledger = ledger;
+    this._capitalLedger = capitalLedger;
     this._activeQueries = 0;
     this._totalExecuted = 0;
     this._totalRevenueSats = 0;
@@ -200,6 +202,56 @@ export class AnalyticsGateway {
     };
   }
 
+  async _chargeAgent(agentId, amount, service, reference) {
+    let walletBalance = 0;
+    try {
+      walletBalance = await this._walletOps.getBalance(agentId);
+    } catch {
+      walletBalance = 0;
+    }
+
+    if (walletBalance >= amount) {
+      try {
+        const sendResult = await this._walletOps.sendEcash(agentId, amount);
+        return { source: 'wallet', token: sendResult.token, reference, service };
+      } catch (err) {
+        if (!String(err?.message || '').includes('Insufficient')) {
+          const wrapped = new Error(`Payment failed: ${err.message}`);
+          wrapped.statusCode = 402;
+          throw wrapped;
+        }
+      }
+    }
+
+    if (this._capitalLedger) {
+      const capitalBalance = await this._capitalLedger.getBalance(agentId);
+      if ((capitalBalance?.available || 0) >= amount) {
+        await this._capitalLedger.spendOnService(agentId, amount, reference, service);
+        return { source: 'capital', token: null, reference, service };
+      }
+    }
+
+    const err = new Error(
+      `Insufficient balance. Query costs ${amount} sats. ` +
+      'Fund your wallet with POST /api/v1/wallet/mint-quote, or keep sats in available capital.'
+    );
+    err.statusCode = 402;
+    throw err;
+  }
+
+  async _refundCharge(agentId, amount, charge, reason) {
+    if (!charge) return false;
+    if (charge.source === 'wallet' && charge.token) {
+      await this._walletOps.receiveEcash(agentId, charge.token);
+      return true;
+    }
+    if (charge.source === 'capital' && this._capitalLedger) {
+      await this._capitalLedger.refundServiceSpend(agentId, amount, charge.reference, charge.service, reason);
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Execute a paid analytics query.
    *
@@ -243,28 +295,8 @@ export class AnalyticsGateway {
     // Per-agent mutex: prevents double-spend race on balance check + debit
     const unlock = await acquire(`analytics:${agentId}`);
     try {
-      // Check wallet balance before attempting debit
-      const balance = await this._walletOps.getBalance(agentId);
-      if (balance < query.price_sats) {
-        const err = new Error(
-          `Insufficient balance. Query costs ${query.price_sats} sats, your balance is ${balance} sats. ` +
-          `Deposit more ecash via POST /api/v1/wallet/mint/quote.`
-        );
-        err.statusCode = 402;
-        throw err;
-      }
-
-      // Debit Cashu wallet — creates an internal ecash token
-      let paymentToken = null;
-      try {
-        const sendResult = await this._walletOps.sendEcash(agentId, query.price_sats);
-        paymentToken = sendResult.token;
-      } catch (err) {
-        // Payment failed — agent does not pay
-        const wrapped = new Error(`Payment failed: ${err.message}`);
-        wrapped.statusCode = 402;
-        throw wrapped;
-      }
+      const chargeReference = `analytics:${Date.now()}:${queryId}`;
+      const charge = await this._chargeAgent(agentId, query.price_sats, 'analytics', chargeReference);
 
       // Reserve concurrency slot synchronously before any await
       this._activeQueries++;
@@ -289,11 +321,14 @@ export class AnalyticsGateway {
         // Log to query history
         await this._logQuery(agentId, queryId, params, query.price_sats, executionMs, true);
 
-        logWalletOperation(agentId, 'analytics_query', query.price_sats, true);
+        if (charge.source === 'wallet') {
+          logWalletOperation(agentId, 'analytics_query', query.price_sats, true);
+        }
 
         return {
           query_id: queryId,
           price_sats: query.price_sats,
+          payment_source: charge.source,
           results,
           execution_ms: executionMs,
           learn: query.learn,
@@ -304,16 +339,19 @@ export class AnalyticsGateway {
         // Query failed after payment — REFUND
         let refundSuccess = false;
         try {
-          await this._walletOps.receiveEcash(agentId, paymentToken);
-          refundSuccess = true;
-          logWalletOperation(agentId, 'analytics_refund', query.price_sats, true);
+          refundSuccess = await this._refundCharge(agentId, query.price_sats, charge, queryErr.message);
+          if (charge.source === 'wallet') {
+            logWalletOperation(agentId, 'analytics_refund', query.price_sats, true);
+          }
         } catch (refundErr) {
           console.error(
             `[AnalyticsGateway] CRITICAL: Refund failed for agent ${agentId}, ` +
             `query ${queryId}, amount ${query.price_sats} sats. ` +
-            `Token: ${paymentToken?.slice(0, 40)}... Error: ${refundErr.message}`
+            `Payment source: ${charge.source}. Error: ${refundErr.message}`
           );
-          logWalletOperation(agentId, 'analytics_refund', query.price_sats, false);
+          if (charge.source === 'wallet') {
+            logWalletOperation(agentId, 'analytics_refund', query.price_sats, false);
+          }
         }
 
         // Log failed query

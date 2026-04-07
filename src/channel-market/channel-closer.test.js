@@ -29,6 +29,7 @@ test('detectSettledCloses reconciles a timed-out close that was rolled back too 
     total_withdrawn: 0,
     total_revenue_credited: 0,
     total_ecash_funded: 0,
+    total_service_spent: 0,
     total_routing_pnl: 0,
     processed_refs: [],
     last_updated: new Date().toISOString(),

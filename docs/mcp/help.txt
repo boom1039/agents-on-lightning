@@ -32,5 +32,6 @@ It may cost sats.
 ## Rules
 
 - keep the same bearer token for the whole file
+- help will use wallet ecash first and available capital second if wallet balance is too low
 - if the route returns `402`, stop honestly and fund the agent before retrying
 - do not look for `/api/v1/capital/help`; help is global

@@ -360,6 +360,54 @@ export class HelpEndpoint {
     }
   }
 
+  async _chargeAgent(agentId, amount, service, reference) {
+    let walletBalance = 0;
+    try {
+      walletBalance = await this._walletOps.getBalance(agentId);
+    } catch {
+      walletBalance = 0;
+    }
+
+    if (walletBalance >= amount) {
+      try {
+        const sendResult = await this._walletOps.sendEcash(agentId, amount);
+        return { source: 'wallet', token: sendResult.token, reference, service };
+      } catch (err) {
+        if (!String(err?.message || '').includes('Insufficient')) {
+          throw err;
+        }
+      }
+    }
+
+    if (this._capitalLedger) {
+      const capitalBalance = await this._capitalLedger.getBalance(agentId);
+      if ((capitalBalance?.available || 0) >= amount) {
+        await this._capitalLedger.spendOnService(agentId, amount, reference, service);
+        return { source: 'capital', token: null, reference, service };
+      }
+    }
+
+    const balErr = new Error(
+      `Insufficient balance for help query (costs ${amount} sats). ` +
+      'Fund your wallet with POST /api/v1/wallet/mint-quote, or keep sats in available capital.'
+    );
+    balErr.status = 402;
+    throw balErr;
+  }
+
+  async _refundCharge(agentId, amount, charge, reason) {
+    if (!charge) return false;
+    if (charge.source === 'wallet' && charge.token) {
+      await this._walletOps.receiveEcash(agentId, charge.token);
+      return true;
+    }
+    if (charge.source === 'capital' && this._capitalLedger) {
+      await this._capitalLedger.refundServiceSpend(agentId, amount, charge.reference, charge.service, reason);
+      return true;
+    }
+    return false;
+  }
+
   async _callAnthropicWithGuards(userMessage) {
     this._ensureCircuitClosed();
 
@@ -467,7 +515,7 @@ export class HelpEndpoint {
       try {
         const capitalBalance = await this._capitalLedger.getBalance(agentId);
         if (capitalBalance !== undefined && capitalBalance !== null) {
-          parts.push(`CAPITAL BALANCE: ${capitalBalance} sats`);
+          parts.push(`CAPITAL BALANCE: available=${capitalBalance.available} locked=${capitalBalance.locked} pending_deposit=${capitalBalance.pending_deposit} pending_close=${capitalBalance.pending_close}`);
           sources.push('capital_ledger');
         }
       } catch { /* skip */ }
@@ -546,22 +594,10 @@ export class HelpEndpoint {
     const costSats = classification.cost_sats;
 
     // --- Debit Cashu wallet ---
-    let paymentToken = null;
+    let charge = null;
     let rateLimitConsumed = false;
-    try {
-      const sendResult = await this._walletOps.sendEcash(agentId, costSats);
-      paymentToken = sendResult.token;
-    } catch (err) {
-      if (err.message?.includes('Insufficient')) {
-        const balErr = new Error(
-          `Insufficient balance for help query (costs ${costSats} sats). ` +
-          `Fund your wallet: POST /api/v1/wallet/mint-quote`,
-        );
-        balErr.status = 402;
-        throw balErr;
-      }
-      throw err;
-    }
+    const chargeReference = `help:${Date.now()}`;
+    charge = await this._chargeAgent(agentId, costSats, 'help', chargeReference);
 
     // --- Increment rate limit AFTER successful payment ---
     await checkAndIncrement(rlKey, this._rateLimit, this._rateWindowMs);
@@ -629,15 +665,15 @@ export class HelpEndpoint {
         answer: safeAnswerText,
         sources,
         cost_sats: costSats,
+        payment_source: charge.source,
         learn,
       };
     } catch (err) {
       // --- Refund on LLM failure ---
       let refundSuccess = false;
-      if (paymentToken) {
+      if (charge) {
         try {
-          await this._walletOps.receiveEcash(agentId, paymentToken);
-          refundSuccess = true;
+          refundSuccess = await this._refundCharge(agentId, costSats, charge, err.message);
         } catch {
           console.error(`[HelpEndpoint] Refund failed for agent ${agentId}, ${costSats} sats lost`);
         }

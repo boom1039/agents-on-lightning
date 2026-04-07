@@ -34,6 +34,7 @@ function emptyState() {
     total_withdrawn: 0,
     total_revenue_credited: 0,
     total_ecash_funded: 0,
+    total_service_spent: 0,
     total_routing_pnl: 0,
     processed_refs: [],
     last_updated: new Date().toISOString(),
@@ -75,12 +76,12 @@ function assertNonNegativeSats(amount, label) {
  *
  * total_deposited + total_revenue_credited + total_ecash_funded =
  *   available + locked + pending_deposit + pending_close +
- *   total_withdrawn + total_routing_pnl
+ *   total_withdrawn + total_service_spent + total_routing_pnl
  */
 function assertInvariant(state, context) {
   const lhs = state.total_deposited + state.total_revenue_credited + state.total_ecash_funded;
   const rhs = state.available + state.locked + state.pending_deposit +
-              state.pending_close + state.total_withdrawn + state.total_routing_pnl;
+              state.pending_close + state.total_withdrawn + state.total_service_spent + state.total_routing_pnl;
   if (lhs !== rhs) {
     throw new Error(
       `INVARIANT VIOLATION [${context}]: ` +
@@ -88,6 +89,7 @@ function assertInvariant(state, context) {
       `total_ecash_funded(${state.total_ecash_funded}) = ${lhs} != ` +
       `available(${state.available}) + locked(${state.locked}) + pending_deposit(${state.pending_deposit}) + ` +
       `pending_close(${state.pending_close}) + total_withdrawn(${state.total_withdrawn}) + ` +
+      `total_service_spent(${state.total_service_spent}) + ` +
       `total_routing_pnl(${state.total_routing_pnl}) = ${rhs}`
     );
   }
@@ -99,7 +101,7 @@ function assertInvariant(state, context) {
 function assertNoNegativeBalances(state, context) {
   const fields = ['available', 'locked', 'pending_deposit', 'pending_close',
                   'total_deposited', 'total_withdrawn', 'total_revenue_credited',
-                  'total_ecash_funded'];
+                  'total_ecash_funded', 'total_service_spent'];
   for (const field of fields) {
     if (state[field] < 0) {
       throw new Error(`NEGATIVE BALANCE [${context}]: ${field} = ${state[field]}`);
@@ -162,7 +164,7 @@ export class CapitalLedger {
       // Validate loaded state has all required fields
       const required = ['available', 'locked', 'pending_deposit', 'pending_close',
                         'total_deposited', 'total_withdrawn', 'total_revenue_credited',
-                        'total_ecash_funded', 'total_routing_pnl'];
+                        'total_ecash_funded', 'total_service_spent', 'total_routing_pnl'];
       for (const field of required) {
         if (typeof state[field] !== 'number' || !Number.isFinite(state[field])) {
           // Migration: accept old field name total_routing_losses
@@ -174,6 +176,10 @@ export class CapitalLedger {
           // Migration: total_ecash_funded added in Plan J — default to 0
           if (field === 'total_ecash_funded' && state[field] === undefined) {
             state.total_ecash_funded = 0;
+            continue;
+          }
+          if (field === 'total_service_spent' && state[field] === undefined) {
+            state.total_service_spent = 0;
             continue;
           }
           throw new Error(`Corrupt state for ${agentId}: field '${field}' is ${state[field]}`);
@@ -239,6 +245,7 @@ export class CapitalLedger {
       total_withdrawn: state.total_withdrawn,
       total_revenue_credited: state.total_revenue_credited,
       total_ecash_funded: state.total_ecash_funded,
+      total_service_spent: state.total_service_spent,
       total_routing_pnl: state.total_routing_pnl,
     };
   }
@@ -818,6 +825,122 @@ export class CapitalLedger {
         agent_id: agentId,
         amount_sats: amount,
         destination_address: destinationAddress,
+        balance_after: this._balanceSummary(state),
+      });
+
+      return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
+   * Spend available capital on a paid platform service.
+   * available -= amount, total_service_spent += amount
+   */
+  async spendOnService(agentId, amount, reference, service) {
+    assertAgentId(agentId);
+    assertPositiveSats(amount, 'service spend amount');
+    if (!reference || typeof reference !== 'string') {
+      throw new Error('spendOnService requires a reference string');
+    }
+    if (!service || typeof service !== 'string') {
+      throw new Error('spendOnService requires a service string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+      assertNotDuplicate(state, `svc:${reference}`, `spendOnService:${agentId}`);
+
+      if (state.available < amount) {
+        throw new Error(
+          `Insufficient available balance for ${agentId}: ` +
+          `has ${state.available}, need ${amount}`
+        );
+      }
+
+      state.available -= amount;
+      state.total_service_spent += amount;
+
+      await this._writeState(agentId, state, `spendOnService:${agentId}`);
+
+      const activity = {
+        agent_id: agentId,
+        type: 'service_spent',
+        service,
+        amount_sats: amount,
+        from_bucket: 'available',
+        to_bucket: 'service_spent',
+        reference,
+        balance_after: this._balanceSummary(state),
+      };
+      await this._logActivity(activity);
+      await this._logAudit({
+        type: 'service_spent',
+        service,
+        agent_id: agentId,
+        amount_sats: amount,
+        reference,
+        balance_after: this._balanceSummary(state),
+      });
+
+      return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
+   * Refund a previously recorded service spend back into available capital.
+   * available += amount, total_service_spent -= amount
+   */
+  async refundServiceSpend(agentId, amount, reference, service, reason = null) {
+    assertAgentId(agentId);
+    assertPositiveSats(amount, 'service refund amount');
+    if (!reference || typeof reference !== 'string') {
+      throw new Error('refundServiceSpend requires a reference string');
+    }
+    if (!service || typeof service !== 'string') {
+      throw new Error('refundServiceSpend requires a service string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+      assertNotDuplicate(state, `svr:${reference}`, `refundServiceSpend:${agentId}`);
+
+      if (state.total_service_spent < amount) {
+        throw new Error(
+          `Insufficient total_service_spent for ${agentId}: ` +
+          `has ${state.total_service_spent}, need ${amount}`
+        );
+      }
+
+      state.available += amount;
+      state.total_service_spent -= amount;
+
+      await this._writeState(agentId, state, `refundServiceSpend:${agentId}`);
+
+      const activity = {
+        agent_id: agentId,
+        type: 'service_refund',
+        service,
+        amount_sats: amount,
+        from_bucket: 'service_spent',
+        to_bucket: 'available',
+        reference,
+        reason: reason || null,
+        balance_after: this._balanceSummary(state),
+      };
+      await this._logActivity(activity);
+      await this._logAudit({
+        type: 'service_refund',
+        service,
+        agent_id: agentId,
+        amount_sats: amount,
+        reference,
+        reason: reason || null,
         balance_after: this._balanceSummary(state),
       });
 

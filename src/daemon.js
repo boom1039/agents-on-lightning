@@ -158,16 +158,17 @@ export class AgentDaemon {
     this.channelMonitor.start();
 
     // 7. Channel market
-    this.analyticsGateway = new AnalyticsGateway({
-      walletOps: this.agentCashuWallet,
-      dataLayer: this.dataLayer,
-      ledger: this.publicLedger,
-    });
-
     this.capitalLedger = new CapitalLedger({
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
+    });
+
+    this.analyticsGateway = new AnalyticsGateway({
+      walletOps: this.agentCashuWallet,
+      dataLayer: this.dataLayer,
+      ledger: this.publicLedger,
+      capitalLedger: this.capitalLedger,
     });
 
     this.spendingVelocity = new SpendingVelocityTracker(getSpendingVelocitySettings(this.config));

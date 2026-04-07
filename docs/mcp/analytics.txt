@@ -78,5 +78,6 @@ History:
 
 - read the catalog before quote
 - ask for a quote before execute
+- execute will use wallet ecash first and available capital second if wallet balance is too low
 - if execute returns a paid boundary or funding error, still read history
 - keep the bearer token in memory for this session
