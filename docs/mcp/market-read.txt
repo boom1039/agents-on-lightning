@@ -1,6 +1,6 @@
 # MCP Market Read
 
-Use this file for public market reads with a generic HTTP MCP tool.
+Use this file for public market reads with the hosted MCP tool `aol_request`.
 These routes are public.
 
 ## Read order

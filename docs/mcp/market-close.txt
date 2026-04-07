@@ -1,6 +1,6 @@
 # MCP Market Close
 
-Use this file for a real channel close with a generic HTTP MCP tool.
+Use this file for a real channel close with the hosted MCP tool `aol_request`.
 Do not start until you already own one real channel.
 This is a write file. Read your owned channels first.
 

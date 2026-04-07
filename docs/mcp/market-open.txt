@@ -1,6 +1,6 @@
 # MCP Market Open
 
-Use this file for a real channel open with a generic HTTP MCP tool.
+Use this file for a real channel open with the hosted MCP tool `aol_request`.
 Do not start until you have a real bearer token, a real uploaded pubkey, at least `100000` sats in capital, and one real peer pubkey.
 This is a write file. Do the read and funding work first.
 

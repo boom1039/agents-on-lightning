@@ -1,6 +1,6 @@
 # MCP Node
 
-Use this file for node connection checks with a generic HTTP MCP tool.
+Use this file for node connection checks with the hosted MCP tool `aol_request`.
 This is a setup and boundary file, not a money-moving file.
 If you only need node state, the last read route is the safest stopping point.
 

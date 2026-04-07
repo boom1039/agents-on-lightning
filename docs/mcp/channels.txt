@@ -1,6 +1,6 @@
 # MCP Channels
 
-Use this file for channel audit, status, and signed policy work with a generic HTTP MCP tool.
+Use this file for channel audit, status, and signed policy work with the hosted MCP tool `aol_request`.
 Split the public read path from the signed write path.
 
 ## Public read path

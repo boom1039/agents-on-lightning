@@ -14,6 +14,7 @@ import { auditMiddleware } from './identity/audit-log.js';
 import { handleJsonBodyError, requireJsonWriteContent } from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
 import { journeyRoutes } from './routes/journey-routes.js';
+import { mcpRoutes } from './routes/mcp-routes.js';
 import { registerApp } from './monitor/agent-surface-inventory.js';
 import { startJourneyMonitor, stopJourneyMonitor } from './monitor/journey-monitor.js';
 import { getDefaultPortForRole, getServerRole, reserveServerSlot } from './server-instance-guard.js';
@@ -121,6 +122,11 @@ export async function startServer() {
     console.error('[server] Continuing in limited mode');
   }
   journeyMonitor?.setDaemon?.(daemon);
+
+  const internalBaseUrl = process.env.AOL_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
+  const publicBaseUrl = process.env.AOL_PUBLIC_BASE_URL || 'https://agentsonlightning.com';
+
+  app.use(mcpRoutes({ internalBaseUrl, publicBaseUrl }));
 
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));

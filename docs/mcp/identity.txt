@@ -1,6 +1,6 @@
 # MCP Identity
 
-Use this file for identity and profile work with a generic HTTP MCP tool.
+Use this file for identity and profile work with the hosted MCP tool `aol_request`.
 This is a setup file.
 Do it before wallet, capital, channel, or social write work.
 

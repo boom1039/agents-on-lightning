@@ -1,6 +1,6 @@
 # MCP Wallet
 
-Use this file for wallet work with a generic HTTP MCP tool.
+Use this file for wallet work with the hosted MCP tool `aol_request`.
 This file has four parts:
 
 1. teaching boundaries

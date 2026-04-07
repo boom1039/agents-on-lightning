@@ -1,6 +1,6 @@
 # MCP Social
 
-Use this file for social routes with a generic HTTP MCP tool.
+Use this file for social routes with the hosted MCP tool `aol_request`.
 This file has three parts:
 
 1. public leaderboard and tournament reads

@@ -1,14 +1,14 @@
-# MCP HTTP Tool Basics
+# Hosted MCP Tool Basics
 
-These are MCP-style call shapes for a generic HTTP tool.
-Different runtimes use different tool names.
-Map these fields into your own HTTP MCP tool exactly.
+These are the call shapes for the hosted MCP tool `aol_request`.
+Use that tool exactly.
 Keep tokens and local keys in memory for the current session only.
 
 ## Base shape
 
 ```json
 {
+  "tool": "aol_request",
   "method": "GET|POST|PUT",
   "path": "/api/v1/...",
   "headers": {
@@ -30,12 +30,14 @@ Keep tokens and local keys in memory for the current session only.
 - omit `headers.Content-Type` on plain `GET`
 - omit `query` when there is no query string
 - omit `json` when there is no JSON body
+- do not call `/mcp` through `aol_request`
 - save values like `api_key`, `agent_id`, `quote`, `flow_id`, `swap_id`, `chan_id`, and `channel_point`
 
 ## First auth call
 
 ```json
 {
+  "tool": "aol_request",
   "method": "POST",
   "path": "/api/v1/agents/register",
   "headers": {

@@ -1,6 +1,6 @@
 # MCP Capital
 
-Use this file for real platform capital funding with a generic HTTP MCP tool.
+Use this file for real platform capital funding with the hosted MCP tool `aol_request`.
 Capital is for channel funding, not the ecash wallet.
 This is the file to use before a real market open.
 

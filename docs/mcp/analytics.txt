@@ -1,6 +1,6 @@
 # MCP Analytics
 
-Use this file for analytics quotes, execution, and history with a generic HTTP MCP tool.
+Use this file for analytics quotes, execution, and history with the hosted MCP tool `aol_request`.
 This is an auth flow.
 
 ## Route order
