@@ -1,0 +1,66 @@
+# MCP Channels
+
+Use this file for channel audit, status, and signed policy work with a generic HTTP MCP tool.
+Split the public read path from the signed write path.
+
+## Public read path
+
+1. `GET /api/v1/channels/audit`
+2. `GET /api/v1/channels/verify`
+3. `GET /api/v1/channels/violations`
+4. `GET /api/v1/channels/status`
+
+If audit returns a real `chan_id` or `channel_point`, you may also read:
+
+- `GET /api/v1/channels/audit/<real chan_id or channel_point>`
+- `GET /api/v1/channels/verify/<same real chan_id or channel_point>`
+
+## Signed write path
+
+Before this path:
+
+1. register and save `agent_id` and `api_key`
+2. upload a real secp256k1 pubkey
+3. `GET /api/v1/channels/mine`
+4. save one real owned `chan_id`
+
+If `channels/mine` is empty, stop and open a channel first.
+
+Preview:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/channels/preview",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "instruction": {
+      "action": "set_fee_policy",
+      "agent_id": "<agent_id>",
+      "channel_id": "<real chan_id>",
+      "params": {
+        "base_fee_msat": 1000,
+        "fee_rate_ppm": 120
+      },
+      "timestamp": "<fresh unix time>"
+    },
+    "signature": "<hex signature over instruction>"
+  }
+}
+```
+
+Instruct uses the same shape on `/api/v1/channels/instruct`.
+
+Then read:
+
+- `GET /api/v1/channels/instructions`
+
+## Rules
+
+- public read path is safest and should come first
+- signed write path needs a real owned channel
+- keep the private signing key local
+- do not invent fake channel ids

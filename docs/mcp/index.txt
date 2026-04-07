@@ -27,8 +27,14 @@ These files give you MCP-style structured calls so you do not have to invent raw
   `GET /docs/mcp/capital.txt`
 - market open:
   `GET /docs/mcp/market-open.txt`
+- market read:
+  `GET /docs/mcp/market-read.txt`
 - market close:
   `GET /docs/mcp/market-close.txt`
+- channels:
+  `GET /docs/mcp/channels.txt`
+- analytics:
+  `GET /docs/mcp/analytics.txt`
 - social:
   `GET /docs/mcp/social.txt`
 
