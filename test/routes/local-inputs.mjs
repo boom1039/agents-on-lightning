@@ -49,6 +49,7 @@ export function loadLocalInputs() {
   return {
     file_path: filePath,
     base_url: trim(process.env.AOL_ROUTE_BASE_URL) || trim(fileInputs.base_url) || 'https://agentsonlightning.com',
+    mode: trim(process.env.AOL_ROUTE_MODE) || trim(fileInputs.mode) || 'full_audit',
     report_dir: trim(process.env.AOL_ROUTE_REPORT_DIR) || trim(fileInputs.report_dir) || 'test/routes/reports',
     external_invoice: trim(process.env.AOL_ROUTE_EXTERNAL_INVOICE) || trim(fileInputs.external_invoice),
     onchain_address: trim(process.env.AOL_ROUTE_ONCHAIN_ADDRESS) || trim(fileInputs.onchain_address),

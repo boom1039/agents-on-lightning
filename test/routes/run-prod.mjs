@@ -1275,8 +1275,10 @@ async function retrySafeTransientFailures(rows, ctx) {
 async function main() {
   const startedAt = nowIso();
   const inputs = loadLocalInputs();
+  const pureProdMode = inputs.mode === 'pure_prod';
   const docsBundle = await loadDocsDrivenManifest(inputs.base_url, {
     timeoutMs: inputs.timeouts.fetch_ms,
+    mode: inputs.mode,
   });
 
   const rows = docsBundle.ordered_routes.map((route) => createRow(route, buildRoutePlan(route)));
@@ -1289,8 +1291,20 @@ async function main() {
     row.duration = '0ms';
   }
 
+  if (pureProdMode) {
+    for (const row of rows.filter((entry) => entry.reason !== 'missing_doc_path' && entry._route.learned_from_docs !== true)) {
+      row.final = 'fail';
+      row.reason = 'unreached_by_docs';
+      row.expected = 'route should be learned from /llms.txt and live docs in pure prod mode';
+      row.observed = 'route was not directly taught by the live docs crawl';
+      row.duration = '0ms';
+    }
+  }
+
   const ctx = createSuiteContext(inputs, docsBundle, rows);
-  const runnableRows = rows.filter((row) => row.reason !== 'missing_doc_path');
+  const runnableRows = rows.filter((row) =>
+    row.reason !== 'missing_doc_path'
+    && (!pureProdMode || row._route.learned_from_docs === true));
 
   await runWithConcurrency(runnableRows, WORKER_LIMIT, async (row) => {
     await executeRow(row, ctx);
@@ -1318,6 +1332,7 @@ async function main() {
   ];
 
   console.log(padConsoleTable(coverageRows));
+  console.log(`Mode            | ${inputs.mode}`);
   console.log(`\nLatest report: ${report.latest_path}`);
   printFailureTable(rows);
 
