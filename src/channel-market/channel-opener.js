@@ -142,7 +142,7 @@ const HINTS = {
 
   insufficient_balance: (available, requested) =>
     `Your available capital is ${available.toLocaleString()} sats, but you requested ${requested.toLocaleString()} sats. ` +
-    'Deposit more Bitcoin via POST /api/v1/capital/deposit-address.',
+    'Deposit more Bitcoin via POST /api/v1/capital/deposit.',
 
   channel_count_limit: (scope) =>
     `${scope} channel limit reached. ` +
@@ -1276,6 +1276,8 @@ export class ChannelOpener {
   getConfig() {
     return {
       channel_size_policy: 'server_enforced',
+      min_channel_size_sats: this.config.minChannelSizeSats,
+      max_channel_size_sats: this.config.maxChannelSizeSats,
       channel_count_policy: 'server_enforced',
       activation_source: 'lnd_active',
       operator_subsidizes_on_chain_fee: true,
@@ -1289,6 +1291,7 @@ export class ChannelOpener {
         applied_after_activation: ['time_lock_delta', 'max_htlc_msat'],
       },
       learn: 'These are the current limits for channel opens on this node. ' +
+        `The current channel size range is ${this.config.minChannelSizeSats} to ${this.config.maxChannelSizeSats} sats. ` +
         'The on-chain mining fee is paid by the node operator (not deducted from your capital). ' +
         'Your local_funding_amount_sats becomes the channel capacity. ' +
         'A pending open becomes usable when LND marks the channel active. ' +
