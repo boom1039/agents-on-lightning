@@ -178,6 +178,66 @@ const MCP_TOOL_SPECS = [
     description: 'Read your assigned channels with a bearer token.',
   },
   {
+    name: 'aol_build_open_channel_instruction',
+    description: 'Build the exact channel-open instruction object to sign locally.',
+  },
+  {
+    name: 'aol_preview_open_channel',
+    description: 'Submit a signed channel-open preview with a bearer token.',
+  },
+  {
+    name: 'aol_open_channel',
+    description: 'Submit a signed real channel-open request with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_pending',
+    description: 'Read your pending channel opens with a bearer token.',
+  },
+  {
+    name: 'aol_build_close_channel_instruction',
+    description: 'Build the exact channel-close instruction object to sign locally.',
+  },
+  {
+    name: 'aol_close_channel',
+    description: 'Submit a signed channel-close request with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_closes',
+    description: 'Read your channel close list with a bearer token.',
+  },
+  {
+    name: 'aol_build_channel_policy_instruction',
+    description: 'Build the exact channel-policy instruction object to sign locally.',
+  },
+  {
+    name: 'aol_preview_channel_policy',
+    description: 'Submit a signed channel-policy preview with a bearer token.',
+  },
+  {
+    name: 'aol_instruct_channel_policy',
+    description: 'Submit a signed channel-policy change with a bearer token.',
+  },
+  {
+    name: 'aol_get_channel_instructions',
+    description: 'Read your pending channel instructions with a bearer token.',
+  },
+  {
+    name: 'aol_estimate_rebalance',
+    description: 'Estimate a rebalance for one owned channel with a bearer token.',
+  },
+  {
+    name: 'aol_build_rebalance_instruction',
+    description: 'Build the exact rebalance instruction object to sign locally.',
+  },
+  {
+    name: 'aol_rebalance_channel',
+    description: 'Submit a signed rebalance request with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_rebalances',
+    description: 'Read your rebalance list with a bearer token.',
+  },
+  {
     name: 'aol_send_message',
     description: 'Send one message to another agent with a bearer token.',
   },
@@ -337,6 +397,48 @@ async function performSiteRequest({
     headers: selectResponseHeaders(response.headers),
     body,
     summary,
+  };
+}
+
+async function resolveAgentIdForApiKey({ internalBaseUrl, apiKey }) {
+  const result = await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const agentId = result.body?.agent_id || result.body?.id || result.body?.state?.agent_id || null;
+  if (result.error || !result.ok || !agentId) {
+    throw new Error('Could not resolve agent identity from api_key.');
+  }
+  return agentId;
+}
+
+function buildInstruction({ action, agentId, params = {}, timestamp, extra = {} }) {
+  return {
+    action,
+    agent_id: agentId,
+    ...extra,
+    params,
+    timestamp: timestamp ?? Date.now(),
+  };
+}
+
+function instructionToolResult(instruction) {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          instruction,
+          signing_payload: JSON.stringify(instruction),
+        }, null, 2),
+      },
+    ],
+    structuredContent: {
+      instruction,
+      signing_payload: JSON.stringify(instruction),
+    },
   };
 }
 
@@ -928,6 +1030,267 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/channels/mine',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_build_open_channel_instruction', {
+    description: 'Build the exact channel-open instruction object to sign locally.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      local_funding_amount_sats: z.number().int().positive().describe('Channel funding amount in sats.'),
+      peer_pubkey: z.string().describe('Real peer pubkey.'),
+      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+    },
+  }, async ({ api_key, local_funding_amount_sats, peer_pubkey, timestamp }) => {
+    const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
+    return instructionToolResult(buildInstruction({
+      action: 'channel_open',
+      agentId,
+      params: {
+        local_funding_amount_sats,
+        peer_pubkey,
+      },
+      timestamp,
+    }));
+  });
+
+  server.registerTool('aol_preview_open_channel', {
+    description: 'Submit a signed channel-open preview with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+    },
+  }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/preview',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_open_channel', {
+    description: 'Submit a signed real channel-open request with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/open',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_market_pending', {
+    description: 'Read your pending channel opens with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/pending',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_build_close_channel_instruction', {
+    description: 'Build the exact channel-close instruction object to sign locally.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      channel_point: z.string().describe('Real channel_point to close.'),
+      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+    },
+  }, async ({ api_key, channel_point, timestamp }) => {
+    const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
+    return instructionToolResult(buildInstruction({
+      action: 'channel_close',
+      agentId,
+      params: { channel_point },
+      timestamp,
+    }));
+  });
+
+  server.registerTool('aol_close_channel', {
+    description: 'Submit a signed channel-close request with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_close_channel_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/close',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_market_closes', {
+    description: 'Read your channel close list with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/closes',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_build_channel_policy_instruction', {
+    description: 'Build the exact channel-policy instruction object to sign locally.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      channel_id: z.string().describe('Real owned chan_id.'),
+      base_fee_msat: z.number().int().nonnegative().optional().describe('Optional base fee in msat.'),
+      fee_rate_ppm: z.number().int().nonnegative().optional().describe('Optional fee rate in ppm.'),
+      min_htlc_msat: z.number().int().nonnegative().optional().describe('Optional min HTLC in msat.'),
+      max_htlc_msat: z.number().int().positive().optional().describe('Optional max HTLC in msat.'),
+      time_lock_delta: z.number().int().positive().optional().describe('Optional CLTV delta.'),
+      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+    },
+  }, async ({ api_key, channel_id, base_fee_msat, fee_rate_ppm, min_htlc_msat, max_htlc_msat, time_lock_delta, timestamp }) => {
+    const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
+    const params = {};
+    if (base_fee_msat !== undefined) params.base_fee_msat = base_fee_msat;
+    if (fee_rate_ppm !== undefined) params.fee_rate_ppm = fee_rate_ppm;
+    if (min_htlc_msat !== undefined) params.min_htlc_msat = min_htlc_msat;
+    if (max_htlc_msat !== undefined) params.max_htlc_msat = max_htlc_msat;
+    if (time_lock_delta !== undefined) params.time_lock_delta = time_lock_delta;
+    if (Object.keys(params).length === 0) {
+      return {
+        content: [{ type: 'text', text: 'Provide at least one policy field to change.' }],
+        isError: true,
+      };
+    }
+    return instructionToolResult(buildInstruction({
+      action: 'set_fee_policy',
+      agentId,
+      params,
+      timestamp,
+      extra: { channel_id },
+    }));
+  });
+
+  server.registerTool('aol_preview_channel_policy', {
+    description: 'Submit a signed channel-policy preview with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+    },
+  }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/channels/preview',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_instruct_channel_policy', {
+    description: 'Submit a signed channel-policy change with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/channels/instruct',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_channel_instructions', {
+    description: 'Read your pending channel instructions with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/instructions',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_estimate_rebalance', {
+    description: 'Estimate a rebalance for one owned channel with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      outbound_chan_id: z.string().describe('Real owned outbound chan_id.'),
+      amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
+    },
+  }, async ({ api_key, outbound_chan_id, amount_sats }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/rebalance/estimate',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { outbound_chan_id, amount_sats },
+  })));
+
+  server.registerTool('aol_build_rebalance_instruction', {
+    description: 'Build the exact rebalance instruction object to sign locally.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      outbound_chan_id: z.string().describe('Real owned outbound chan_id.'),
+      amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
+      max_fee_sats: z.number().int().nonnegative().describe('Maximum fee in sats.'),
+      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+    },
+  }, async ({ api_key, outbound_chan_id, amount_sats, max_fee_sats, timestamp }) => {
+    const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
+    return instructionToolResult(buildInstruction({
+      action: 'rebalance',
+      agentId,
+      params: { outbound_chan_id, amount_sats, max_fee_sats },
+      timestamp,
+    }));
+  });
+
+  server.registerTool('aol_rebalance_channel', {
+    description: 'Submit a signed rebalance request with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_rebalance_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/rebalance',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_market_rebalances', {
+    description: 'Read your rebalance list with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/rebalances',
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 

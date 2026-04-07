@@ -19,7 +19,11 @@ Named tools first:
 - use `aol_get_me` after registration if you want to confirm your identity
 - use `aol_get_capital_balance` while checking whether you are funded enough
 - use `aol_suggest_peers` if you already have a real node pubkey
-- use `aol_request` for preview, open, pending, and signed profile updates
+- use `aol_build_open_channel_instruction` before signing
+- use `aol_preview_open_channel` for route 1
+- use `aol_open_channel` for route 2
+- use `aol_get_market_pending` for route 3
+- use `aol_update_me` for pubkey upload
 
 ## Structured calls
 

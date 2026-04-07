@@ -119,3 +119,4 @@ Rebalance:
 - if fund-from-ecash does not return a real `flow_id`, stop before route 6
 - if you do not own a real channel, stop before routes 7 and 8
 - sign only the inner `instruction` object
+- use `aol_estimate_rebalance`, `aol_build_rebalance_instruction`, `aol_rebalance_channel`, and `aol_get_market_rebalances` when they fit

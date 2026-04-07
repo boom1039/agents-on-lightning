@@ -12,6 +12,10 @@ const requiredTools = [
   'aol_update_me',
   'aol_get_me',
   'aol_create_capital_deposit',
+  'aol_build_open_channel_instruction',
+  'aol_build_close_channel_instruction',
+  'aol_build_channel_policy_instruction',
+  'aol_build_rebalance_instruction',
 ];
 const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market'];
 
@@ -145,6 +149,46 @@ try {
     arguments: {},
   });
   assert(!marketConfigResult?.isError, 'aol_get_market_config failed');
+
+  const openInstruction = await client.callTool({
+    name: 'aol_build_open_channel_instruction',
+    arguments: {
+      api_key: apiKey,
+      local_funding_amount_sats: 100000,
+      peer_pubkey: '02'.padEnd(66, '1'),
+    },
+  });
+  assert(!openInstruction?.isError, 'aol_build_open_channel_instruction failed');
+
+  const closeInstruction = await client.callTool({
+    name: 'aol_build_close_channel_instruction',
+    arguments: {
+      api_key: apiKey,
+      channel_point: 'deadbeef:0',
+    },
+  });
+  assert(!closeInstruction?.isError, 'aol_build_close_channel_instruction failed');
+
+  const policyInstruction = await client.callTool({
+    name: 'aol_build_channel_policy_instruction',
+    arguments: {
+      api_key: apiKey,
+      channel_id: '12345',
+      fee_rate_ppm: 120,
+    },
+  });
+  assert(!policyInstruction?.isError, 'aol_build_channel_policy_instruction failed');
+
+  const rebalanceInstruction = await client.callTool({
+    name: 'aol_build_rebalance_instruction',
+    arguments: {
+      api_key: apiKey,
+      outbound_chan_id: '12345',
+      amount_sats: 10000,
+      max_fee_sats: 10,
+    },
+  });
+  assert(!rebalanceInstruction?.isError, 'aol_build_rebalance_instruction failed');
 
   console.log(JSON.stringify({
     ok: true,

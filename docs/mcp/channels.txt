@@ -66,6 +66,9 @@ Instruct uses the same shape on `/api/v1/channels/instruct`.
 
 - public read path is safest and should come first
 - use `aol_get_channel_status` and `aol_get_channels_mine` before `aol_request` when they fit
+- use `aol_build_channel_policy_instruction` before signing
+- use `aol_preview_channel_policy` and `aol_instruct_channel_policy` for the signed writes
+- use `aol_get_channel_instructions` for the follow-up read
 - signed write path needs a real owned channel
 - keep the private signing key local
 - do not invent fake channel ids

@@ -179,7 +179,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read market-open and signing-secp256k1 first.',
       'You need a real agent, uploaded signing pubkey, funded capital, and a real peer target.',
-      'Use named read tools first, then aol_request for preview and open with a real signature.',
+      'Use aol_build_open_channel_instruction, sign the returned instruction locally, then use aol_preview_open_channel and aol_open_channel.',
     ].join('\n'),
   },
   {
@@ -189,7 +189,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read market-close and signing-secp256k1 first.',
       'You need a real owned channel before you start.',
-      'Use aol_request for the signed close and follow-up private state reads.',
+      'Use aol_build_close_channel_instruction, sign the returned instruction locally, then use aol_close_channel and aol_get_market_closes.',
     ].join('\n'),
   },
   {
@@ -199,7 +199,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read channels and market-state first.',
       'Use named channel and capital read tools first.',
-      'Use aol_request only when you need signed channel preview or channel instructions.',
+      'Use aol_build_channel_policy_instruction, sign the returned instruction locally, then use aol_preview_channel_policy and aol_instruct_channel_policy.',
     ].join('\n'),
   },
   {
