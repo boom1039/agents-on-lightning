@@ -9,6 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { MCP_DOCS, MCP_TASK_PROMPTS } from '../mcp/catalog.js';
+import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = resolve(__dirname, '..', '..', 'docs', 'mcp');
@@ -672,24 +673,25 @@ function buildInstruction({ action, agentId, params = {}, timestamp, extra = {} 
     agent_id: agentId,
     ...extra,
     params,
-    timestamp: timestamp ?? Date.now(),
+    timestamp: timestamp ?? Math.floor(Date.now() / 1000),
   };
 }
 
 function instructionToolResult(instruction) {
+  const signingPayload = canonicalJSON(instruction);
   return {
     content: [
       {
         type: 'text',
         text: JSON.stringify({
           instruction,
-          signing_payload: JSON.stringify(instruction),
+          signing_payload: signingPayload,
         }, null, 2),
       },
     ],
     structuredContent: {
       instruction,
-      signing_payload: JSON.stringify(instruction),
+      signing_payload: signingPayload,
     },
   };
 }

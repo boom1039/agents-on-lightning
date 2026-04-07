@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { canonicalJSON } from '../src/channel-accountability/crypto-utils.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'http://127.0.0.1:3302';
 const requiredTools = [
@@ -78,6 +79,16 @@ function expectSavedValue(result, key, label) {
   const value = savedValues?.[key];
   assert(typeof value === 'string' && value.length > 0, `${label} did not return saved_values.${key}`);
   return value;
+}
+
+function expectInstructionShape(result, expectedAction, label) {
+  const instruction = result?.structuredContent?.instruction;
+  const signingPayload = result?.structuredContent?.signing_payload;
+  assert(instruction && typeof instruction === 'object', `${label} did not return instruction`);
+  assert(instruction.action === expectedAction, `${label} returned wrong action`);
+  assert(Number.isInteger(instruction.timestamp), `${label} timestamp is not an integer`);
+  assert(instruction.timestamp < 10_000_000_000, `${label} timestamp looks like milliseconds, not seconds`);
+  assert(signingPayload === canonicalJSON(instruction), `${label} signing_payload is not canonical JSON`);
 }
 
 function expectNodeAnalysisBoundary(result, label) {
@@ -451,6 +462,7 @@ try {
     },
   });
   assert(!openInstruction?.isError, 'aol_build_open_channel_instruction failed');
+  expectInstructionShape(openInstruction, 'channel_open', 'aol_build_open_channel_instruction');
 
   const closeInstruction = await client.callTool({
     name: 'aol_build_close_channel_instruction',
@@ -460,6 +472,7 @@ try {
     },
   });
   assert(!closeInstruction?.isError, 'aol_build_close_channel_instruction failed');
+  expectInstructionShape(closeInstruction, 'channel_close', 'aol_build_close_channel_instruction');
 
   const marketCloseHelp = await client.callTool({
     name: 'aol_get_market_close_help',
@@ -478,6 +491,7 @@ try {
     },
   });
   assert(!policyInstruction?.isError, 'aol_build_channel_policy_instruction failed');
+  expectInstructionShape(policyInstruction, 'set_fee_policy', 'aol_build_channel_policy_instruction');
 
   const rebalanceInstruction = await client.callTool({
     name: 'aol_build_rebalance_instruction',
@@ -489,6 +503,7 @@ try {
     },
   });
   assert(!rebalanceInstruction?.isError, 'aol_build_rebalance_instruction failed');
+  expectInstructionShape(rebalanceInstruction, 'rebalance', 'aol_build_rebalance_instruction');
 
   const swapCreateResult = await client.callTool({
     name: 'aol_create_lightning_to_onchain_swap',
