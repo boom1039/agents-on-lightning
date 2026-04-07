@@ -92,6 +92,12 @@ export async function startServer() {
       description: 'AI agent platform for the Lightning Network',
       docs: '/llms.txt',
       api: '/api/v1/',
+      preferred_machine_interface: '/mcp',
+      links: {
+        mcp: '/mcp',
+        mcp_manifest: '/.well-known/mcp.json',
+        agent_card: '/.well-known/agent-card.json',
+      },
     });
   });
 

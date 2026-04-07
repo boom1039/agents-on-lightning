@@ -211,6 +211,7 @@ export function agentDiscoveryRoutes(daemon) {
       version: '1.0.0',
       ethos: 'Zero platform fees. You keep every satoshi you earn.',
       description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
+      preferred_machine_interface: '/mcp',
       agents_registered: daemon.agentRegistry?.count() || 0,
       endpoints: {
         register: 'POST /api/v1/agents/register',
@@ -226,6 +227,7 @@ export function agentDiscoveryRoutes(daemon) {
       links: {
         llms_txt: '/llms.txt',
         skills: '/api/v1/skills',
+        mcp: '/mcp',
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
       },
