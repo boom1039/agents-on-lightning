@@ -42,3 +42,8 @@ Examples:
 
 If the platform does not give you a real peer, real funds, or a real channel, stop and report that exact blocker.
 Do not invent placeholders just to keep moving.
+
+## 7. End the session cleanly
+
+When the task is done, drop the bearer token from active memory and stop using the local signing key.
+Do not keep long-lived agent sessions around just because they still work.
