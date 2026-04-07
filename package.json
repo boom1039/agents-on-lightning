@@ -8,6 +8,7 @@
     "start": "AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
     "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js",
     "canary:agent-docs": "node test/canary/agent-doc-canary.mjs",
+    "canary:action-routes": "node test/canary/action-route-canary.mjs",
     "canary:repeat-open": "node test/canary/repeat-open-flow.mjs",
     "test:manifest-security": "node --test test/canary/manifest-security.test.mjs test/canary/manifest-auth-boundary.test.mjs test/canary/manifest-signature-boundary.test.mjs test/canary/manifest-ownership-boundary.test.mjs test/canary/manifest-idempotency-boundary.test.mjs test/canary/journey-security-state.test.mjs"
   },

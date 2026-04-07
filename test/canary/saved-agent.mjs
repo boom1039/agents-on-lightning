@@ -14,8 +14,8 @@ async function readJson(path) {
 }
 
 export async function loadSavedAgent({
-  agentId = `${process.env.AOL_REPEAT_AGENT_ID || ''}`.trim(),
-  metadataPath = `${process.env.AOL_REPEAT_AGENT_METADATA_PATH || ''}`.trim(),
+  agentId = `${process.env.AOL_CANARY_AGENT_ID || process.env.AOL_REPEAT_AGENT_ID || ''}`.trim(),
+  metadataPath = `${process.env.AOL_CANARY_AGENT_METADATA_PATH || process.env.AOL_REPEAT_AGENT_METADATA_PATH || ''}`.trim(),
   rootDir = DEFAULT_ROOT,
 } = {}) {
   if (metadataPath) {
