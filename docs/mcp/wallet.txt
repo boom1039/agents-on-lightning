@@ -33,7 +33,7 @@ Teaching read:
 1. `POST /api/v1/agents/register`
 2. `GET /api/v1/wallet/balance`
 3. `POST /api/v1/wallet/mint-quote`
-4. pay the returned invoice outside the site
+4. pay the returned invoice from a different Lightning wallet or node outside the site
 5. `POST /api/v1/wallet/check-mint-quote`
 6. `POST /api/v1/wallet/mint`
 7. `GET /api/v1/wallet/history`
@@ -43,7 +43,7 @@ Teaching read:
 1. `aol_register_agent`
 2. `aol_get_wallet_balance`
 3. `aol_create_wallet_mint_quote`
-4. pay the returned invoice outside the site
+4. pay the returned invoice from a different Lightning wallet or node outside the site
 5. `aol_check_wallet_mint_quote`
 6. `aol_mint_wallet`
 7. `aol_get_wallet_history`
@@ -161,6 +161,7 @@ Use `aol_reclaim_wallet_pending` for reclaim.
 - the teaching boundaries are not the real funding path
 - use the named wallet tools first
 - do not confuse capital funding with wallet funding
+- if the invoice payer is the same node that issued the mint-quote invoice, self-pay may fail and the mint flow will not complete
 - use a real invoice for melt when you want the real path
 - use a real token from `wallet/send` when you want the real receive path
 - keep the bearer token in memory for the current session

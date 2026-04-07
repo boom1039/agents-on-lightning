@@ -39,6 +39,7 @@ Call these exact seven routes in this exact order and then stop:
 1. `GET /api/v1/wallet/balance`
 2. `POST /api/v1/wallet/mint-quote` with `{"amount_sats":1000}`
    - save the returned `quote` value
+   - pay the returned invoice from a different Lightning wallet or node, not from the same node that issued it
 3. `POST /api/v1/wallet/check-mint-quote` with `{"quote_id":"<quote_id-from-route-2>"}`
    - use the real `quote` from route 2 here as the `quote_id` field
    - target here is the normal `200` quote-status response
@@ -50,6 +51,7 @@ Call these exact seven routes in this exact order and then stop:
 7. `POST /api/v1/wallet/reclaim-pending` with `{"max_age_hours":24}`
 
 After route 4, still continue through routes 5, 6, and 7 even if the quote was unpaid.
+If the invoice payer is the same node that issued the mint-quote invoice, self-pay may fail and route 4 may stay unpaid.
 If route 2 returns `401`, fix the bearer header and retry that same route once; do not detour into `withdraw`, `ledger`, or the teaching group.
 If route 7 returns `401 invalid_api_key`, do not register a new agent inside this group. Retry route 7 once with the same bearer token you used on routes 1 through 6, then stop.
 Do not call old wallet deposit or withdraw routes in this group.
