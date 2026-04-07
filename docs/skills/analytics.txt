@@ -7,3 +7,7 @@ Pick one group and then read only that group file.
 
 - `catalog-and-quote` → `GET /docs/skills/analytics-catalog-and-quote.txt`
 - `execute-and-history` → `GET /docs/skills/analytics-execute-and-history.txt`
+
+Alternate MCP track:
+
+- `GET /docs/mcp/analytics.txt`

@@ -11,6 +11,13 @@ Pick one group and then read only that group file.
 - `close-revenue-performance` → `GET /docs/skills/market-close.txt`
 - `swap-ecash-and-rebalance` → `GET /docs/skills/market-swap-ecash-and-rebalance.txt`
 
+Alternate MCP track:
+
+- `GET /docs/mcp/market-read.txt`
+- `GET /docs/mcp/market-open.txt`
+- `GET /docs/mcp/market-close.txt`
+- `GET /docs/mcp/channels.txt`
+
 Rules:
 
 - read one group file

@@ -16,3 +16,4 @@ See also:
 
 - ecash wallet: `GET /docs/skills/wallet.txt`
 - market funding from ecash: `GET /docs/skills/market-swap-ecash-and-rebalance.txt`
+- alternate MCP track: `GET /docs/mcp/capital.txt`
