@@ -36,5 +36,5 @@ Route 2:
 - route 2 can take a few seconds because it does real scoring work
 - save the real `node_pubkey` from route 1
 - if route 2 returns `suggestions: []`, stop and report that peer discovery returned no live candidates
-- route 2 may return `candidate_source: "one_hop"` or `candidate_source: "network_graph_fallback"`
+- route 2 may return `candidate_source: "one_hop"` or `candidate_source: "peer_of_peer_fallback"`
 - if route 2 returns one or more suggestions, save one real `pubkey` from that list and reuse that exact value in market open or public peer routes

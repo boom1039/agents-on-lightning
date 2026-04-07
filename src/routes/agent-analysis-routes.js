@@ -18,42 +18,44 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PYTHON3 = process.env.PYTHON3 || 'python3';
 const SUGGEST_PEERS_SCRIPT = resolve(__dirname, '..', 'analysis', 'suggest-peers.py');
 
-function buildGraphFallbackCandidates(graph = {}, excluded = new Set(), limit = 30) {
-  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  const edges = Array.isArray(graph.edges) ? graph.edges : [];
-  if (nodes.length === 0 || edges.length === 0) return [];
+async function buildPeerOfPeerFallbackCandidates(client, firstHopPubkeys = [], excluded = new Set(), limit = 30) {
+  const secondHopPubkeys = new Set();
 
-  const nodeMap = new Map(nodes.map((node) => [node.pub_key, node]));
-  const stats = new Map();
+  const scans = await Promise.all(
+    firstHopPubkeys.slice(0, 5).map(async (pubkey) => {
+      try {
+        return await client._get(`/v1/graph/node/${pubkey}?include_channels=true`);
+      } catch {
+        return null;
+      }
+    }),
+  );
 
-  for (const edge of edges) {
-    const node1 = edge.node1_pub;
-    const node2 = edge.node2_pub;
-    const capacity = Number.parseInt(edge.capacity || '0', 10) || 0;
-
-    for (const pubkey of [node1, node2]) {
-      if (!pubkey || excluded.has(pubkey)) continue;
-      const current = stats.get(pubkey) || { num_channels: 0, total_capacity: 0 };
-      current.num_channels += 1;
-      current.total_capacity += capacity;
-      stats.set(pubkey, current);
+  for (const scan of scans) {
+    for (const ch of scan?.channels || []) {
+      if (ch.node1_pub && !excluded.has(ch.node1_pub)) secondHopPubkeys.add(ch.node1_pub);
+      if (ch.node2_pub && !excluded.has(ch.node2_pub)) secondHopPubkeys.add(ch.node2_pub);
     }
   }
 
-  return [...stats.entries()]
-    .map(([pubkey, stat]) => ({
-      pubkey,
-      alias: nodeMap.get(pubkey)?.alias || '',
-      num_channels: stat.num_channels,
-      total_capacity: String(stat.total_capacity),
-    }))
-    .sort((a, b) => {
-      const capDiff = (Number.parseInt(b.total_capacity || '0', 10) || 0)
-        - (Number.parseInt(a.total_capacity || '0', 10) || 0);
-      if (capDiff !== 0) return capDiff;
-      return (b.num_channels || 0) - (a.num_channels || 0);
-    })
-    .slice(0, limit);
+  const pubkeys = [...secondHopPubkeys].slice(0, limit);
+  const candidates = await Promise.all(
+    pubkeys.map(async (pubkey) => {
+      try {
+        const info = await client.getNodeInfo(pubkey);
+        return {
+          pubkey,
+          alias: info.node?.alias || '',
+          num_channels: info.num_channels || 0,
+          total_capacity: info.total_capacity || '0',
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return candidates.filter(Boolean);
 }
 
 export function agentAnalysisRoutes(daemon) {
@@ -211,12 +213,11 @@ export function agentAnalysisRoutes(daemon) {
       let result = await scoreCandidates(candidates);
 
       if (result.total_candidates_considered === 0) {
-        const graph = await client.describeGraph(false).catch(() => null);
-        const excluded = new Set([...myPeers, req.params.pubkey]);
-        const fallbackCandidates = buildGraphFallbackCandidates(graph, excluded, 30);
+        const excluded = new Set([...myPeers, req.params.pubkey, ...peerList]);
+        const fallbackCandidates = await buildPeerOfPeerFallbackCandidates(client, peerList, excluded, 30);
         if (fallbackCandidates.length > 0) {
           candidates = fallbackCandidates;
-          candidateSource = 'network_graph_fallback';
+          candidateSource = 'peer_of_peer_fallback';
           result = await scoreCandidates(candidates);
         }
       }
