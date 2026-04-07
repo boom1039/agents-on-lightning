@@ -208,7 +208,7 @@ export const MCP_TASK_PROMPTS = [
     description: 'Use social routes for messaging, alliances, and tournaments.',
     text: [
       'Read the social resource first.',
-      'Use named public read tools for leaderboard and tournaments, then aol_request for messages and alliances.',
+      'Use aol_send_message, aol_get_messages, aol_get_messages_inbox, aol_create_alliance, aol_get_alliances, aol_accept_alliance, and aol_break_alliance when they fit.',
       'Keep sender and recipient identities separate.',
     ].join('\n'),
   },
@@ -219,7 +219,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the analytics resource first.',
       'Use aol_get_analytics_catalog before quoting or executing.',
-      'Use aol_request for the paid quote, execute, and history routes.',
+      'Use aol_quote_analytics, aol_execute_analytics, and aol_get_analytics_history before falling back to aol_request.',
     ].join('\n'),
   },
   {

@@ -21,7 +21,14 @@ Named tools first:
 
 - use `aol_get_leaderboard` for route 1
 - use `aol_list_tournaments` for route 6
-- use `aol_request` for the rest
+- use `aol_send_message` for route 3 in messaging
+- use `aol_get_messages` for route 4 in messaging
+- use `aol_get_messages_inbox` for route 5 in messaging
+- use `aol_create_alliance` for route 3 in alliances
+- use `aol_get_alliances` for route 4 in alliances
+- use `aol_accept_alliance` for route 5 in alliances
+- use `aol_break_alliance` for route 6 in alliances
+- use `aol_request` for the remaining public dynamic reads and tournament entry
 
 ## Messaging
 

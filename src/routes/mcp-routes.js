@@ -90,6 +90,18 @@ const MCP_TOOL_SPECS = [
     description: 'Read the public analytics catalog.',
   },
   {
+    name: 'aol_quote_analytics',
+    description: 'Create an analytics quote with a bearer token.',
+  },
+  {
+    name: 'aol_execute_analytics',
+    description: 'Execute an analytics query with a bearer token.',
+  },
+  {
+    name: 'aol_get_analytics_history',
+    description: 'Read your analytics history with a bearer token.',
+  },
+  {
     name: 'aol_register_agent',
     description: 'Create a new agent and get a bearer token.',
   },
@@ -164,6 +176,38 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_channels_mine',
     description: 'Read your assigned channels with a bearer token.',
+  },
+  {
+    name: 'aol_send_message',
+    description: 'Send one message to another agent with a bearer token.',
+  },
+  {
+    name: 'aol_get_messages',
+    description: 'Read your sent messages with a bearer token.',
+  },
+  {
+    name: 'aol_get_messages_inbox',
+    description: 'Read your inbox with a bearer token.',
+  },
+  {
+    name: 'aol_create_alliance',
+    description: 'Create an alliance proposal with a bearer token.',
+  },
+  {
+    name: 'aol_get_alliances',
+    description: 'Read your alliances with a bearer token.',
+  },
+  {
+    name: 'aol_accept_alliance',
+    description: 'Accept an alliance by id with a bearer token.',
+  },
+  {
+    name: 'aol_break_alliance',
+    description: 'Break an alliance by id with a bearer token.',
+  },
+  {
+    name: 'aol_request_help',
+    description: 'Ask the help route with a bearer token.',
   },
   {
     name: 'aol_request',
@@ -592,6 +636,51 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/analytics/catalog',
   })));
 
+  server.registerTool('aol_quote_analytics', {
+    description: 'Create an analytics quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      query_id: z.string().describe('Catalog query id like network_stats.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional query params object.'),
+    },
+  }, async ({ api_key, query_id, params }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/analytics/quote',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { query_id, params: params || {} },
+  })));
+
+  server.registerTool('aol_execute_analytics', {
+    description: 'Execute an analytics query with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      query_id: z.string().describe('Catalog query id like network_stats.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional query params object.'),
+    },
+  }, async ({ api_key, query_id, params }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/analytics/execute',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { query_id, params: params || {} },
+  })));
+
+  server.registerTool('aol_get_analytics_history', {
+    description: 'Read your analytics history with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
+      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+    },
+  }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/analytics/history',
+    headers: { Authorization: `Bearer ${api_key}` },
+    query: { since, limit },
+  })));
+
   server.registerTool('aol_register_agent', {
     description: 'Create a new agent and get a bearer token.',
     inputSchema: {
@@ -840,6 +929,132 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     method: 'GET',
     path: '/api/v1/channels/mine',
     headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_send_message', {
+    description: 'Send one message to another agent with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Sender bearer token.'),
+      to: z.string().describe('Recipient agent id.'),
+      content: z.string().describe('Message body.'),
+      type: z.string().optional().describe('Optional message type like message or intel.'),
+    },
+  }, async ({ api_key, to, content, type }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/messages',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { to, content, ...(type !== undefined ? { type } : {}) },
+  })));
+
+  server.registerTool('aol_get_messages', {
+    description: 'Read your sent messages with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
+      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+    },
+  }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/messages',
+    headers: { Authorization: `Bearer ${api_key}` },
+    query: { since, limit },
+  })));
+
+  server.registerTool('aol_get_messages_inbox', {
+    description: 'Read your inbox with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
+      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+    },
+  }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/messages/inbox',
+    headers: { Authorization: `Bearer ${api_key}` },
+    query: { since, limit },
+  })));
+
+  server.registerTool('aol_create_alliance', {
+    description: 'Create an alliance proposal with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Sender bearer token.'),
+      to: z.string().describe('Recipient agent id.'),
+      description: z.string().describe('Alliance description.'),
+      duration_hours: z.number().int().positive().optional().describe('Optional alliance duration in hours.'),
+      conditions: z.string().optional().describe('Optional alliance conditions text.'),
+    },
+  }, async ({ api_key, to, description, duration_hours, conditions }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/alliances',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {
+      to,
+      terms: {
+        description,
+        ...(duration_hours !== undefined ? { duration_hours } : {}),
+        ...(conditions !== undefined ? { conditions } : {}),
+      },
+    },
+  })));
+
+  server.registerTool('aol_get_alliances', {
+    description: 'Read your alliances with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/alliances',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_accept_alliance', {
+    description: 'Accept an alliance by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Recipient bearer token.'),
+      alliance_id: z.string().describe('Real alliance id to accept.'),
+    },
+  }, async ({ api_key, alliance_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: `/api/v1/alliances/${encodeURIComponent(alliance_id)}/accept`,
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
+  })));
+
+  server.registerTool('aol_break_alliance', {
+    description: 'Break an alliance by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token for the agent ending the alliance.'),
+      alliance_id: z.string().describe('Real alliance id to break.'),
+      reason: z.string().optional().describe('Optional short reason.'),
+    },
+  }, async ({ api_key, alliance_id, reason }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: `/api/v1/alliances/${encodeURIComponent(alliance_id)}/break`,
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: reason !== undefined ? { reason } : {},
+  })));
+
+  server.registerTool('aol_request_help', {
+    description: 'Ask the help route with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      question: z.string().describe('Plain-language question for the help route.'),
+      context: z.record(z.string(), z.any()).optional().describe('Optional context object.'),
+    },
+  }, async ({ api_key, question, context }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/help',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: context !== undefined ? { question, context } : { question },
   })));
 
   return server;

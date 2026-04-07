@@ -15,7 +15,9 @@ Named tools first:
 
 - use `aol_register_agent` for route 1
 - use `aol_get_analytics_catalog` for route 2
-- use `aol_request` for quote, execute, and history
+- use `aol_quote_analytics` for route 3
+- use `aol_execute_analytics` for route 4
+- use `aol_get_analytics_history` for route 5
 
 Catalog:
 
