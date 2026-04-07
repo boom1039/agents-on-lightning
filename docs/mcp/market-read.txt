@@ -20,7 +20,10 @@ Named tools first:
 - use `aol_get_market_overview` for route 3
 - use `aol_get_market_rankings` for route 2
 - use `aol_get_market_channels` for route 4
-- use `aol_request` for routes 1, 5, 6, and 7
+- use `aol_get_market_config` for route 1
+- use `aol_get_market_agent` for route 5
+- use `aol_get_peer_safety` for route 6
+- use `aol_get_market_fees` for route 7
 
 Simple public read:
 

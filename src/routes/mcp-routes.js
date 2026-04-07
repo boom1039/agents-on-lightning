@@ -38,6 +38,10 @@ const MCP_TOOL_SPECS = [
     description: 'Read block height, sync state, and platform node info.',
   },
   {
+    name: 'aol_get_market_config',
+    description: 'Read the public market config and channel-open rules.',
+  },
+  {
     name: 'aol_get_capabilities',
     description: 'Read the tier and capability map.',
   },
@@ -90,8 +94,20 @@ const MCP_TOOL_SPECS = [
     description: 'Create a new agent and get a bearer token.',
   },
   {
+    name: 'aol_update_me',
+    description: 'Update your own agent profile with a bearer token.',
+  },
+  {
     name: 'aol_get_me',
     description: 'Read your own agent profile with a bearer token.',
+  },
+  {
+    name: 'aol_get_agent_profile',
+    description: 'Read one public agent profile by agent id.',
+  },
+  {
+    name: 'aol_get_agent_lineage',
+    description: 'Read one public agent lineage tree by agent id.',
   },
   {
     name: 'aol_get_wallet_balance',
@@ -102,6 +118,18 @@ const MCP_TOOL_SPECS = [
     description: 'Read your wallet history with a bearer token.',
   },
   {
+    name: 'aol_create_wallet_mint_quote',
+    description: 'Create a wallet mint quote with a bearer token.',
+  },
+  {
+    name: 'aol_check_wallet_mint_quote',
+    description: 'Check a wallet mint quote with a bearer token.',
+  },
+  {
+    name: 'aol_mint_wallet',
+    description: 'Mint wallet funds from a paid mint quote with a bearer token.',
+  },
+  {
     name: 'aol_get_capital_balance',
     description: 'Read your capital balance with a bearer token.',
   },
@@ -110,8 +138,28 @@ const MCP_TOOL_SPECS = [
     description: 'Read your capital activity with a bearer token.',
   },
   {
+    name: 'aol_create_capital_deposit',
+    description: 'Create a capital deposit address with a bearer token.',
+  },
+  {
+    name: 'aol_get_capital_deposits',
+    description: 'Read your capital deposits with a bearer token.',
+  },
+  {
     name: 'aol_suggest_peers',
     description: 'Read suggested peer candidates for a node pubkey.',
+  },
+  {
+    name: 'aol_get_peer_safety',
+    description: 'Read public peer safety information by pubkey.',
+  },
+  {
+    name: 'aol_get_market_fees',
+    description: 'Read public market fee competition for a peer pubkey.',
+  },
+  {
+    name: 'aol_get_market_agent',
+    description: 'Read one public market agent view by agent id.',
   },
   {
     name: 'aol_get_channels_mine',
@@ -425,6 +473,15 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/platform/status',
   })));
 
+  server.registerTool('aol_get_market_config', {
+    description: 'Read the public market config and channel-open rules.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/config',
+  })));
+
   server.registerTool('aol_get_capabilities', {
     description: 'Read the tier and capability map.',
     inputSchema: {},
@@ -547,6 +604,38 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     json: { name },
   })));
 
+  server.registerTool('aol_update_me', {
+    description: 'Update your own agent profile with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      name: z.string().optional().describe('Optional new public name.'),
+      description: z.string().optional().describe('Optional public description.'),
+      framework: z.string().optional().describe('Optional framework label.'),
+      contact_url: z.string().optional().describe('Optional contact URL.'),
+      pubkey: z.string().optional().describe('Optional secp256k1 signing pubkey for signed routes.'),
+    },
+  }, async ({ api_key, name, description, framework, contact_url, pubkey }) => {
+    const json = {};
+    if (name !== undefined) json.name = name;
+    if (description !== undefined) json.description = description;
+    if (framework !== undefined) json.framework = framework;
+    if (contact_url !== undefined) json.contact_url = contact_url;
+    if (pubkey !== undefined) json.pubkey = pubkey;
+    if (Object.keys(json).length === 0) {
+      return {
+        content: [{ type: 'text', text: 'Provide at least one profile field to update.' }],
+        isError: true,
+      };
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'PUT',
+      path: '/api/v1/agents/me',
+      headers: { Authorization: `Bearer ${api_key}` },
+      json,
+    }));
+  });
+
   server.registerTool('aol_get_me', {
     description: 'Read your own agent profile with a bearer token.',
     inputSchema: {
@@ -557,6 +646,28 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     method: 'GET',
     path: '/api/v1/agents/me',
     headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_agent_profile', {
+    description: 'Read one public agent profile by agent id.',
+    inputSchema: {
+      agent_id: z.string().describe('Public 8-character agent id.'),
+    },
+  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/agents/${encodeURIComponent(agent_id)}`,
+  })));
+
+  server.registerTool('aol_get_agent_lineage', {
+    description: 'Read one public agent lineage tree by agent id.',
+    inputSchema: {
+      agent_id: z.string().describe('Public 8-character agent id.'),
+    },
+  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/agents/${encodeURIComponent(agent_id)}/lineage`,
   })));
 
   server.registerTool('aol_get_wallet_balance', {
@@ -583,6 +694,49 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
+  server.registerTool('aol_create_wallet_mint_quote', {
+    description: 'Create a wallet mint quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
+    },
+  }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/mint-quote',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats },
+  })));
+
+  server.registerTool('aol_check_wallet_mint_quote', {
+    description: 'Check a wallet mint quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      quote_id: z.string().describe('Real quote_id returned by wallet mint quote.'),
+    },
+  }, async ({ api_key, quote_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/check-mint-quote',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { quote_id },
+  })));
+
+  server.registerTool('aol_mint_wallet', {
+    description: 'Mint wallet funds from a paid mint quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
+      quote_id: z.string().describe('Real paid quote_id returned by wallet mint quote.'),
+    },
+  }, async ({ api_key, amount_sats, quote_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/mint',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats, quote_id },
+  })));
+
   server.registerTool('aol_get_capital_balance', {
     description: 'Read your capital balance with a bearer token.',
     inputSchema: {
@@ -607,6 +761,31 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
+  server.registerTool('aol_create_capital_deposit', {
+    description: 'Create a capital deposit address with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/capital/deposit',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
+  })));
+
+  server.registerTool('aol_get_capital_deposits', {
+    description: 'Read your capital deposits with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/capital/deposits',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
   server.registerTool('aol_suggest_peers', {
     description: 'Read suggested peer candidates for a node pubkey.',
     inputSchema: {
@@ -616,6 +795,39 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: `/api/v1/analysis/suggest-peers/${node_pubkey}`,
+  })));
+
+  server.registerTool('aol_get_peer_safety', {
+    description: 'Read public peer safety information by pubkey.',
+    inputSchema: {
+      peer_pubkey: z.string().describe('Real peer pubkey to inspect.'),
+    },
+  }, async ({ peer_pubkey }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/peer-safety/${peer_pubkey}`,
+  })));
+
+  server.registerTool('aol_get_market_fees', {
+    description: 'Read public market fee competition for a peer pubkey.',
+    inputSchema: {
+      peer_pubkey: z.string().describe('Real peer pubkey to inspect.'),
+    },
+  }, async ({ peer_pubkey }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/fees/${peer_pubkey}`,
+  })));
+
+  server.registerTool('aol_get_market_agent', {
+    description: 'Read one public market agent view by agent id.',
+    inputSchema: {
+      agent_id: z.string().describe('Public 8-character agent id.'),
+    },
+  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/agent/${encodeURIComponent(agent_id)}`,
   })));
 
   server.registerTool('aol_get_channels_mine', {

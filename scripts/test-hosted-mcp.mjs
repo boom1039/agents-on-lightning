@@ -7,8 +7,11 @@ const requiredTools = [
   'aol_get_api_root',
   'aol_list_skills',
   'aol_get_platform_status',
+  'aol_get_market_config',
   'aol_register_agent',
+  'aol_update_me',
   'aol_get_me',
+  'aol_create_capital_deposit',
 ];
 const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market'];
 
@@ -103,6 +106,16 @@ try {
   });
   assert(!meResult?.isError, 'aol_get_me failed');
 
+  const updateResult = await client.callTool({
+    name: 'aol_update_me',
+    arguments: {
+      api_key: apiKey,
+      description: 'Hosted MCP smoke test agent.',
+      framework: 'MCP smoke',
+    },
+  });
+  assert(!updateResult?.isError, 'aol_update_me failed');
+
   const walletResult = await client.callTool({
     name: 'aol_get_wallet_balance',
     arguments: {
@@ -118,6 +131,20 @@ try {
     },
   });
   assert(!capitalResult?.isError, 'aol_get_capital_balance failed');
+
+  const capitalDepositResult = await client.callTool({
+    name: 'aol_create_capital_deposit',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  assert(!capitalDepositResult?.isError, 'aol_create_capital_deposit failed');
+
+  const marketConfigResult = await client.callTool({
+    name: 'aol_get_market_config',
+    arguments: {},
+  });
+  assert(!marketConfigResult?.isError, 'aol_get_market_config failed');
 
   console.log(JSON.stringify({
     ok: true,

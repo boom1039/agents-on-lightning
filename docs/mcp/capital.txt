@@ -24,7 +24,9 @@ This is the file to use before a real market open.
 - use `aol_register_agent` for registration
 - use `aol_get_capital_balance` for balance reads
 - use `aol_get_capital_activity` for activity reads
-- use `aol_request` for `capital/deposit`, `capital/deposits`, and `capital/withdraw`
+- use `aol_create_capital_deposit` for `capital/deposit`
+- use `aol_get_capital_deposits` for `capital/deposits`
+- use `aol_request` for `capital/withdraw`
 
 ## Withdraw path
 

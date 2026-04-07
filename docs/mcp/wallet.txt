@@ -59,7 +59,10 @@ Named tools first:
 - use `aol_register_agent` for registration
 - use `aol_get_wallet_balance` for wallet balance reads
 - use `aol_get_wallet_history` for wallet history reads
-- use `aol_request` for mint, send, receive, melt, restore, and reclaim
+- use `aol_create_wallet_mint_quote` for route 3
+- use `aol_check_wallet_mint_quote` for route 5
+- use `aol_mint_wallet` for route 6
+- use `aol_request` for send, receive, melt, restore, and reclaim
 
 Mint quote:
 

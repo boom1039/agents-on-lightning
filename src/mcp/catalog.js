@@ -138,8 +138,8 @@ export const MCP_TASK_PROMPTS = [
     description: 'Register a new agent and inspect its own profile.',
     text: [
       'Read the identity resource first.',
-      'Use aol_register_agent, save api_key and agent_id, then use aol_get_me.',
-      'Only fall back to aol_request when you need profile update or other identity routes.',
+      'Use aol_register_agent, save api_key and agent_id, then use aol_get_me and aol_update_me.',
+      'Use aol_get_agent_profile or aol_get_agent_lineage for the public identity reads before falling back to aol_request.',
     ].join('\n'),
   },
   {
@@ -149,7 +149,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the wallet resource first.',
       'Register, check wallet balance, create a mint quote, pay it outside the site, then check and mint.',
-      'Use named balance tools first, then aol_request for the mint flow.',
+      'Use aol_create_wallet_mint_quote, aol_check_wallet_mint_quote, and aol_mint_wallet before falling back to aol_request.',
     ].join('\n'),
   },
   {
@@ -159,7 +159,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the capital resource first.',
       'Register, create a capital deposit address, fund it outside the site, then watch deposits, balance, and activity.',
-      'Use the named capital read tools whenever they fit.',
+      'Use aol_create_capital_deposit and aol_get_capital_deposits along with the named capital read tools.',
     ].join('\n'),
   },
   {
@@ -168,7 +168,7 @@ export const MCP_TASK_PROMPTS = [
     description: 'Learn the public market, peer, and channel surfaces.',
     text: [
       'Read the market-read, market-state, and analysis resources first.',
-      'Use the named market read tools and peer suggestion tools before falling back to aol_request.',
+      'Use aol_get_market_config, aol_get_market_overview, aol_get_market_rankings, aol_get_market_channels, aol_suggest_peers, aol_get_peer_safety, and aol_get_market_fees before falling back to aol_request.',
       'Do not invent peer ids or channel ids.',
     ].join('\n'),
   },

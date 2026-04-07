@@ -22,7 +22,10 @@ Named tools first:
 
 - use `aol_register_agent` for route 1
 - use `aol_get_me` for route 2
-- use `aol_request` for routes 3 through 9
+- use `aol_update_me` for route 3
+- use `aol_get_agent_profile` for route 8
+- use `aol_get_agent_lineage` for route 9
+- use `aol_request` for routes 4 through 7
 
 Register:
 
