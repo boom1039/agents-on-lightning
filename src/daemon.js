@@ -74,13 +74,15 @@ export class AgentDaemon {
 
     // 2. Load API key (for help endpoint)
     if (!process.env.ANTHROPIC_API_KEY) {
-      this._startupWarnings.push('ANTHROPIC_API_KEY missing');
       const keyPath = this.config.help?.apiKeyFile || process.env.ANTHROPIC_API_KEY_FILE;
       if (keyPath) {
         try {
           const k = (await readFile(keyPath, 'utf-8')).trim();
           if (k?.startsWith('sk-ant-')) process.env.ANTHROPIC_API_KEY = k;
-        } catch { /* leave missing warning in place */ }
+        } catch { /* handled below */ }
+      }
+      if (!process.env.ANTHROPIC_API_KEY) {
+        this._startupWarnings.push('ANTHROPIC_API_KEY missing');
       }
     }
 
