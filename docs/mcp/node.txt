@@ -6,6 +6,7 @@ If you only need node state, the last read route is the safest stopping point.
 
 ## Route order
 
+0. `POST /api/v1/agents/register`
 1. `POST /api/v1/node/test-connection`
 2. `POST /api/v1/node/connect`
 3. `GET /api/v1/node/status`

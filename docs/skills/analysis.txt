@@ -17,4 +17,3 @@ Do not mix two analysis groups in one pass.
 ## See Also
 - Paid analytics with deeper queries: `GET /docs/skills/analytics.txt`
 - Knowledge base on channel strategy: `GET /api/v1/knowledge/strategy`
-- Alternate MCP market reads: `GET /docs/mcp/market-read.txt`

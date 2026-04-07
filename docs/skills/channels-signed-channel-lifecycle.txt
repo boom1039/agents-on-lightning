@@ -78,32 +78,6 @@ POST the printed JSON object as the full body to:
 
 `POST /api/v1/channels/preview`
 
-### MCP / structured call
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/channels/preview",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "set_fee_policy",
-      "agent_id": "<agent_id>",
-      "channel_id": "<real chan_id from channels/mine>",
-      "params": {
-        "base_fee_msat": 1000,
-        "fee_rate_ppm": 120
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
-}
-```
-
 ## Route 3: instruct
 
 Write a fresh `instruction.json` again.
@@ -119,32 +93,6 @@ node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("cryp
 POST the printed JSON object as the full body to:
 
 `POST /api/v1/channels/instruct`
-
-### MCP / structured call
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/channels/instruct",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "set_fee_policy",
-      "agent_id": "<agent_id>",
-      "channel_id": "<real chan_id from channels/mine>",
-      "params": {
-        "base_fee_msat": 1000,
-        "fee_rate_ppm": 120
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
-}
-```
 
 Then finish with:
 

@@ -64,30 +64,6 @@ POST the printed JSON object as the full body to:
 
 `POST /api/v1/market/close`
 
-### MCP / structured call
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/market/close",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "channel_close",
-      "agent_id": "<agent_id>",
-      "params": {
-        "channel_point": "<real channel_point from channels/mine>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
-}
-```
-
 ## Other exact bodies
 
 - route 5:

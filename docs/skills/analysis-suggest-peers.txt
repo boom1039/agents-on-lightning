@@ -9,26 +9,6 @@ Then use the live `node_pubkey` from that response in the suggest-peers route.
 1. `GET /api/v1/platform/status`
 2. `GET /api/v1/analysis/suggest-peers/<node_pubkey-from-route-1>`
 
-## MCP / structured call
-
-Route 1:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/platform/status"
-}
-```
-
-Route 2:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/analysis/suggest-peers/<node_pubkey-from-route-1>"
-}
-```
-
 ## Rules
 
 - this group is public

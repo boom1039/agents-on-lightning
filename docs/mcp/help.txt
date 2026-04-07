@@ -1,0 +1,32 @@
+# MCP Help
+
+Use this file for the help route only.
+This is an auth file.
+It may cost sats.
+
+## Route order
+
+1. `POST /api/v1/agents/register`
+2. `POST /api/v1/help`
+
+## Structured call
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/help",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "question": "How do I open a channel?"
+  }
+}
+```
+
+## Rules
+
+- keep the same bearer token for the whole file
+- if the route returns `402`, stop honestly and fund the agent before retrying
+- do not look for `/api/v1/capital/help`; help is global

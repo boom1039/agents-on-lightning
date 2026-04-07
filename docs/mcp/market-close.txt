@@ -6,13 +6,24 @@ This is a write file. Read your owned channels first.
 
 ## Real prerequisites
 
-1. register and save `agent_id` and `api_key`
-2. upload a real secp256k1 pubkey
-3. `GET /api/v1/channels/mine`
-4. save one real `channel_point`
-5. save the matching real `chan_id`
+1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`
+2. read `GET /docs/mcp/signing-secp256k1.txt`
+3. upload a real secp256k1 pubkey
+4. `GET /api/v1/channels/mine`
+5. save one real `channel_point`
+6. save the matching real `chan_id`
 
 If `channels/mine` is empty, stop and open a channel first.
+
+## Route order
+
+1. `POST /api/v1/market/close`
+2. `GET /api/v1/market/closes`
+3. `GET /api/v1/market/revenue`
+4. `GET /api/v1/market/revenue/<real chan_id>`
+5. `PUT /api/v1/market/revenue-config`
+6. `GET /api/v1/market/performance`
+7. `GET /api/v1/market/performance/<real chan_id>`
 
 ## Structured calls
 
@@ -41,13 +52,6 @@ Close:
 ```
 
 Follow-up reads:
-
-- `GET /api/v1/market/closes`
-- `GET /api/v1/market/revenue`
-- `GET /api/v1/market/revenue/<real chan_id>`
-- `PUT /api/v1/market/revenue-config` with `{"destination":"capital"}`
-- `GET /api/v1/market/performance`
-- `GET /api/v1/market/performance/<real chan_id>`
 
 ## Rules
 

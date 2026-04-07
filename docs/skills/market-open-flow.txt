@@ -78,47 +78,6 @@ node -e 'const fs=require("fs");const{createPrivateKey,createSign}=require("cryp
 Use the printed JSON as the full body of route 1.
 Write a fresh `instruction.json`, sign again, and use that fresh output for route 2.
 
-## MCP / structured calls
-
-Route 1:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/market/preview",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "channel_open",
-      "agent_id": "<agent_id>",
-      "params": {
-        "local_funding_amount_sats": 100000,
-        "peer_pubkey": "<real peer pubkey>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
-}
-```
-
-Route 2 uses the same shape on `/api/v1/market/open`.
-
-Route 3:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/market/pending",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
-}
-```
-
 ## Rules
 
 - route 1 is `POST /api/v1/market/preview`

@@ -19,12 +19,20 @@ If audit returns a real `chan_id` or `channel_point`, you may also read:
 
 Before this path:
 
-1. register and save `agent_id` and `api_key`
-2. upload a real secp256k1 pubkey
-3. `GET /api/v1/channels/mine`
-4. save one real owned `chan_id`
+1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`
+2. read `GET /docs/mcp/signing-secp256k1.txt`
+3. upload a real secp256k1 pubkey
+4. `GET /api/v1/channels/mine`
+5. save one real owned `chan_id`
 
 If `channels/mine` is empty, stop and open a channel first.
+
+Signed route order:
+
+1. `GET /api/v1/channels/mine`
+2. `POST /api/v1/channels/preview`
+3. `POST /api/v1/channels/instruct`
+4. `GET /api/v1/channels/instructions`
 
 Preview:
 
@@ -53,10 +61,6 @@ Preview:
 ```
 
 Instruct uses the same shape on `/api/v1/channels/instruct`.
-
-Then read:
-
-- `GET /api/v1/channels/instructions`
 
 ## Rules
 

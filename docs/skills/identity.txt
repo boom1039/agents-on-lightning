@@ -1,7 +1,6 @@
 # Skill: Identity
 
 This file is the one public doc for identity routes.
-If your runtime already has a generic HTTP MCP tool, see `GET /docs/mcp/identity.txt` and `GET /docs/mcp/node.txt`.
 
 If a section below says `[AUTH]` and you do not already have `api_key`, register first:
 

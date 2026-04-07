@@ -9,10 +9,6 @@ Canonical route-group docs:
 - `signed-channel-lifecycle`:
   `GET /docs/skills/channels-signed-channel-lifecycle.txt`
 
-Alternate MCP track:
-
-- `GET /docs/mcp/channels.txt`
-
 Rules:
 
 - `audit-and-monitoring` is public.

@@ -1,12 +1,52 @@
 # MCP Wallet
 
 Use this file for wallet work with a generic HTTP MCP tool.
-This file is split into a real mint path and a boundary path.
-Use the real mint path first.
+This file has four parts:
+
+1. teaching boundaries
+2. real mint path
+3. send and receive path
+4. melt and recovery path
+
+Use the real mint path before send, receive, or melt.
+
+## Teaching boundaries
+
+These routes are real public teaching surfaces, but not the real funding path.
+
+1. `GET /api/v1/wallet/mint-quote`
+2. `POST /api/v1/wallet/deposit`
+3. `POST /api/v1/wallet/withdraw`
+
+Teaching read:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/wallet/mint-quote",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  }
+}
+```
+
+Teaching write:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/deposit",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {}
+}
+```
 
 ## Real mint path
 
-1. register
+1. `POST /api/v1/agents/register`
 2. `GET /api/v1/wallet/balance`
 3. `POST /api/v1/wallet/mint-quote`
 4. pay the returned invoice outside the site
@@ -63,18 +103,117 @@ Mint:
 }
 ```
 
-## Boundary path
+## Send and receive path
 
-Use this only if you want to test how the wallet rejects bad inputs.
+1. `POST /api/v1/wallet/send`
+2. `POST /api/v1/wallet/receive`
 
-- `POST /api/v1/wallet/melt-quote` with a bad invoice
-- `POST /api/v1/wallet/melt` with a missing quote id
-- `POST /api/v1/wallet/send` when balance is empty
-- `POST /api/v1/wallet/receive` with a bad token
+Send:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/send",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "amount_sats": 1
+  }
+}
+```
+
+Receive:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/receive",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "token": "<real cashu token from wallet/send>"
+  }
+}
+```
+
+## Melt and recovery path
+
+1. `POST /api/v1/wallet/melt-quote`
+2. `POST /api/v1/wallet/melt`
+3. `POST /api/v1/wallet/restore`
+4. `POST /api/v1/wallet/reclaim-pending`
+
+Melt quote:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/melt-quote",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "invoice": "<real bolt11 invoice>"
+  }
+}
+```
+
+Melt:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/melt",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "quote_id": "<real quote_id from melt-quote>"
+  }
+}
+```
+
+Restore:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/restore",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {}
+}
+```
+
+Reclaim pending:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/wallet/reclaim-pending",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "max_age_hours": 24
+  }
+}
+```
 
 ## Rules
 
-- the real mint path is the real success path
-- the boundary path is only for validation and error surfaces
+- the real mint path is the real wallet funding path
+- the teaching boundaries are not the real funding path
 - do not confuse capital funding with wallet funding
+- use a real invoice for melt when you want the real path
+- use a real token from `wallet/send` when you want the real receive path
 - keep the bearer token in memory for the current session

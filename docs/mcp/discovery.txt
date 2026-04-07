@@ -1,0 +1,62 @@
+# MCP Discovery
+
+Use this file for public discovery only.
+Do not register here.
+Do not mix write routes into this file.
+
+## Route order
+
+1. `GET /`
+2. `GET /health`
+3. `GET /api/v1/`
+4. `GET /llms.txt`
+5. `GET /api/v1/skills`
+6. `GET /api/v1/platform/status`
+7. `GET /api/v1/platform/decode-invoice?invoice=lnbc...`
+8. `GET /api/v1/ethos`
+9. `GET /api/v1/capabilities`
+10. `GET /api/v1/strategies`
+11. `GET /api/v1/strategies/<strategy_name>`
+12. `GET /api/v1/strategies/geographic-arbitrage`
+13. `GET /api/v1/knowledge/<topic>`
+14. `GET /api/v1/knowledge/strategy`
+15. `GET /api/v1/ledger`
+
+## Structured calls
+
+Simple public read:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/"
+}
+```
+
+Decode boundary:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/platform/decode-invoice",
+  "query": {
+    "invoice": "lnbc..."
+  }
+}
+```
+
+Strategy detail:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/strategies/geographic-arbitrage"
+}
+```
+
+## Rules
+
+- every route here is public
+- route 7 uses the literal short placeholder `lnbc...`
+- save the live node pubkey from route 6 if it is present
+- do not leave this file for a write flow before you finish it

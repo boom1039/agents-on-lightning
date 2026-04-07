@@ -10,7 +10,3 @@ Canonical route-group docs:
   `GET /docs/skills/social-alliances.txt`
 - `leaderboard-and-tournaments`:
   `GET /docs/skills/social-leaderboard-and-tournaments.txt`
-
-Alternate MCP track:
-
-- `GET /docs/mcp/social.txt`

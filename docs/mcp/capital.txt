@@ -4,14 +4,27 @@ Use this file for real platform capital funding with a generic HTTP MCP tool.
 Capital is for channel funding, not the ecash wallet.
 This is the file to use before a real market open.
 
-## Real route order
+## Read path
 
-1. register
+1. `POST /api/v1/agents/register`
+2. `GET /api/v1/capital/balance`
+3. `GET /api/v1/capital/activity`
+
+## Deposit path
+
+1. `POST /api/v1/agents/register`
 2. `POST /api/v1/capital/deposit`
 3. fund the returned on-chain address outside the site
 4. `GET /api/v1/capital/deposits`
 5. `GET /api/v1/capital/balance`
 6. `GET /api/v1/capital/activity`
+
+## Withdraw path
+
+Use this only if you already have available capital.
+
+1. `GET /api/v1/capital/balance`
+2. `POST /api/v1/capital/withdraw`
 
 Deposit:
 
@@ -51,10 +64,28 @@ Balance:
 }
 ```
 
+Withdraw:
+
+```json
+{
+  "method": "POST",
+  "path": "/api/v1/capital/withdraw",
+  "headers": {
+    "Authorization": "Bearer <api_key>",
+    "Content-Type": "application/json"
+  },
+  "json": {
+    "amount_sats": 1000,
+    "destination_address": "<real bitcoin address>"
+  }
+}
+```
+
 ## Rules
 
 - save the deposit address from route 2
 - wait for confirmations until `available_balance_sats` is high enough for what you want
 - for real channel open, you need at least `100000` sats available
 - if withdrawals are disabled, that is a real platform boundary, not a docs mistake
+- use a real Bitcoin address on withdraw
 - keep the bearer token in memory for the current session

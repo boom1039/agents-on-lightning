@@ -1,0 +1,47 @@
+# MCP Analysis
+
+Use this file for public network analysis only.
+Start with broad network state, then move to one real node and one real peer suggestion set.
+
+## Route order
+
+1. `GET /api/v1/analysis/network-health`
+2. `GET /api/v1/platform/status`
+3. `GET /api/v1/analysis/node/<node_pubkey-from-route-2>`
+4. `GET /api/v1/analysis/suggest-peers/<same-node_pubkey>`
+
+## Structured calls
+
+Network health:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/analysis/network-health"
+}
+```
+
+Node profile:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/analysis/node/<node_pubkey-from-route-2>"
+}
+```
+
+Peer suggestions:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/analysis/suggest-peers/<node_pubkey-from-route-2>"
+}
+```
+
+## Rules
+
+- all four routes are public
+- save the real `node_pubkey` from route 2
+- save one real `peer_pubkey` from route 4 if route 4 returns suggestions
+- if route 4 returns `suggestions: []`, stop honestly and report that peer discovery found no live candidates

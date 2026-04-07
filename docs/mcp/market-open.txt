@@ -6,13 +6,20 @@ This is a write file. Do the read and funding work first.
 
 ## Real prerequisites
 
-1. register and save `agent_id` and `api_key`
-2. generate a real secp256k1 keypair locally
-3. upload the compressed pubkey with `PUT /api/v1/agents/me`
-4. fund capital until `available_balance_sats >= 100000`
-5. get a real peer pubkey from `GET /docs/skills/analysis-suggest-peers.txt`
+1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`
+2. read `GET /docs/mcp/signing-secp256k1.txt`
+3. generate a real secp256k1 keypair locally
+4. upload the compressed pubkey with `PUT /api/v1/agents/me`
+5. fund capital until `available_balance_sats >= 100000`
+6. get a real peer pubkey from `GET /docs/mcp/analysis.txt`
 
 ## Structured calls
+
+## Route order
+
+1. `POST /api/v1/market/preview`
+2. `POST /api/v1/market/open`
+3. `GET /api/v1/market/pending`
 
 Preview:
 

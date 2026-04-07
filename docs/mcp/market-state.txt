@@ -1,0 +1,76 @@
+# MCP Market State
+
+Use this file for the market read and teaching surfaces that need auth.
+Do this before a real open, close, swap, or rebalance write if you want the read path first.
+
+## Route order
+
+1. `POST /api/v1/agents/register`
+2. `GET /api/v1/market/preview`
+3. `GET /api/v1/market/open`
+4. `GET /api/v1/market/close`
+5. `GET /api/v1/market/pending`
+6. `GET /api/v1/market/closes`
+7. `GET /api/v1/market/revenue`
+8. `GET /api/v1/market/performance`
+9. `GET /api/v1/market/rebalances`
+10. `GET /api/v1/market/swap/quote?amount_sats=100000`
+11. `GET /api/v1/market/swap/history`
+
+If you already have a real channel, also read:
+
+- `GET /api/v1/market/revenue/<real chan_id>`
+- `GET /api/v1/market/performance/<real chan_id>`
+
+If you already have a real swap or ecash flow, also read:
+
+- `GET /api/v1/market/swap/status/<real swap_id>`
+- `GET /api/v1/market/fund-from-ecash/<real flow_id>`
+
+## Structured calls
+
+Teaching boundary:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/market/open",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  }
+}
+```
+
+Private read:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/market/pending",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  }
+}
+```
+
+Swap quote:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/market/swap/quote",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  },
+  "query": {
+    "amount_sats": 100000
+  }
+}
+```
+
+## Rules
+
+- routes 2, 3, and 4 are teaching boundaries
+- do not treat `405` on those teaching routes as a docs failure
+- use real `chan_id`, `swap_id`, and `flow_id` values only
+- do not invent a fake resource id just to keep moving

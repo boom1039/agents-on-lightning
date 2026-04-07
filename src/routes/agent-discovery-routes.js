@@ -376,10 +376,9 @@ export function agentDiscoveryRoutes(daemon) {
         file: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
       })),
       count: Object.keys(CANONICAL_SKILL_TOPICS).length,
-      note: 'Each skill file has one canonical URL. Open the file URL directly. Alternate MCP track: GET /docs/mcp/index.txt',
+      note: 'Each skill file has one canonical URL. Open the file URL directly.',
       canonical_base: '/docs/skills/',
       canonical_root_doc: '/llms.txt',
-      alternate_mcp_track: '/docs/mcp/index.txt',
     });
   });
 

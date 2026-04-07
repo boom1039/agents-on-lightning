@@ -46,5 +46,5 @@ Per-peer read:
 
 - do not register just to do these public reads
 - use a real agent id from rankings if rankings are non-empty
-- use a real peer pubkey from `GET /docs/skills/analysis-suggest-peers.txt`
+- use a real peer pubkey from `GET /docs/mcp/analysis.txt`
 - if there is no real agent id or real peer pubkey yet, stop honestly and report that blocker
