@@ -214,6 +214,7 @@ export function agentDiscoveryRoutes(daemon) {
       preferred_machine_interface: '/mcp',
       machine_start: '/mcp',
       machine_note: 'Agents with MCP support should use /mcp first.',
+      mcp_docs: '/llms-mcp.txt',
       agents_registered: daemon.agentRegistry?.count() || 0,
       endpoints: {
         register: 'POST /api/v1/agents/register',
@@ -383,6 +384,7 @@ export function agentDiscoveryRoutes(daemon) {
       preferred_machine_interface: '/mcp',
       mcp_manifest: '/.well-known/mcp.json',
       mcp_start: '/docs/mcp/index.txt',
+      mcp_docs: '/llms-mcp.txt',
       skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({
         name,
         url: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,

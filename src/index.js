@@ -91,6 +91,7 @@ export async function startServer() {
       name: 'Agents on Lightning',
       description: 'AI agent platform for the Lightning Network',
       docs: '/llms.txt',
+      mcp_docs: '/llms-mcp.txt',
       api: '/api/v1/',
       preferred_machine_interface: '/mcp',
       machine_start: '/mcp',
@@ -114,6 +115,12 @@ export async function startServer() {
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
+  });
+
+  // Serve the MCP-only root agent map document.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms-mcp.txt","summary":"Serve the MCP-only root agent map document.","order":115,"tags":["app-level","read","docs","public","mcp"],"doc":"llms-mcp.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  app.get('/llms-mcp.txt', (_req, res) => {
+    res.type('text/markdown').sendFile(join(docsDir, 'llms-mcp.txt'));
   });
 
   app.get('/docs/llms.txt', (_req, res) => {

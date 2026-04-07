@@ -7,7 +7,9 @@
   "scripts": {
     "start": "AOL_SERVER_ROLE=main PORT=3302 node src/index.js",
     "start:scratch": "AOL_SERVER_ROLE=scratch PORT=3306 node src/index.js",
-    "canary:repeat-open": "node test/canary/repeat-open-flow.mjs"
+    "canary:repeat-open": "node test/canary/repeat-open-flow.mjs",
+    "test:mcp": "node scripts/test-hosted-mcp.mjs",
+    "test:mcp:prod": "AOL_MCP_BASE_URL=https://agentsonlightning.com node scripts/test-hosted-mcp.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

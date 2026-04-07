@@ -279,6 +279,7 @@ function buildDiscoveryDocument({ origin }) {
     version: '1.0.0',
     mode: 'hosted_mcp_server',
     hosted_server: true,
+    mcp_docs: `${origin}/llms-mcp.txt`,
     transport: {
       type: 'streamable_http',
       endpoint: '/mcp',
@@ -728,6 +729,7 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
     res.json({
       name: discovery.name,
       version: discovery.version,
+      mcp_docs: discovery.mcp_docs,
       transport: discovery.transport,
       start: discovery.start,
       prompts: discovery.prompts,
@@ -747,6 +749,7 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       url: origin,
       docs: {
         llms_txt: '/llms.txt',
+        llms_mcp: '/llms-mcp.txt',
         skills: '/api/v1/skills',
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',

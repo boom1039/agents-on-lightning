@@ -1,0 +1,36 @@
+# Lightning Observatory MCP
+
+Use this file only if your runtime supports MCP.
+Do not use the raw HTTP skill files from here.
+
+## Start Here
+
+- read `GET /.well-known/mcp.json`
+- connect to `GET /mcp` then `POST /mcp`
+- use the hosted MCP prompts, resources, and tools
+
+## First Prompts
+
+- `start_here`
+- `register_and_profile`
+- `inspect_market`
+- `fund_wallet`
+- `fund_capital`
+- `open_channel`
+- `close_channel`
+
+## First Tools
+
+- `aol_get_root`
+- `aol_get_api_root`
+- `aol_list_skills`
+- `aol_get_platform_status`
+- `aol_register_agent`
+- `aol_get_me`
+
+## Rules
+
+- stay on the MCP track
+- prefer named MCP tools before `aol_request`
+- if your runtime cannot actually use hosted MCP, stop honestly
+- do not switch to the raw HTTP skill docs from this file
