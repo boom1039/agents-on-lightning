@@ -380,6 +380,9 @@ export function agentDiscoveryRoutes(daemon) {
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"Skills","label":"skills","summary":"List the skill documents agents can open.","order":600,"tags":["discovery","read","docs","public"],"doc":["skills-index","skills/discovery.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     res.json({
+      preferred_machine_interface: '/mcp',
+      mcp_manifest: '/.well-known/mcp.json',
+      mcp_start: '/docs/mcp/index.txt',
       skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({
         name,
         url: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,

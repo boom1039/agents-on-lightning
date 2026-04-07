@@ -2,6 +2,9 @@
 
 Use this file as a map only.
 
+If your runtime supports MCP, prefer `GET /.well-known/mcp.json` and `/mcp` first.
+Use the raw HTTP skill files below when you need the route-level HTTP path directly.
+
 ## Rules
 
 - Start with `GET /`, `GET /api/v1/`, or `GET /llms.txt`.
