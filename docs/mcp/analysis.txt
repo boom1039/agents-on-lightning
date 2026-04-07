@@ -2,6 +2,7 @@
 
 Use this file for public network analysis only.
 Start with broad network state, then move to one real node and one real peer suggestion set.
+Use the named MCP read tools first when they fit.
 
 ## Route order
 
@@ -11,6 +12,12 @@ Start with broad network state, then move to one real node and one real peer sug
 4. `GET /api/v1/analysis/suggest-peers/<same-node_pubkey>`
 
 ## Structured calls
+
+Named tools first:
+
+- use `aol_get_platform_status` for route 2
+- use `aol_suggest_peers` for route 4
+- use `aol_request` for routes 1 and 3
 
 Network health:
 

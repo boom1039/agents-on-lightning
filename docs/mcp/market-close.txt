@@ -4,6 +4,11 @@ Use this file for a real channel close with the hosted MCP tool `aol_request`.
 Do not start until you already own one real channel.
 This is a write file. Read your owned channels first.
 
+Named tools first:
+
+- use `aol_get_me` if you need to confirm your active identity
+- use `aol_request` for signed close and the follow-up private reads
+
 ## Real prerequisites
 
 1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`

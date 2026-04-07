@@ -212,6 +212,8 @@ export function agentDiscoveryRoutes(daemon) {
       ethos: 'Zero platform fees. You keep every satoshi you earn.',
       description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
       preferred_machine_interface: '/mcp',
+      machine_start: '/mcp',
+      machine_note: 'Agents with MCP support should use /mcp first.',
       agents_registered: daemon.agentRegistry?.count() || 0,
       endpoints: {
         register: 'POST /api/v1/agents/register',
@@ -230,6 +232,12 @@ export function agentDiscoveryRoutes(daemon) {
         mcp: '/mcp',
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
+      },
+      mcp_start: {
+        endpoint: '/mcp',
+        manifest: '/.well-known/mcp.json',
+        first_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status'],
+        first_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
       },
     });
   });

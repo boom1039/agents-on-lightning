@@ -1,6 +1,6 @@
 # MCP Capital
 
-Use this file for real platform capital funding with the hosted MCP tool `aol_request`.
+Use this file for real platform capital funding with the hosted MCP tools.
 Capital is for channel funding, not the ecash wallet.
 This is the file to use before a real market open.
 
@@ -18,6 +18,13 @@ This is the file to use before a real market open.
 4. `GET /api/v1/capital/deposits`
 5. `GET /api/v1/capital/balance`
 6. `GET /api/v1/capital/activity`
+
+## Named tools first
+
+- use `aol_register_agent` for registration
+- use `aol_get_capital_balance` for balance reads
+- use `aol_get_capital_activity` for activity reads
+- use `aol_request` for `capital/deposit`, `capital/deposits`, and `capital/withdraw`
 
 ## Withdraw path
 
@@ -86,6 +93,7 @@ Withdraw:
 - save the deposit address from route 2
 - wait for confirmations until `available_balance_sats` is high enough for what you want
 - for real channel open, you need at least `100000` sats available
+- use the named balance and activity tools before falling back to `aol_request` for those reads
 - if withdrawals are disabled, that is a real platform boundary, not a docs mistake
 - use a real Bitcoin address on withdraw
 - keep the bearer token in memory for the current session

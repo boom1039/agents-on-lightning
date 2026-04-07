@@ -8,7 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { rateLimit } from '../identity/rate-limiter.js';
-import { MCP_DOCS } from '../mcp/catalog.js';
+import { MCP_DOCS, MCP_TASK_PROMPTS } from '../mcp/catalog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = resolve(__dirname, '..', '..', 'docs', 'mcp');
@@ -20,6 +20,108 @@ const ALLOWED_HEADER_NAMES = new Set([
 ]);
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const TOOL_METHODS = ['GET', 'POST', 'PUT', 'DELETE'];
+const MCP_TOOL_SPECS = [
+  {
+    name: 'aol_get_root',
+    description: 'Read the site root JSON entrypoint.',
+  },
+  {
+    name: 'aol_get_api_root',
+    description: 'Read the public API root JSON entrypoint.',
+  },
+  {
+    name: 'aol_list_skills',
+    description: 'List the canonical public skill files.',
+  },
+  {
+    name: 'aol_get_platform_status',
+    description: 'Read block height, sync state, and platform node info.',
+  },
+  {
+    name: 'aol_get_capabilities',
+    description: 'Read the tier and capability map.',
+  },
+  {
+    name: 'aol_get_ethos',
+    description: 'Read the public platform ethos.',
+  },
+  {
+    name: 'aol_list_strategies',
+    description: 'List the public strategy catalog.',
+  },
+  {
+    name: 'aol_get_strategy',
+    description: 'Read one public strategy by name.',
+  },
+  {
+    name: 'aol_get_ledger',
+    description: 'Read the public ledger summary.',
+  },
+  {
+    name: 'aol_get_leaderboard',
+    description: 'Read the public leaderboard.',
+  },
+  {
+    name: 'aol_list_tournaments',
+    description: 'Read the public tournaments list.',
+  },
+  {
+    name: 'aol_get_market_overview',
+    description: 'Read the public market overview.',
+  },
+  {
+    name: 'aol_get_market_rankings',
+    description: 'Read public market rankings.',
+  },
+  {
+    name: 'aol_get_market_channels',
+    description: 'Read the public market channel list.',
+  },
+  {
+    name: 'aol_get_channel_status',
+    description: 'Read public channel monitor status.',
+  },
+  {
+    name: 'aol_get_analytics_catalog',
+    description: 'Read the public analytics catalog.',
+  },
+  {
+    name: 'aol_register_agent',
+    description: 'Create a new agent and get a bearer token.',
+  },
+  {
+    name: 'aol_get_me',
+    description: 'Read your own agent profile with a bearer token.',
+  },
+  {
+    name: 'aol_get_wallet_balance',
+    description: 'Read your wallet balances with a bearer token.',
+  },
+  {
+    name: 'aol_get_wallet_history',
+    description: 'Read your wallet history with a bearer token.',
+  },
+  {
+    name: 'aol_get_capital_balance',
+    description: 'Read your capital balance with a bearer token.',
+  },
+  {
+    name: 'aol_get_capital_activity',
+    description: 'Read your capital activity with a bearer token.',
+  },
+  {
+    name: 'aol_suggest_peers',
+    description: 'Read suggested peer candidates for a node pubkey.',
+  },
+  {
+    name: 'aol_get_channels_mine',
+    description: 'Read your assigned channels with a bearer token.',
+  },
+  {
+    name: 'aol_request',
+    description: 'Send one request to this site only. Use the MCP docs to know the right path and JSON shape.',
+  },
+];
 
 function getOrigin(req, fallback) {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
@@ -93,6 +195,84 @@ async function readResponseBody(response) {
   return { contentType, body: text.length > 12000 ? `${text.slice(0, 12000)}\n...[truncated]` : text };
 }
 
+async function performSiteRequest({
+  internalBaseUrl,
+  method,
+  path,
+  headers,
+  query,
+  json,
+}) {
+  let url;
+  try {
+    url = new URL(path, internalBaseUrl);
+  } catch {
+    return {
+      error: 'Use a valid same-origin path like /api/v1/skills.',
+    };
+  }
+
+  if (url.origin !== new URL(internalBaseUrl).origin) {
+    return {
+      error: 'Use a same-origin path only.',
+    };
+  }
+  if (!isAllowedToolPath(url.pathname) || url.pathname === '/mcp') {
+    return {
+      error: 'This tool only calls this site docs and API paths. Do not call /mcp through the tool.',
+    };
+  }
+
+  addQuery(url, query);
+  const requestHeaders = sanitizeHeaders(headers);
+  if (json !== undefined && !requestHeaders['Content-Type'] && !requestHeaders['content-type']) {
+    requestHeaders['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers: requestHeaders,
+    body: json !== undefined ? JSON.stringify(json) : undefined,
+  });
+  const { contentType, body } = await readResponseBody(response);
+  const summary = `${method} ${url.pathname}${url.search} -> ${response.status}`;
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    path: `${url.pathname}${url.search}`,
+    contentType,
+    headers: selectResponseHeaders(response.headers),
+    body,
+    summary,
+  };
+}
+
+function toToolResult(result) {
+  if (result.error) {
+    return {
+      content: [{ type: 'text', text: result.error }],
+      isError: true,
+    };
+  }
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `${result.summary}\n${summarizeBody(result.body)}`,
+      },
+    ],
+    structuredContent: {
+      ok: result.ok,
+      status: result.status,
+      path: result.path,
+      content_type: result.contentType,
+      headers: result.headers,
+      body: result.body,
+    },
+  };
+}
+
 function buildDiscoveryDocument({ origin }) {
   return {
     name: 'Agents on Lightning MCP',
@@ -106,21 +286,31 @@ function buildDiscoveryDocument({ origin }) {
       json_response_mode: true,
     },
     start: '/docs/mcp/index.txt',
-    prompts: MCP_DOCS.map((doc) => ({
-      name: doc.name,
-      description: doc.description,
-    })),
+    prompts: [
+      ...MCP_TASK_PROMPTS.map((prompt) => ({
+        name: prompt.name,
+        description: prompt.description,
+      })),
+      ...MCP_DOCS.map((doc) => ({
+        name: doc.name,
+        description: doc.description,
+      })),
+    ],
     resources: MCP_DOCS.map((doc) => ({
       name: doc.name,
       title: doc.title,
       uri: getDocUrl(origin, doc.file),
     })),
-    tools: [
-      {
-        name: 'aol_request',
-        description: 'Send one request to this site only. Use the MCP docs to know the right path and JSON shape.',
-      },
+    recommended_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
+    recommended_tools: [
+      'aol_get_root',
+      'aol_get_api_root',
+      'aol_list_skills',
+      'aol_get_platform_status',
+      'aol_register_agent',
+      'aol_get_me',
     ],
+    tools: MCP_TOOL_SPECS,
   };
 }
 
@@ -163,6 +353,23 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   }
 
+  for (const prompt of MCP_TASK_PROMPTS) {
+    server.registerPrompt(prompt.name, {
+      title: prompt.title,
+      description: prompt.description,
+    }, async () => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: prompt.text,
+          },
+        },
+      ],
+    }));
+  }
+
   server.registerTool('aol_request', {
     description: 'Send one same-origin request to Agents on Lightning. This tool does not invent ids, signatures, or flow steps for you.',
     inputSchema: {
@@ -172,61 +379,255 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
       query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('Optional query string values.'),
       json: z.any().optional().describe('Optional JSON request body for POST or PUT calls.'),
     },
-  }, async ({ method, path, headers, query, json }) => {
-    let url;
-    try {
-      url = new URL(path, internalBaseUrl);
-    } catch {
-      return {
-        content: [{ type: 'text', text: 'Use a valid same-origin path like /api/v1/skills.' }],
-        isError: true,
-      };
-    }
+  }, async ({ method, path, headers, query, json }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method,
+    path,
+    headers,
+    query,
+    json,
+  })));
 
-    if (url.origin !== new URL(internalBaseUrl).origin) {
-      return {
-        content: [{ type: 'text', text: 'Use a same-origin path only.' }],
-        isError: true,
-      };
-    }
-    if (!isAllowedToolPath(url.pathname) || url.pathname === '/mcp') {
-      return {
-        content: [{ type: 'text', text: 'This tool only calls this site docs and API paths. Do not call /mcp through the tool.' }],
-        isError: true,
-      };
-    }
+  server.registerTool('aol_get_root', {
+    description: 'Read the site root JSON entrypoint.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/',
+  })));
 
-    addQuery(url, query);
-    const requestHeaders = sanitizeHeaders(headers);
-    if (json !== undefined && !requestHeaders['Content-Type'] && !requestHeaders['content-type']) {
-      requestHeaders['Content-Type'] = 'application/json';
-    }
+  server.registerTool('aol_get_api_root', {
+    description: 'Read the public API root JSON entrypoint.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/',
+  })));
 
-    const response = await fetch(url, {
-      method,
-      headers: requestHeaders,
-      body: json !== undefined ? JSON.stringify(json) : undefined,
-    });
-    const { contentType, body } = await readResponseBody(response);
-    const summary = `${method} ${url.pathname}${url.search} -> ${response.status}`;
+  server.registerTool('aol_list_skills', {
+    description: 'List the canonical public skill files.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/skills',
+  })));
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `${summary}\n${summarizeBody(body)}`,
-        },
-      ],
-      structuredContent: {
-        ok: response.ok,
-        status: response.status,
-        path: `${url.pathname}${url.search}`,
-        content_type: contentType,
-        headers: selectResponseHeaders(response.headers),
-        body,
-      },
-    };
-  });
+  server.registerTool('aol_get_platform_status', {
+    description: 'Read block height, sync state, and platform node info.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/platform/status',
+  })));
+
+  server.registerTool('aol_get_capabilities', {
+    description: 'Read the tier and capability map.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/capabilities',
+  })));
+
+  server.registerTool('aol_get_ethos', {
+    description: 'Read the public platform ethos.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/ethos',
+  })));
+
+  server.registerTool('aol_list_strategies', {
+    description: 'List the public strategy catalog.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/strategies',
+  })));
+
+  server.registerTool('aol_get_strategy', {
+    description: 'Read one public strategy by name.',
+    inputSchema: {
+      name: z.string().describe('Strategy name like geographic-arbitrage.'),
+    },
+  }, async ({ name }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/strategies/${encodeURIComponent(name)}`,
+  })));
+
+  server.registerTool('aol_get_ledger', {
+    description: 'Read the public ledger summary.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/ledger',
+  })));
+
+  server.registerTool('aol_get_leaderboard', {
+    description: 'Read the public leaderboard.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/leaderboard',
+  })));
+
+  server.registerTool('aol_list_tournaments', {
+    description: 'Read the public tournaments list.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/tournaments',
+  })));
+
+  server.registerTool('aol_get_market_overview', {
+    description: 'Read the public market overview.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/overview',
+  })));
+
+  server.registerTool('aol_get_market_rankings', {
+    description: 'Read public market rankings.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/rankings',
+  })));
+
+  server.registerTool('aol_get_market_channels', {
+    description: 'Read the public market channel list.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/channels',
+  })));
+
+  server.registerTool('aol_get_channel_status', {
+    description: 'Read public channel monitor status.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/status',
+  })));
+
+  server.registerTool('aol_get_analytics_catalog', {
+    description: 'Read the public analytics catalog.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/analytics/catalog',
+  })));
+
+  server.registerTool('aol_register_agent', {
+    description: 'Create a new agent and get a bearer token.',
+    inputSchema: {
+      name: z.string().describe('New agent name.'),
+    },
+  }, async ({ name }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/agents/register',
+    json: { name },
+  })));
+
+  server.registerTool('aol_get_me', {
+    description: 'Read your own agent profile with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_wallet_balance', {
+    description: 'Read your wallet balances with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/wallet/balance',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_wallet_history', {
+    description: 'Read your wallet history with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/wallet/history',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_capital_balance', {
+    description: 'Read your capital balance with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/capital/balance',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_capital_activity', {
+    description: 'Read your capital activity with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/capital/activity',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_suggest_peers', {
+    description: 'Read suggested peer candidates for a node pubkey.',
+    inputSchema: {
+      node_pubkey: z.string().describe('Node pubkey to analyze.'),
+    },
+  }, async ({ node_pubkey }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/analysis/suggest-peers/${node_pubkey}`,
+  })));
+
+  server.registerTool('aol_get_channels_mine', {
+    description: 'Read your assigned channels with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/mine',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
 
   return server;
 }
@@ -331,6 +732,8 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       start: discovery.start,
       prompts: discovery.prompts,
       resources: discovery.resources,
+      recommended_prompts: discovery.recommended_prompts,
+      recommended_tools: discovery.recommended_tools,
       tools: discovery.tools,
     });
   });
@@ -347,6 +750,10 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
         skills: '/api/v1/skills',
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',
+      },
+      mcp_hints: {
+        preferred_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
+        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status', 'aol_register_agent', 'aol_request'],
       },
       capabilities: {
         public_registration: true,

@@ -76,8 +76,8 @@ export class NodeManager {
         this._scopedDefaultNodes.set(role, client);
         console.log(`[NodeManager] Scoped ${role} macaroon ready for "${name}"`);
       } catch (err) {
-        console.warn(`[NodeManager] Scoped ${role} macaroon failed for "${name}" — using default access: ${err.message}`);
-        this._scopedDefaultNodes.set(role, fallbackClient);
+        console.warn(`[NodeManager] Scoped ${role} macaroon failed for "${name}" — blocking that role instead of widening access: ${err.message}`);
+        this._scopedDefaultNodes.set(role, null);
       }
     }
   }
@@ -226,12 +226,22 @@ export class NodeManager {
 
   getScopedDefaultNode(role = 'read') {
     const scope = this._normalizeScope(role);
-    return this._scopedDefaultNodes.get(scope) || this.getDefaultNode();
+    if (this._scopedDefaultNodes.has(scope)) {
+      const client = this._scopedDefaultNodes.get(scope);
+      if (!client) {
+        throw new Error(`Scoped "${scope}" macaroon is unavailable.`);
+      }
+      return client;
+    }
+    return this.getDefaultNode();
   }
 
   getScopedDefaultNodeOrNull(role = 'read') {
     const scope = this._normalizeScope(role);
-    return this._scopedDefaultNodes.get(scope) || this.getDefaultNodeOrNull();
+    if (this._scopedDefaultNodes.has(scope)) {
+      return this._scopedDefaultNodes.get(scope) || null;
+    }
+    return this.getDefaultNodeOrNull();
   }
 
   /**

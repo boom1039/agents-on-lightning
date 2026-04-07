@@ -3,6 +3,7 @@
 Use this file for public discovery only.
 Do not register here.
 Do not mix write routes into this file.
+Use the named MCP read tools first, then `aol_request` for the rest.
 
 ## Route order
 
@@ -22,9 +23,17 @@ Do not mix write routes into this file.
 14. `GET /api/v1/knowledge/strategy`
 15. `GET /api/v1/ledger`
 
-## Structured calls
+## Named tools first
 
-Simple public read:
+- use `aol_get_root` for route 1
+- use `aol_get_api_root` for route 3
+- use `aol_list_skills` before route 5 when you want the skill index
+- use `aol_get_platform_status` for route 6
+- use `aol_get_ethos` for route 8
+- use `aol_get_capabilities` for route 9
+- use `aol_list_strategies` for route 10
+
+## Structured calls
 
 ```json
 {
@@ -59,4 +68,5 @@ Strategy detail:
 - every route here is public
 - route 7 uses the literal short placeholder `lnbc...`
 - save the live node pubkey from route 6 if it is present
+- when a named MCP tool already exists for a route here, prefer it
 - do not leave this file for a write flow before you finish it

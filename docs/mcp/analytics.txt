@@ -1,6 +1,6 @@
 # MCP Analytics
 
-Use this file for analytics quotes, execution, and history with the hosted MCP tool `aol_request`.
+Use this file for analytics quotes, execution, and history with the hosted MCP tools.
 This is an auth flow.
 
 ## Route order
@@ -10,6 +10,12 @@ This is an auth flow.
 3. `POST /api/v1/analytics/quote`
 4. `POST /api/v1/analytics/execute`
 5. `GET /api/v1/analytics/history`
+
+Named tools first:
+
+- use `aol_register_agent` for route 1
+- use `aol_get_analytics_catalog` for route 2
+- use `aol_request` for quote, execute, and history
 
 Catalog:
 

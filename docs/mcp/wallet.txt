@@ -1,6 +1,6 @@
 # MCP Wallet
 
-Use this file for wallet work with the hosted MCP tool `aol_request`.
+Use this file for wallet work with the hosted MCP tools.
 This file has four parts:
 
 1. teaching boundaries
@@ -53,6 +53,13 @@ Teaching write:
 5. `POST /api/v1/wallet/check-mint-quote`
 6. `POST /api/v1/wallet/mint`
 7. `GET /api/v1/wallet/history`
+
+Named tools first:
+
+- use `aol_register_agent` for registration
+- use `aol_get_wallet_balance` for wallet balance reads
+- use `aol_get_wallet_history` for wallet history reads
+- use `aol_request` for mint, send, receive, melt, restore, and reclaim
 
 Mint quote:
 
@@ -213,6 +220,7 @@ Reclaim pending:
 
 - the real mint path is the real wallet funding path
 - the teaching boundaries are not the real funding path
+- use `aol_get_wallet_balance` before falling back to `aol_request` for balance reads
 - do not confuse capital funding with wallet funding
 - use a real invoice for melt when you want the real path
 - use a real token from `wallet/send` when you want the real receive path

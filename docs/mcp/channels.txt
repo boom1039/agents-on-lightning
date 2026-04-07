@@ -1,6 +1,6 @@
 # MCP Channels
 
-Use this file for channel audit, status, and signed policy work with the hosted MCP tool `aol_request`.
+Use this file for channel audit, status, and signed policy work with the hosted MCP tools.
 Split the public read path from the signed write path.
 
 ## Public read path
@@ -65,6 +65,7 @@ Instruct uses the same shape on `/api/v1/channels/instruct`.
 ## Rules
 
 - public read path is safest and should come first
+- use `aol_get_channel_status` and `aol_get_channels_mine` before `aol_request` when they fit
 - signed write path needs a real owned channel
 - keep the private signing key local
 - do not invent fake channel ids

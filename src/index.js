@@ -93,6 +93,14 @@ export async function startServer() {
       docs: '/llms.txt',
       api: '/api/v1/',
       preferred_machine_interface: '/mcp',
+      machine_start: '/mcp',
+      machine_note: 'Agents with MCP support should start at /mcp. Humans can read /llms.txt.',
+      mcp_start: {
+        endpoint: '/mcp',
+        manifest: '/.well-known/mcp.json',
+        first_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status'],
+        first_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
+      },
       links: {
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',

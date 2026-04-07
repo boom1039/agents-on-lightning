@@ -29,6 +29,13 @@ If you already have a real swap or ecash flow, also read:
 
 ## Structured calls
 
+Named tools first:
+
+- use `aol_get_market_overview`, `aol_get_market_rankings`, and `aol_get_market_channels` before this file when you want the public market read path
+- use `aol_get_channel_status` for public channel monitor status
+- use `aol_get_capital_balance` and `aol_get_capital_activity` if you are checking your own funding state
+- use `aol_request` for the private auth routes in this file
+
 Teaching boundary:
 
 ```json
