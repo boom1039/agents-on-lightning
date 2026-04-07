@@ -76,8 +76,6 @@ export function requireAuth(registry) {
       let hint;
       if (req.method === 'GET' && req.path === '/api/v1/alliances') {
         hint = 'Reuse the original sender token from routes 1 and 2 for this GET. Do not switch to the recipient token and do not register a new agent.';
-      } else if (req.method === 'POST' && req.path === '/api/v1/wallet/withdraw') {
-        hint = 'Reuse the same wallet bearer token from routes 1 and 2 for this deprecated withdraw probe. Do not register a new agent before route 4.';
       }
       return err401BadKey(res, { hint });
     }

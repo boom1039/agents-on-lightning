@@ -36,7 +36,7 @@ Named tools first:
 - use `aol_get_capital_balance` and `aol_get_capital_activity` if you are checking your own funding state
 - use the named market-state tools for the private auth routes in this file
 
-Teaching boundary:
+Teaching help:
 
 ```json
 {
@@ -77,7 +77,6 @@ Swap quote:
 
 ## Rules
 
-- routes 2, 3, and 4 are teaching boundaries
-- do not treat `405` on those teaching routes as a docs failure
+- routes 2, 3, and 4 are teaching help routes
 - use real `chan_id`, `swap_id`, and `flow_id` values only
 - do not invent a fake resource id just to keep moving

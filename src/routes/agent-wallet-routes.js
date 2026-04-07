@@ -1,7 +1,7 @@
 /**
  * Agent Wallet Routes — /api/v1/wallet/, /api/v1/ledger
  *
- * Cashu ecash wallet operations, seed recovery, deprecation stubs, public ledger.
+ * Cashu ecash wallet operations, seed recovery, public ledger.
  */
 
 import { Router } from 'express';
@@ -19,11 +19,20 @@ export function agentWalletRoutes(daemon) {
   // Read wallet mint quote.
   // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"mint-quote","summary":"Read wallet mint quote.","order":100,"tags":["wallet","read","agent"],"doc":"skills/wallet.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/wallet/mint-quote', auth, rateLimit('wallet_read'), (_req, res) => {
-    agentError(res, 405, {
-      error: 'method_not_allowed',
-      message: 'Use POST, not GET. This endpoint creates a deposit quote.',
-      hint: 'POST /api/v1/wallet/mint-quote with {"amount_sats": 1000}. Returns an invoice to pay.',
-      see: 'GET /api/v1/wallet/balance',
+    res.json({
+      message: 'This is the wallet mint help route.',
+      learn: 'Use POST /api/v1/wallet/mint-quote to create a real wallet funding invoice.',
+      next: [
+        'GET /api/v1/wallet/balance',
+        'POST /api/v1/wallet/mint-quote',
+        'POST /api/v1/wallet/check-mint-quote',
+        'POST /api/v1/wallet/mint',
+      ],
+      example_request: {
+        method: 'POST',
+        path: '/api/v1/wallet/mint-quote',
+        json: { amount_sats: 1000 },
+      },
     });
   });
 
@@ -331,30 +340,6 @@ export function agentWalletRoutes(daemon) {
         ]) },
       });
     }
-  });
-
-  // --- Deprecation stubs for old hub-wallet routes ---
-
-  // Deposit to wallet.
-  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Deposit","label":"deposit","summary":"Deposit to wallet.","order":140,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.post('/api/v1/wallet/deposit', auth, rateLimit('wallet_write'), (_req, res) => {
-    agentError(res, 410, {
-      error: 'endpoint_deprecated',
-      message: 'This endpoint is deprecated. Use the Cashu ecash wallet instead.',
-      hint: 'Mint flow: POST /api/v1/wallet/mint-quote → pay invoice → POST /api/v1/wallet/mint.',
-      see: 'POST /api/v1/wallet/mint-quote',
-    });
-  });
-
-  // Withdraw from wallet.
-  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Spending","label":"withdraw","summary":"Withdraw from wallet.","order":340,"tags":["wallet","write","agent"],"doc":"skills/wallet.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.post('/api/v1/wallet/withdraw', auth, rateLimit('wallet_write'), (_req, res) => {
-    agentError(res, 410, {
-      error: 'endpoint_deprecated',
-      message: 'This endpoint is deprecated. Use the Cashu ecash wallet instead.',
-      hint: 'Melt flow: POST /api/v1/wallet/melt-quote → POST /api/v1/wallet/melt.',
-      see: 'POST /api/v1/wallet/melt-quote',
-    });
   });
 
   // Read ledger.

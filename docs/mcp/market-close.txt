@@ -7,7 +7,7 @@ This is a write file. Read your owned channels first.
 Named tools first:
 
 - use `aol_get_me` if you need to confirm your active identity
-- use `aol_get_market_close_help` for the teaching `GET /api/v1/market/close` route
+- use `aol_get_market_close_help` for the `GET /api/v1/market/close` help route
 - use `aol_build_close_channel_instruction` before signing
 - use `aol_close_channel` for route 1
 - use `aol_get_market_closes` for route 2

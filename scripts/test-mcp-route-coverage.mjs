@@ -227,7 +227,7 @@ try {
   markResult('GET /api/v1/wallet/history', 'aol_get_wallet_history', walletHistory, { success: [200] });
 
   const walletMintQuoteHelp = await callTool('aol_get_wallet_mint_quote_help', { api_key: agentAKey });
-  markResult('GET /api/v1/wallet/mint-quote', 'aol_get_wallet_mint_quote_help', walletMintQuoteHelp, { boundary: [405] });
+  markResult('GET /api/v1/wallet/mint-quote', 'aol_get_wallet_mint_quote_help', walletMintQuoteHelp, { success: [200] });
 
   const walletMintQuote = await callTool('aol_create_wallet_mint_quote', { api_key: agentAKey, amount_sats: 1000 });
   markResult('POST /api/v1/wallet/mint-quote', 'aol_create_wallet_mint_quote', walletMintQuote, { success: [200] });
@@ -238,12 +238,6 @@ try {
 
   const walletMint = await callTool('aol_mint_wallet', { api_key: agentAKey, amount_sats: 1000, quote: mintQuoteId });
   markResult('POST /api/v1/wallet/mint', 'aol_mint_wallet', walletMint, { boundary: [400] });
-
-  const walletDepositDeprecated = await callTool('aol_try_wallet_deposit', { api_key: agentAKey });
-  markResult('POST /api/v1/wallet/deposit', 'aol_try_wallet_deposit', walletDepositDeprecated, { boundary: [410] });
-
-  const walletWithdrawDeprecated = await callTool('aol_try_wallet_withdraw', { api_key: agentAKey });
-  markResult('POST /api/v1/wallet/withdraw', 'aol_try_wallet_withdraw', walletWithdrawDeprecated, { boundary: [410] });
 
   const walletSend = await callTool('aol_send_wallet_tokens', { api_key: agentAKey, amount_sats: 1 });
   markResult('POST /api/v1/wallet/send', 'aol_send_wallet_tokens', walletSend, { boundary: [400] });
@@ -360,10 +354,10 @@ try {
   });
 
   const previewOpenHelp = await callTool('aol_get_market_preview_help', { api_key: agentAKey });
-  markResult('GET /api/v1/market/preview', 'aol_get_market_preview_help', previewOpenHelp, { boundary: [405] });
+  markResult('GET /api/v1/market/preview', 'aol_get_market_preview_help', previewOpenHelp, { success: [200] });
 
   const openHelp = await callTool('aol_get_market_open_help', { api_key: agentAKey });
-  markResult('GET /api/v1/market/open', 'aol_get_market_open_help', openHelp, { boundary: [405] });
+  markResult('GET /api/v1/market/open', 'aol_get_market_open_help', openHelp, { success: [200] });
 
   const marketPending = await callTool('aol_get_market_pending', { api_key: agentAKey });
   markResult('GET /api/v1/market/pending', 'aol_get_market_pending', marketPending, { success: [200] });
@@ -390,7 +384,7 @@ try {
   });
 
   const closeHelp = await callTool('aol_get_market_close_help', { api_key: agentAKey });
-  markResult('GET /api/v1/market/close', 'aol_get_market_close_help', closeHelp, { boundary: [405] });
+  markResult('GET /api/v1/market/close', 'aol_get_market_close_help', closeHelp, { success: [200] });
 
   const marketCloses = await callTool('aol_get_market_closes', { api_key: agentAKey });
   markResult('GET /api/v1/market/closes', 'aol_get_market_closes', marketCloses, { success: [200] });

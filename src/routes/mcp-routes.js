@@ -195,7 +195,7 @@ const MCP_TOOL_SPECS = [
   },
   {
     name: 'aol_get_wallet_mint_quote_help',
-    description: 'Read the wallet mint-quote teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real wallet mint flow.',
   },
   {
     name: 'aol_create_wallet_mint_quote',
@@ -232,14 +232,6 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_reclaim_wallet_pending',
     description: 'Reclaim pending wallet sends with a bearer token.',
-  },
-  {
-    name: 'aol_try_wallet_deposit',
-    description: 'Hit the deprecated wallet deposit route with a bearer token.',
-  },
-  {
-    name: 'aol_try_wallet_withdraw',
-    description: 'Hit the deprecated wallet withdraw route with a bearer token.',
   },
   {
     name: 'aol_get_capital_balance',
@@ -343,11 +335,11 @@ const MCP_TOOL_SPECS = [
   },
   {
     name: 'aol_get_market_preview_help',
-    description: 'Read the market preview teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market preview flow.',
   },
   {
     name: 'aol_get_market_open_help',
-    description: 'Read the market open teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market open flow.',
   },
   {
     name: 'aol_get_market_pending',
@@ -379,7 +371,7 @@ const MCP_TOOL_SPECS = [
   },
   {
     name: 'aol_get_market_close_help',
-    description: 'Read the market close teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market close flow.',
   },
   {
     name: 'aol_close_channel',
@@ -1391,7 +1383,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_wallet_mint_quote_help', {
-    description: 'Read the wallet mint-quote teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real wallet mint flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1549,32 +1541,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     json: {
       ...(max_age_hours !== undefined ? { max_age_hours } : {}),
     },
-  })));
-
-  server.registerTool('aol_try_wallet_deposit', {
-    description: 'Hit the deprecated wallet deposit route with a bearer token.',
-    inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-    },
-  }, async ({ api_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/wallet/deposit',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: {},
-  })));
-
-  server.registerTool('aol_try_wallet_withdraw', {
-    description: 'Hit the deprecated wallet withdraw route with a bearer token.',
-    inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-    },
-  }, async ({ api_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/wallet/withdraw',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: {},
   })));
 
   server.registerTool('aol_get_capital_balance', {
@@ -1966,7 +1932,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_preview_help', {
-    description: 'Read the market preview teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market preview flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1978,7 +1944,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_open_help', {
-    description: 'Read the market open teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market open flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2097,7 +2063,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_market_close_help', {
-    description: 'Read the market close teaching boundary with a bearer token.',
+    description: 'Read MCP help for the real market close flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },

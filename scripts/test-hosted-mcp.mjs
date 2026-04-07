@@ -20,8 +20,6 @@ const requiredTools = [
   'aol_get_wallet_mint_quote_help',
   'aol_create_wallet_mint_quote',
   'aol_check_wallet_mint_quote',
-  'aol_try_wallet_deposit',
-  'aol_try_wallet_withdraw',
   'aol_restore_wallet',
   'aol_reclaim_wallet_pending',
   'aol_test_node_connection',
@@ -242,7 +240,7 @@ try {
       api_key: apiKey,
     },
   });
-  expectStatus(walletMintQuoteHelp, 405, 'aol_get_wallet_mint_quote_help');
+  expectStatus(walletMintQuoteHelp, 200, 'aol_get_wallet_mint_quote_help');
 
   const walletMintQuoteResult = await client.callTool({
     name: 'aol_create_wallet_mint_quote',
@@ -265,22 +263,6 @@ try {
   });
   assert(!walletCheckMintQuoteResult?.isError, 'aol_check_wallet_mint_quote failed');
   expectStatus(walletCheckMintQuoteResult, 200, 'aol_check_wallet_mint_quote');
-
-  const walletDepositBoundary = await client.callTool({
-    name: 'aol_try_wallet_deposit',
-    arguments: {
-      api_key: apiKey,
-    },
-  });
-  expectStatus(walletDepositBoundary, 410, 'aol_try_wallet_deposit');
-
-  const walletWithdrawBoundary = await client.callTool({
-    name: 'aol_try_wallet_withdraw',
-    arguments: {
-      api_key: apiKey,
-    },
-  });
-  expectStatus(walletWithdrawBoundary, 410, 'aol_try_wallet_withdraw');
 
   const walletRestore = await client.callTool({
     name: 'aol_restore_wallet',
@@ -406,7 +388,7 @@ try {
       api_key: apiKey,
     },
   });
-  expectStatus(marketPreviewHelp, 405, 'aol_get_market_preview_help');
+  expectStatus(marketPreviewHelp, 200, 'aol_get_market_preview_help');
 
   const marketOpenHelp = await client.callTool({
     name: 'aol_get_market_open_help',
@@ -414,7 +396,7 @@ try {
       api_key: apiKey,
     },
   });
-  expectStatus(marketOpenHelp, 405, 'aol_get_market_open_help');
+  expectStatus(marketOpenHelp, 200, 'aol_get_market_open_help');
 
   const channelsAuditResult = await client.callTool({
     name: 'aol_get_channels_audit',
@@ -485,7 +467,7 @@ try {
       api_key: apiKey,
     },
   });
-  expectStatus(marketCloseHelp, 405, 'aol_get_market_close_help');
+  expectStatus(marketCloseHelp, 200, 'aol_get_market_close_help');
 
   const policyInstruction = await client.callTool({
     name: 'aol_build_channel_policy_instruction',

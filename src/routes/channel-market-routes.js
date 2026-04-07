@@ -84,6 +84,15 @@ function fundingTxExplorerLinks(txid) {
   };
 }
 
+function sendTeachingHelp(res, body) {
+  res.json({
+    message: body.message,
+    learn: body.learn,
+    next: body.next,
+    example_request: body.example_request,
+  });
+}
+
 function sendUnexpectedKeys(res, unexpected, see) {
   return err400Validation(res, `Unexpected field(s): ${unexpected.join(', ')}`, {
     hint: 'Send only the documented JSON keys for this route.',
@@ -325,11 +334,30 @@ export function channelMarketRoutes(daemon) {
   // Read market preview.
   // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"preview","summary":"Read market preview.","order":200,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/preview', auth, marketPrivateRead, (_req, res) => {
-    agentError(res, 405, {
-      error: 'method_not_allowed',
-      message: 'Use POST, not GET. This endpoint validates a channel open request.',
-      hint: 'POST /api/v1/market/preview with a signed instruction. See GET /api/v1/market/config for requirements.',
-      see: 'GET /api/v1/market/config',
+    sendTeachingHelp(res, {
+      message: 'This is the market preview help route.',
+      learn: 'Use POST /api/v1/market/preview with a signed channel_open instruction to validate an open before the real submit.',
+      next: [
+        'GET /api/v1/market/config',
+        'POST /api/v1/market/preview',
+        'POST /api/v1/market/open',
+      ],
+      example_request: {
+        method: 'POST',
+        path: '/api/v1/market/preview',
+        json: {
+          instruction: {
+            action: 'channel_open',
+            agent_id: '<agent_id>',
+            params: {
+              local_funding_amount_sats: 100000,
+              peer_pubkey: '<peer_pubkey>',
+            },
+            timestamp: 0,
+          },
+          signature: '<hex_signature>',
+        },
+      },
     });
   });
 
@@ -437,11 +465,31 @@ export function channelMarketRoutes(daemon) {
   // Read market open.
   // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Read market open.","order":220,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/open', auth, marketPrivateRead, (_req, res) => {
-    agentError(res, 405, {
-      error: 'method_not_allowed',
-      message: 'Use POST, not GET. This endpoint opens a channel.',
-      hint: 'POST /api/v1/market/open with a signed instruction. Preview first: POST /api/v1/market/preview.',
-      see: 'POST /api/v1/market/preview',
+    sendTeachingHelp(res, {
+      message: 'This is the market open help route.',
+      learn: 'Use POST /api/v1/market/open with a signed channel_open instruction after a successful preview.',
+      next: [
+        'GET /api/v1/market/config',
+        'POST /api/v1/market/preview',
+        'POST /api/v1/market/open',
+        'GET /api/v1/market/pending',
+      ],
+      example_request: {
+        method: 'POST',
+        path: '/api/v1/market/open',
+        json: {
+          instruction: {
+            action: 'channel_open',
+            agent_id: '<agent_id>',
+            params: {
+              local_funding_amount_sats: 100000,
+              peer_pubkey: '<peer_pubkey>',
+            },
+            timestamp: 0,
+          },
+          signature: '<hex_signature>',
+        },
+      },
     });
   });
 
@@ -664,11 +712,29 @@ export function channelMarketRoutes(daemon) {
   // Read market close.
   // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"close","summary":"Read market close.","order":300,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/close', auth, marketPrivateRead, (_req, res) => {
-    agentError(res, 405, {
-      error: 'method_not_allowed',
-      message: 'Use POST, not GET. This endpoint closes a channel.',
-      hint: 'POST /api/v1/market/close with a signed instruction containing "action": "channel_close" and "params": {"channel_point": "..."}',
-      see: 'GET /api/v1/market/closes',
+    sendTeachingHelp(res, {
+      message: 'This is the market close help route.',
+      learn: 'Use POST /api/v1/market/close with a signed channel_close instruction for one channel you already own.',
+      next: [
+        'GET /api/v1/channels/mine',
+        'POST /api/v1/market/close',
+        'GET /api/v1/market/closes',
+      ],
+      example_request: {
+        method: 'POST',
+        path: '/api/v1/market/close',
+        json: {
+          instruction: {
+            action: 'channel_close',
+            agent_id: '<agent_id>',
+            params: {
+              channel_point: '<funding_txid>:<output_index>',
+            },
+            timestamp: 0,
+          },
+          signature: '<hex_signature>',
+        },
+      },
     });
   });
 

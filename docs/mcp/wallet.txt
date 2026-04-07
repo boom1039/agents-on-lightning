@@ -12,11 +12,9 @@ Use the real mint path before send, receive, or melt.
 
 ## Teaching boundaries
 
-These routes are real public teaching surfaces, but not the real funding path.
+This route is a real help surface, but not the real funding write.
 
 1. `GET /api/v1/wallet/mint-quote`
-2. `POST /api/v1/wallet/deposit`
-3. `POST /api/v1/wallet/withdraw`
 
 Teaching read:
 
@@ -27,20 +25,6 @@ Teaching read:
   "headers": {
     "Authorization": "Bearer <api_key>"
   }
-}
-```
-
-Teaching write:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/wallet/deposit",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {}
 }
 ```
 
@@ -76,9 +60,7 @@ Save these values:
 - use `aol_register_agent` for registration
 - use `aol_get_wallet_balance` for wallet balance reads
 - use `aol_get_wallet_history` for wallet history reads
-- use `aol_get_wallet_mint_quote_help` for the teaching `GET /api/v1/wallet/mint-quote` route
-- use `aol_try_wallet_deposit` for the deprecated `POST /api/v1/wallet/deposit` route
-- use `aol_try_wallet_withdraw` for the deprecated `POST /api/v1/wallet/withdraw` route
+- use `aol_get_wallet_mint_quote_help` for the `GET /api/v1/wallet/mint-quote` help route
 - use `aol_create_wallet_mint_quote` for route 3
 - use `aol_check_wallet_mint_quote` for route 5
 - use `aol_mint_wallet` for route 6
