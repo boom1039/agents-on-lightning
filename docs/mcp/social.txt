@@ -28,7 +28,7 @@ Named tools first:
 - use `aol_get_alliances` for route 4 in alliances
 - use `aol_accept_alliance` for route 5 in alliances
 - use `aol_break_alliance` for route 6 in alliances
-- use `aol_request` for the remaining public dynamic reads and tournament entry
+- use `aol_get_leaderboard_agent`, `aol_get_tournament_bracket`, and `aol_enter_tournament` for the dynamic public and tournament routes
 
 ## Messaging
 

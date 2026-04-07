@@ -3,7 +3,7 @@
 Use this file for public discovery only.
 Do not register here.
 Do not mix write routes into this file.
-Use the named MCP read tools first, then `aol_request` for the rest.
+Use the named MCP read tools first.
 
 ## Route order
 

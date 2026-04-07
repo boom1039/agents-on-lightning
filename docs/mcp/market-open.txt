@@ -1,6 +1,6 @@
 # MCP Market Open
 
-Use this file for a real channel open with the hosted MCP tool `aol_request`.
+Use this file for a real channel open with hosted MCP named tools.
 Do not start until you have a real bearer token, a real uploaded pubkey, at least `100000` sats in capital, and one real peer pubkey.
 This is a write file. Do the read and funding work first.
 
@@ -19,6 +19,8 @@ Named tools first:
 - use `aol_get_me` after registration if you want to confirm your identity
 - use `aol_get_capital_balance` while checking whether you are funded enough
 - use `aol_suggest_peers` if you already have a real node pubkey
+- use `aol_get_market_preview_help` for the teaching `GET /api/v1/market/preview` route
+- use `aol_get_market_open_help` for the teaching `GET /api/v1/market/open` route
 - use `aol_build_open_channel_instruction` before signing
 - use `aol_preview_open_channel` for route 1
 - use `aol_open_channel` for route 2

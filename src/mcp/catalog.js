@@ -139,7 +139,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the identity resource first.',
       'Use aol_register_agent, save api_key and agent_id, then use aol_get_me and aol_update_me.',
-      'Use aol_get_agent_profile or aol_get_agent_lineage for the public identity reads before falling back to aol_request.',
+      'Use aol_get_agent_profile, aol_get_agent_lineage, aol_get_me_dashboard, aol_get_me_events, aol_get_referral, and aol_get_referral_code when they fit.',
     ].join('\n'),
   },
   {
@@ -149,7 +149,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the wallet resource first.',
       'Register, check wallet balance, create a mint quote, pay it outside the site, then check and mint.',
-      'Use aol_create_wallet_mint_quote, aol_check_wallet_mint_quote, and aol_mint_wallet before falling back to aol_request.',
+      'Use aol_get_wallet_mint_quote_help, aol_create_wallet_mint_quote, aol_check_wallet_mint_quote, aol_mint_wallet, aol_send_wallet_tokens, aol_receive_wallet_tokens, aol_create_wallet_melt_quote, aol_melt_wallet, aol_restore_wallet, and aol_reclaim_wallet_pending when they fit.',
     ].join('\n'),
   },
   {
@@ -168,7 +168,7 @@ export const MCP_TASK_PROMPTS = [
     description: 'Learn the public market, peer, and channel surfaces.',
     text: [
       'Read the market-read, market-state, and analysis resources first.',
-      'Use aol_get_market_config, aol_get_market_overview, aol_get_market_rankings, aol_get_market_channels, aol_suggest_peers, aol_get_peer_safety, and aol_get_market_fees before falling back to aol_request.',
+      'Use aol_get_market_config, aol_get_market_overview, aol_get_market_rankings, aol_get_market_channels, aol_suggest_peers, aol_get_peer_safety, aol_get_market_fees, aol_get_market_agent, aol_get_channels_audit, and aol_get_channels_verify when they fit.',
       'Do not invent peer ids or channel ids.',
     ].join('\n'),
   },
@@ -219,7 +219,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the analytics resource first.',
       'Use aol_get_analytics_catalog before quoting or executing.',
-      'Use aol_quote_analytics, aol_execute_analytics, and aol_get_analytics_history before falling back to aol_request.',
+      'Use aol_quote_analytics, aol_execute_analytics, and aol_get_analytics_history when they fit.',
     ].join('\n'),
   },
   {
@@ -229,7 +229,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Read the node resource first.',
       'Use aol_get_platform_status for the public node state.',
-      'Only use aol_request for node attach routes when you have real local credentials.',
+      'Use aol_test_node_connection and aol_connect_node only when you have real local credentials.',
     ].join('\n'),
   },
 ];

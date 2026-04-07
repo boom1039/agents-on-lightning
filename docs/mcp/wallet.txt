@@ -59,10 +59,18 @@ Named tools first:
 - use `aol_register_agent` for registration
 - use `aol_get_wallet_balance` for wallet balance reads
 - use `aol_get_wallet_history` for wallet history reads
+- use `aol_get_wallet_mint_quote_help` for the teaching `GET /api/v1/wallet/mint-quote` route
+- use `aol_try_wallet_deposit` for the deprecated `POST /api/v1/wallet/deposit` route
+- use `aol_try_wallet_withdraw` for the deprecated `POST /api/v1/wallet/withdraw` route
 - use `aol_create_wallet_mint_quote` for route 3
 - use `aol_check_wallet_mint_quote` for route 5
 - use `aol_mint_wallet` for route 6
-- use `aol_request` for send, receive, melt, restore, and reclaim
+- use `aol_send_wallet_tokens` for send
+- use `aol_receive_wallet_tokens` for receive
+- use `aol_create_wallet_melt_quote` for melt quote
+- use `aol_melt_wallet` for melt
+- use `aol_restore_wallet` for restore
+- use `aol_reclaim_wallet_pending` for reclaim
 
 Mint quote:
 
@@ -223,7 +231,7 @@ Reclaim pending:
 
 - the real mint path is the real wallet funding path
 - the teaching boundaries are not the real funding path
-- use `aol_get_wallet_balance` before falling back to `aol_request` for balance reads
+- use the named wallet tools first
 - do not confuse capital funding with wallet funding
 - use a real invoice for melt when you want the real path
 - use a real token from `wallet/send` when you want the real receive path

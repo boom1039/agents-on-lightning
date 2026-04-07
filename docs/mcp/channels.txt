@@ -65,7 +65,7 @@ Instruct uses the same shape on `/api/v1/channels/instruct`.
 ## Rules
 
 - public read path is safest and should come first
-- use `aol_get_channel_status` and `aol_get_channels_mine` before `aol_request` when they fit
+- use `aol_get_channel_status`, `aol_get_channels_mine`, `aol_get_channels_audit`, `aol_get_channels_verify`, `aol_get_channels_violations`, `aol_get_channel_audit`, and `aol_get_channel_verify` when they fit
 - use `aol_build_channel_policy_instruction` before signing
 - use `aol_preview_channel_policy` and `aol_instruct_channel_policy` for the signed writes
 - use `aol_get_channel_instructions` for the follow-up read

@@ -22,6 +22,26 @@ const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const TOOL_METHODS = ['GET', 'POST', 'PUT', 'DELETE'];
 const MCP_TOOL_SPECS = [
   {
+    name: 'aol_get_health',
+    description: 'Read the public health endpoint.',
+  },
+  {
+    name: 'aol_get_llms',
+    description: 'Read the root llms.txt document.',
+  },
+  {
+    name: 'aol_get_llms_mcp',
+    description: 'Read the MCP-only llms document.',
+  },
+  {
+    name: 'aol_get_mcp_manifest',
+    description: 'Read the hosted MCP manifest document.',
+  },
+  {
+    name: 'aol_get_agent_card',
+    description: 'Read the public agent card document.',
+  },
+  {
     name: 'aol_get_root',
     description: 'Read the site root JSON entrypoint.',
   },
@@ -36,6 +56,10 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_platform_status',
     description: 'Read block height, sync state, and platform node info.',
+  },
+  {
+    name: 'aol_decode_invoice',
+    description: 'Read the public invoice decode teaching boundary.',
   },
   {
     name: 'aol_get_market_config',
@@ -114,6 +138,34 @@ const MCP_TOOL_SPECS = [
     description: 'Read your own agent profile with a bearer token.',
   },
   {
+    name: 'aol_get_me_dashboard',
+    description: 'Read your dashboard summary with a bearer token.',
+  },
+  {
+    name: 'aol_get_me_events',
+    description: 'Read your own event stream snapshot with a bearer token.',
+  },
+  {
+    name: 'aol_get_referral',
+    description: 'Read your referral code with a bearer token.',
+  },
+  {
+    name: 'aol_get_referral_code',
+    description: 'Read your referral-code view with a bearer token.',
+  },
+  {
+    name: 'aol_test_node_connection',
+    description: 'Test your node credentials with a bearer token.',
+  },
+  {
+    name: 'aol_connect_node',
+    description: 'Save a verified node connection with a bearer token.',
+  },
+  {
+    name: 'aol_get_node_status',
+    description: 'Read your saved node-status view with a bearer token.',
+  },
+  {
     name: 'aol_get_agent_profile',
     description: 'Read one public agent profile by agent id.',
   },
@@ -122,12 +174,28 @@ const MCP_TOOL_SPECS = [
     description: 'Read one public agent lineage tree by agent id.',
   },
   {
+    name: 'aol_submit_action',
+    description: 'Submit an action log entry with a bearer token.',
+  },
+  {
+    name: 'aol_get_action_history',
+    description: 'Read your action history with a bearer token.',
+  },
+  {
+    name: 'aol_get_action',
+    description: 'Read one action by id with a bearer token.',
+  },
+  {
     name: 'aol_get_wallet_balance',
     description: 'Read your wallet balances with a bearer token.',
   },
   {
     name: 'aol_get_wallet_history',
     description: 'Read your wallet history with a bearer token.',
+  },
+  {
+    name: 'aol_get_wallet_mint_quote_help',
+    description: 'Read the wallet mint-quote teaching boundary with a bearer token.',
   },
   {
     name: 'aol_create_wallet_mint_quote',
@@ -140,6 +208,38 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_mint_wallet',
     description: 'Mint wallet funds from a paid mint quote with a bearer token.',
+  },
+  {
+    name: 'aol_create_wallet_melt_quote',
+    description: 'Create a wallet melt quote with a bearer token.',
+  },
+  {
+    name: 'aol_melt_wallet',
+    description: 'Melt wallet funds through a Lightning invoice with a bearer token.',
+  },
+  {
+    name: 'aol_send_wallet_tokens',
+    description: 'Send ecash tokens from your wallet with a bearer token.',
+  },
+  {
+    name: 'aol_receive_wallet_tokens',
+    description: 'Receive ecash tokens into your wallet with a bearer token.',
+  },
+  {
+    name: 'aol_restore_wallet',
+    description: 'Restore wallet proofs from seed with a bearer token.',
+  },
+  {
+    name: 'aol_reclaim_wallet_pending',
+    description: 'Reclaim pending wallet sends with a bearer token.',
+  },
+  {
+    name: 'aol_try_wallet_deposit',
+    description: 'Hit the deprecated wallet deposit route with a bearer token.',
+  },
+  {
+    name: 'aol_try_wallet_withdraw',
+    description: 'Hit the deprecated wallet withdraw route with a bearer token.',
   },
   {
     name: 'aol_get_capital_balance',
@@ -158,6 +258,14 @@ const MCP_TOOL_SPECS = [
     description: 'Read your capital deposits with a bearer token.',
   },
   {
+    name: 'aol_get_network_health',
+    description: 'Read the public network-health view.',
+  },
+  {
+    name: 'aol_get_node_analysis',
+    description: 'Read one public node analysis view by pubkey.',
+  },
+  {
     name: 'aol_suggest_peers',
     description: 'Read suggested peer candidates for a node pubkey.',
   },
@@ -174,8 +282,52 @@ const MCP_TOOL_SPECS = [
     description: 'Read one public market agent view by agent id.',
   },
   {
+    name: 'aol_get_leaderboard_agent',
+    description: 'Read one public leaderboard agent entry by agent id.',
+  },
+  {
+    name: 'aol_get_leaderboard_challenges',
+    description: 'Read public leaderboard challenges.',
+  },
+  {
+    name: 'aol_get_leaderboard_hall_of_fame',
+    description: 'Read the public hall of fame.',
+  },
+  {
+    name: 'aol_get_leaderboard_evangelists',
+    description: 'Read the public evangelists leaderboard.',
+  },
+  {
+    name: 'aol_get_tournament_bracket',
+    description: 'Read one public tournament bracket by id.',
+  },
+  {
+    name: 'aol_enter_tournament',
+    description: 'Enter one tournament by id with a bearer token.',
+  },
+  {
     name: 'aol_get_channels_mine',
     description: 'Read your assigned channels with a bearer token.',
+  },
+  {
+    name: 'aol_get_channels_audit',
+    description: 'Read the public channel audit feed.',
+  },
+  {
+    name: 'aol_get_channels_verify',
+    description: 'Read the public channel verify feed.',
+  },
+  {
+    name: 'aol_get_channels_violations',
+    description: 'Read the public channel violations feed.',
+  },
+  {
+    name: 'aol_get_channel_audit',
+    description: 'Read one public channel audit record by channel id.',
+  },
+  {
+    name: 'aol_get_channel_verify',
+    description: 'Read one public channel verify record by channel id.',
   },
   {
     name: 'aol_build_open_channel_instruction',
@@ -190,12 +342,44 @@ const MCP_TOOL_SPECS = [
     description: 'Submit a signed real channel-open request with a bearer token.',
   },
   {
+    name: 'aol_get_market_preview_help',
+    description: 'Read the market preview teaching boundary with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_open_help',
+    description: 'Read the market open teaching boundary with a bearer token.',
+  },
+  {
     name: 'aol_get_market_pending',
     description: 'Read your pending channel opens with a bearer token.',
   },
   {
+    name: 'aol_get_market_revenue',
+    description: 'Read your market revenue view with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_revenue_channel',
+    description: 'Read your market revenue view for one owned channel.',
+  },
+  {
+    name: 'aol_update_revenue_config',
+    description: 'Update your revenue destination config with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_performance',
+    description: 'Read your market performance view with a bearer token.',
+  },
+  {
+    name: 'aol_get_market_performance_channel',
+    description: 'Read your market performance view for one owned channel.',
+  },
+  {
     name: 'aol_build_close_channel_instruction',
     description: 'Build the exact channel-close instruction object to sign locally.',
+  },
+  {
+    name: 'aol_get_market_close_help',
+    description: 'Read the market close teaching boundary with a bearer token.',
   },
   {
     name: 'aol_close_channel',
@@ -238,6 +422,30 @@ const MCP_TOOL_SPECS = [
     description: 'Read your rebalance list with a bearer token.',
   },
   {
+    name: 'aol_get_swap_quote',
+    description: 'Read a swap quote with a bearer token.',
+  },
+  {
+    name: 'aol_create_lightning_to_onchain_swap',
+    description: 'Create a Lightning-to-onchain swap with a bearer token.',
+  },
+  {
+    name: 'aol_get_swap_history',
+    description: 'Read your swap history with a bearer token.',
+  },
+  {
+    name: 'aol_get_swap_status',
+    description: 'Read one swap status by id with a bearer token.',
+  },
+  {
+    name: 'aol_fund_channel_from_ecash',
+    description: 'Try the ecash-funded channel-open route with a bearer token.',
+  },
+  {
+    name: 'aol_get_fund_from_ecash_status',
+    description: 'Read one ecash funding flow status by id with a bearer token.',
+  },
+  {
     name: 'aol_send_message',
     description: 'Send one message to another agent with a bearer token.',
   },
@@ -268,6 +476,10 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_request_help',
     description: 'Ask the help route with a bearer token.',
+  },
+  {
+    name: 'aol_withdraw_capital',
+    description: 'Try a capital withdrawal with a bearer token.',
   },
   {
     name: 'aol_request',
@@ -583,6 +795,51 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     json,
   })));
 
+  server.registerTool('aol_get_health', {
+    description: 'Read the public health endpoint.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/health',
+  })));
+
+  server.registerTool('aol_get_llms', {
+    description: 'Read the root llms.txt document.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/llms.txt',
+  })));
+
+  server.registerTool('aol_get_llms_mcp', {
+    description: 'Read the MCP-only llms document.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/llms-mcp.txt',
+  })));
+
+  server.registerTool('aol_get_mcp_manifest', {
+    description: 'Read the hosted MCP manifest document.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/.well-known/mcp.json',
+  })));
+
+  server.registerTool('aol_get_agent_card', {
+    description: 'Read the public agent card document.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/.well-known/agent-card.json',
+  })));
+
   server.registerTool('aol_get_root', {
     description: 'Read the site root JSON entrypoint.',
     inputSchema: {},
@@ -617,6 +874,18 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/platform/status',
+  })));
+
+  server.registerTool('aol_decode_invoice', {
+    description: 'Read the public invoice decode teaching boundary.',
+    inputSchema: {
+      invoice: z.string().describe('BOLT11 invoice string, or the short placeholder lnbc... for the teaching boundary.'),
+    },
+  }, async ({ invoice }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/platform/decode-invoice',
+    query: { invoice },
   })));
 
   server.registerTool('aol_get_market_config', {
@@ -839,6 +1108,104 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
+  server.registerTool('aol_get_me_dashboard', {
+    description: 'Read your dashboard summary with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me/dashboard',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_me_events', {
+    description: 'Read your own event stream snapshot with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me/events',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_referral', {
+    description: 'Read your referral code with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me/referral',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_referral_code', {
+    description: 'Read your referral-code view with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/agents/me/referral-code',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_test_node_connection', {
+    description: 'Test your node credentials with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      host: z.string().describe('Public host:port for your LND node.'),
+      macaroon: z.string().describe('Hex macaroon string for the remote node.'),
+      tls_cert: z.string().describe('Hex TLS cert string for the remote node.'),
+    },
+  }, async ({ api_key, host, macaroon, tls_cert }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/node/test-connection',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { host, macaroon, tls_cert },
+  })));
+
+  server.registerTool('aol_connect_node', {
+    description: 'Save a verified node connection with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      host: z.string().describe('Public host:port for your LND node.'),
+      macaroon: z.string().describe('Hex macaroon string for the remote node.'),
+      tls_cert: z.string().describe('Hex TLS cert string for the remote node.'),
+      tier: z.string().optional().describe('Optional node tier like readonly or observatory.'),
+    },
+  }, async ({ api_key, host, macaroon, tls_cert, tier }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/node/connect',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {
+      host,
+      macaroon,
+      tls_cert,
+      ...(tier !== undefined ? { tier } : {}),
+    },
+  })));
+
+  server.registerTool('aol_get_node_status', {
+    description: 'Read your saved node-status view with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/node/status',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
   server.registerTool('aol_get_agent_profile', {
     description: 'Read one public agent profile by agent id.',
     inputSchema: {
@@ -859,6 +1226,51 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: `/api/v1/agents/${encodeURIComponent(agent_id)}/lineage`,
+  })));
+
+  server.registerTool('aol_submit_action', {
+    description: 'Submit an action log entry with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      action_type: z.string().describe('Action type like open_channel.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional action params object.'),
+      description: z.string().optional().describe('Optional human-readable action summary.'),
+    },
+  }, async ({ api_key, action_type, params, description }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/actions/submit',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {
+      action_type,
+      ...(params !== undefined ? { params } : {}),
+      ...(description !== undefined ? { description } : {}),
+    },
+  })));
+
+  server.registerTool('aol_get_action_history', {
+    description: 'Read your action history with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/actions/history',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_action', {
+    description: 'Read one action by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      action_id: z.string().describe('Real action id from action history.'),
+    },
+  }, async ({ api_key, action_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/actions/${encodeURIComponent(action_id)}`,
+    headers: { Authorization: `Bearer ${api_key}` },
   })));
 
   server.registerTool('aol_get_wallet_balance', {
@@ -882,6 +1294,18 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/wallet/history',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_wallet_mint_quote_help', {
+    description: 'Read the wallet mint-quote teaching boundary with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/wallet/mint-quote',
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
@@ -926,6 +1350,117 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/wallet/mint',
     headers: { Authorization: `Bearer ${api_key}` },
     json: { amount_sats, quote_id },
+  })));
+
+  server.registerTool('aol_create_wallet_melt_quote', {
+    description: 'Create a wallet melt quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      invoice: z.string().describe('Real BOLT11 invoice string.'),
+    },
+  }, async ({ api_key, invoice }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/melt-quote',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { invoice },
+  })));
+
+  server.registerTool('aol_melt_wallet', {
+    description: 'Melt wallet funds through a Lightning invoice with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      quote_id: z.string().describe('Real quote_id returned by wallet melt-quote.'),
+    },
+  }, async ({ api_key, quote_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/melt',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { quote_id },
+  })));
+
+  server.registerTool('aol_send_wallet_tokens', {
+    description: 'Send ecash tokens from your wallet with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Amount to send in sats.'),
+    },
+  }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/send',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats },
+  })));
+
+  server.registerTool('aol_receive_wallet_tokens', {
+    description: 'Receive ecash tokens into your wallet with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      token: z.string().describe('Real Cashu token string.'),
+    },
+  }, async ({ api_key, token }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/receive',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { token },
+  })));
+
+  server.registerTool('aol_restore_wallet', {
+    description: 'Restore wallet proofs from seed with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/restore',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
+  })));
+
+  server.registerTool('aol_reclaim_wallet_pending', {
+    description: 'Reclaim pending wallet sends with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      max_age_hours: z.number().int().positive().optional().describe('Optional max token age to reclaim.'),
+    },
+  }, async ({ api_key, max_age_hours }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/reclaim-pending',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {
+      ...(max_age_hours !== undefined ? { max_age_hours } : {}),
+    },
+  })));
+
+  server.registerTool('aol_try_wallet_deposit', {
+    description: 'Hit the deprecated wallet deposit route with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/deposit',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
+  })));
+
+  server.registerTool('aol_try_wallet_withdraw', {
+    description: 'Hit the deprecated wallet withdraw route with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/wallet/withdraw',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
   })));
 
   server.registerTool('aol_get_capital_balance', {
@@ -975,6 +1510,45 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     method: 'GET',
     path: '/api/v1/capital/deposits',
     headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_withdraw_capital', {
+    description: 'Try a capital withdrawal with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Amount to withdraw in sats.'),
+      destination_address: z.string().describe('Bitcoin on-chain address.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, amount_sats, destination_address, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/capital/withdraw',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { amount_sats, destination_address, ...(idempotency_key ? { idempotency_key } : {}) },
+  })));
+
+  server.registerTool('aol_get_network_health', {
+    description: 'Read the public network-health view.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/analysis/network-health',
+  })));
+
+  server.registerTool('aol_get_node_analysis', {
+    description: 'Read one public node analysis view by pubkey.',
+    inputSchema: {
+      node_pubkey: z.string().describe('Real node pubkey to inspect.'),
+    },
+  }, async ({ node_pubkey }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/analysis/node/${node_pubkey}`,
   })));
 
   server.registerTool('aol_suggest_peers', {
@@ -1033,6 +1607,118 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
+  server.registerTool('aol_get_leaderboard_agent', {
+    description: 'Read one public leaderboard agent entry by agent id.',
+    inputSchema: {
+      agent_id: z.string().describe('Public 8-character agent id.'),
+    },
+  }, async ({ agent_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/leaderboard/agent/${encodeURIComponent(agent_id)}`,
+  })));
+
+  server.registerTool('aol_get_leaderboard_challenges', {
+    description: 'Read public leaderboard challenges.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/leaderboard/challenges',
+  })));
+
+  server.registerTool('aol_get_leaderboard_hall_of_fame', {
+    description: 'Read the public hall of fame.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/leaderboard/hall-of-fame',
+  })));
+
+  server.registerTool('aol_get_leaderboard_evangelists', {
+    description: 'Read the public evangelists leaderboard.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/leaderboard/evangelists',
+  })));
+
+  server.registerTool('aol_get_tournament_bracket', {
+    description: 'Read one public tournament bracket by id.',
+    inputSchema: {
+      tournament_id: z.string().describe('Real tournament id.'),
+    },
+  }, async ({ tournament_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/tournaments/${encodeURIComponent(tournament_id)}/bracket`,
+  })));
+
+  server.registerTool('aol_enter_tournament', {
+    description: 'Enter one tournament by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      tournament_id: z.string().describe('Real tournament id.'),
+    },
+  }, async ({ api_key, tournament_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: `/api/v1/tournaments/${encodeURIComponent(tournament_id)}/enter`,
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: {},
+  })));
+
+  server.registerTool('aol_get_channels_audit', {
+    description: 'Read the public channel audit feed.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/audit',
+  })));
+
+  server.registerTool('aol_get_channels_verify', {
+    description: 'Read the public channel verify feed.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/verify',
+  })));
+
+  server.registerTool('aol_get_channels_violations', {
+    description: 'Read the public channel violations feed.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/violations',
+  })));
+
+  server.registerTool('aol_get_channel_audit', {
+    description: 'Read one public channel audit record by channel id.',
+    inputSchema: {
+      chan_id: z.string().describe('Real chan_id or channel point used by the audit route.'),
+    },
+  }, async ({ chan_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/channels/audit/${encodeURIComponent(chan_id)}`,
+  })));
+
+  server.registerTool('aol_get_channel_verify', {
+    description: 'Read one public channel verify record by channel id.',
+    inputSchema: {
+      chan_id: z.string().describe('Real chan_id or channel point used by the verify route.'),
+    },
+  }, async ({ chan_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/channels/verify/${encodeURIComponent(chan_id)}`,
+  })));
+
   server.registerTool('aol_build_open_channel_instruction', {
     description: 'Build the exact channel-open instruction object to sign locally.',
     inputSchema: {
@@ -1088,6 +1774,30 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     json: { instruction, signature },
   })));
 
+  server.registerTool('aol_get_market_preview_help', {
+    description: 'Read the market preview teaching boundary with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/preview',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_market_open_help', {
+    description: 'Read the market open teaching boundary with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/open',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
   server.registerTool('aol_get_market_pending', {
     description: 'Read your pending channel opens with a bearer token.',
     inputSchema: {
@@ -1097,6 +1807,70 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/market/pending',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_market_revenue', {
+    description: 'Read your market revenue view with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/revenue',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_market_revenue_channel', {
+    description: 'Read your market revenue view for one owned channel.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      chan_id: z.string().describe('Real owned chan_id.'),
+    },
+  }, async ({ api_key, chan_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/revenue/${encodeURIComponent(chan_id)}`,
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_update_revenue_config', {
+    description: 'Update your revenue destination config with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      destination: z.string().describe('Revenue destination like capital.'),
+    },
+  }, async ({ api_key, destination }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'PUT',
+    path: '/api/v1/market/revenue-config',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { destination },
+  })));
+
+  server.registerTool('aol_get_market_performance', {
+    description: 'Read your market performance view with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/performance',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_market_performance_channel', {
+    description: 'Read your market performance view for one owned channel.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      chan_id: z.string().describe('Real owned chan_id.'),
+    },
+  }, async ({ api_key, chan_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/performance/${encodeURIComponent(chan_id)}`,
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
@@ -1116,6 +1890,18 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
       timestamp,
     }));
   });
+
+  server.registerTool('aol_get_market_close_help', {
+    description: 'Read the market close teaching boundary with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/close',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
 
   server.registerTool('aol_close_channel', {
     description: 'Submit a signed channel-close request with a bearer token.',
@@ -1291,6 +2077,96 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/market/rebalances',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_swap_quote', {
+    description: 'Read a swap quote with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
+    },
+  }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/swap/quote',
+    headers: { Authorization: `Bearer ${api_key}` },
+    query: { amount_sats },
+  })));
+
+  server.registerTool('aol_create_lightning_to_onchain_swap', {
+    description: 'Create a Lightning-to-onchain swap with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
+      onchain_address: z.string().describe('Bitcoin on-chain address for the swap payout.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, amount_sats, onchain_address, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/swap/lightning-to-onchain',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { amount_sats, onchain_address, ...(idempotency_key ? { idempotency_key } : {}) },
+  })));
+
+  server.registerTool('aol_get_swap_history', {
+    description: 'Read your swap history with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/market/swap/history',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_swap_status', {
+    description: 'Read one swap status by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      swap_id: z.string().describe('Real swap id.'),
+    },
+  }, async ({ api_key, swap_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/swap/status/${encodeURIComponent(swap_id)}`,
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_fund_channel_from_ecash', {
+    description: 'Try the ecash-funded channel-open route with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
+      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+    },
+  }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/fund-from-ecash',
+    headers: {
+      Authorization: `Bearer ${api_key}`,
+      ...(idempotency_key ? { 'Idempotency-Key': idempotency_key } : {}),
+    },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_fund_from_ecash_status', {
+    description: 'Read one ecash funding flow status by id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      flow_id: z.string().describe('Real ecash funding flow id.'),
+    },
+  }, async ({ api_key, flow_id }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: `/api/v1/market/fund-from-ecash/${encodeURIComponent(flow_id)}`,
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 

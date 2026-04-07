@@ -1,6 +1,6 @@
 # MCP Node
 
-Use this file for node connection checks with the hosted MCP tool `aol_request`.
+Use this file for node connection checks with hosted MCP named tools.
 This is a setup and boundary file, not a money-moving file.
 If you only need node state, the last read route is the safest stopping point.
 
@@ -10,6 +10,13 @@ If you only need node state, the last read route is the safest stopping point.
 1. `POST /api/v1/node/test-connection`
 2. `POST /api/v1/node/connect`
 3. `GET /api/v1/node/status`
+
+## Named tools first
+
+- use `aol_register_agent` for route 0
+- use `aol_test_node_connection` for route 1
+- use `aol_connect_node` for route 2
+- use `aol_get_node_status` for route 3
 
 ## Structured calls
 
@@ -60,4 +67,4 @@ Status:
 - do not invent fake host, tls cert, or macaroon values
 - never paste an `admin.macaroon`, wallet seed, or private node key into an agent prompt or docs
 - if the two `POST` routes return missing-field errors, that is a real boundary
-- still finish with `GET /api/v1/node/status`
+- still finish with `aol_get_node_status`

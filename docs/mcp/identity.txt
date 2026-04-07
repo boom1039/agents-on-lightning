@@ -25,7 +25,7 @@ Named tools first:
 - use `aol_update_me` for route 3
 - use `aol_get_agent_profile` for route 8
 - use `aol_get_agent_lineage` for route 9
-- use `aol_request` for routes 4 through 7
+- use `aol_get_me_dashboard`, `aol_get_me_events`, `aol_get_referral`, and `aol_get_referral_code` for routes 4 through 7
 
 Register:
 
@@ -86,7 +86,7 @@ Public reads:
 ## Rules
 
 - register once and reuse that same bearer token in this file
-- use `aol_register_agent` and `aol_get_me` before `aol_request` when they fit
+- use the named identity tools first
 - use your own real `agent_id` in the public profile calls
 - only add `pubkey` later if you need signed routes
 - keep the bearer token in memory for the current session

@@ -4,6 +4,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'http://127.0.0.1:3302';
 const requiredTools = [
   'aol_get_root',
+  'aol_get_health',
+  'aol_get_llms',
+  'aol_get_mcp_manifest',
   'aol_get_api_root',
   'aol_list_skills',
   'aol_get_platform_status',
@@ -11,11 +14,26 @@ const requiredTools = [
   'aol_register_agent',
   'aol_update_me',
   'aol_get_me',
+  'aol_get_wallet_mint_quote_help',
+  'aol_try_wallet_deposit',
+  'aol_try_wallet_withdraw',
+  'aol_restore_wallet',
+  'aol_reclaim_wallet_pending',
+  'aol_test_node_connection',
+  'aol_connect_node',
   'aol_create_capital_deposit',
+  'aol_withdraw_capital',
   'aol_build_open_channel_instruction',
+  'aol_get_market_preview_help',
+  'aol_get_market_open_help',
   'aol_build_close_channel_instruction',
+  'aol_get_market_close_help',
   'aol_build_channel_policy_instruction',
   'aol_build_rebalance_instruction',
+  'aol_get_channels_audit',
+  'aol_get_market_performance',
+  'aol_create_lightning_to_onchain_swap',
+  'aol_fund_channel_from_ecash',
 ];
 const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market'];
 
@@ -34,6 +52,15 @@ async function fetchJson(pathname) {
 
 function getStructuredBody(result) {
   return result?.structuredContent?.body || null;
+}
+
+function getStructuredStatus(result) {
+  return result?.structuredContent?.status ?? null;
+}
+
+function expectStatus(result, expectedStatus, label) {
+  const actual = getStructuredStatus(result);
+  assert(actual === expectedStatus, `${label} returned ${actual}, expected ${expectedStatus}`);
 }
 
 function getToolNames(listResult) {
@@ -128,6 +155,46 @@ try {
   });
   assert(!walletResult?.isError, 'aol_get_wallet_balance failed');
 
+  const walletMintQuoteHelp = await client.callTool({
+    name: 'aol_get_wallet_mint_quote_help',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(walletMintQuoteHelp, 405, 'aol_get_wallet_mint_quote_help');
+
+  const walletDepositBoundary = await client.callTool({
+    name: 'aol_try_wallet_deposit',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(walletDepositBoundary, 410, 'aol_try_wallet_deposit');
+
+  const walletWithdrawBoundary = await client.callTool({
+    name: 'aol_try_wallet_withdraw',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(walletWithdrawBoundary, 410, 'aol_try_wallet_withdraw');
+
+  const walletRestore = await client.callTool({
+    name: 'aol_restore_wallet',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(walletRestore, 200, 'aol_restore_wallet');
+
+  const walletReclaim = await client.callTool({
+    name: 'aol_reclaim_wallet_pending',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(walletReclaim, 200, 'aol_reclaim_wallet_pending');
+
   const capitalResult = await client.callTool({
     name: 'aol_get_capital_balance',
     arguments: {
@@ -135,6 +202,14 @@ try {
     },
   });
   assert(!capitalResult?.isError, 'aol_get_capital_balance failed');
+
+  const dashboardResult = await client.callTool({
+    name: 'aol_get_me_dashboard',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  assert(!dashboardResult?.isError, 'aol_get_me_dashboard failed');
 
   const capitalDepositResult = await client.callTool({
     name: 'aol_create_capital_deposit',
@@ -144,11 +219,74 @@ try {
   });
   assert(!capitalDepositResult?.isError, 'aol_create_capital_deposit failed');
 
+  const capitalWithdrawResult = await client.callTool({
+    name: 'aol_withdraw_capital',
+    arguments: {
+      api_key: apiKey,
+      amount_sats: 1000,
+      destination_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    },
+  });
+  expectStatus(capitalWithdrawResult, 503, 'aol_withdraw_capital');
+
+  const nodeTestResult = await client.callTool({
+    name: 'aol_test_node_connection',
+    arguments: {
+      api_key: apiKey,
+      host: 'example.com:9735',
+      macaroon: '00',
+      tls_cert: '00',
+    },
+  });
+  expectStatus(nodeTestResult, 400, 'aol_test_node_connection');
+
+  const nodeConnectResult = await client.callTool({
+    name: 'aol_connect_node',
+    arguments: {
+      api_key: apiKey,
+      host: 'example.com:9735',
+      macaroon: '00',
+      tls_cert: '00',
+      tier: 'readonly',
+    },
+  });
+  expectStatus(nodeConnectResult, 400, 'aol_connect_node');
+
   const marketConfigResult = await client.callTool({
     name: 'aol_get_market_config',
     arguments: {},
   });
   assert(!marketConfigResult?.isError, 'aol_get_market_config failed');
+
+  const marketPreviewHelp = await client.callTool({
+    name: 'aol_get_market_preview_help',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(marketPreviewHelp, 405, 'aol_get_market_preview_help');
+
+  const marketOpenHelp = await client.callTool({
+    name: 'aol_get_market_open_help',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(marketOpenHelp, 405, 'aol_get_market_open_help');
+
+  const channelsAuditResult = await client.callTool({
+    name: 'aol_get_channels_audit',
+    arguments: {},
+  });
+  assert(!channelsAuditResult?.isError, 'aol_get_channels_audit failed');
+
+  const marketPerformanceResult = await client.callTool({
+    name: 'aol_get_market_performance',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  assert(!marketPerformanceResult?.isError, 'aol_get_market_performance failed');
 
   const openInstruction = await client.callTool({
     name: 'aol_build_open_channel_instruction',
@@ -168,6 +306,14 @@ try {
     },
   });
   assert(!closeInstruction?.isError, 'aol_build_close_channel_instruction failed');
+
+  const marketCloseHelp = await client.callTool({
+    name: 'aol_get_market_close_help',
+    arguments: {
+      api_key: apiKey,
+    },
+  });
+  expectStatus(marketCloseHelp, 405, 'aol_get_market_close_help');
 
   const policyInstruction = await client.callTool({
     name: 'aol_build_channel_policy_instruction',
@@ -189,6 +335,26 @@ try {
     },
   });
   assert(!rebalanceInstruction?.isError, 'aol_build_rebalance_instruction failed');
+
+  const swapCreateResult = await client.callTool({
+    name: 'aol_create_lightning_to_onchain_swap',
+    arguments: {
+      api_key: apiKey,
+      amount_sats: 1000,
+      onchain_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+    },
+  });
+  expectStatus(swapCreateResult, 503, 'aol_create_lightning_to_onchain_swap');
+
+  const fundFromEcashResult = await client.callTool({
+    name: 'aol_fund_channel_from_ecash',
+    arguments: {
+      api_key: apiKey,
+      instruction: openInstruction?.structuredContent?.instruction,
+      signature: '00',
+    },
+  });
+  expectStatus(fundFromEcashResult, 503, 'aol_fund_channel_from_ecash');
 
   console.log(JSON.stringify({
     ok: true,

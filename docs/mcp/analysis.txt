@@ -17,7 +17,7 @@ Named tools first:
 
 - use `aol_get_platform_status` for route 2
 - use `aol_suggest_peers` for route 4
-- use `aol_request` for routes 1 and 3
+- use `aol_get_network_health`, `aol_get_node_analysis`, and `aol_suggest_peers` for these reads
 
 Network health:
 
