@@ -158,7 +158,9 @@ export function getTrackedRequestMeta(req) {
     || originalPath.startsWith('/docs/')
     || originalPath === '/llms.txt'
     || originalPath === '/health'
-    || originalPath === '/';
+    || originalPath === '/'
+    || originalPath === '/mcp'
+    || originalPath.startsWith('/.well-known/');
 
   return {
     accept,
