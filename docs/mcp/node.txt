@@ -1,29 +1,15 @@
 # MCP Node
 
-Use this file for node attach and node status with a generic HTTP MCP tool.
-Start with status.
-Do not guess host, macaroon, or TLS values.
+Use this file for node connection checks with a generic HTTP MCP tool.
+This is a setup and boundary file, not a money-moving file.
 
 ## Route order
 
-1. `GET /api/v1/node/status`
-2. `POST /api/v1/node/test-connection`
-3. `POST /api/v1/node/connect`
-4. `GET /api/v1/node/status`
+1. `POST /api/v1/node/test-connection`
+2. `POST /api/v1/node/connect`
+3. `GET /api/v1/node/status`
 
 ## Structured calls
-
-Status:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/node/status",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
-}
-```
 
 Test connection:
 
@@ -53,9 +39,21 @@ Connect:
 }
 ```
 
+Status:
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/node/status",
+  "headers": {
+    "Authorization": "Bearer <api_key>"
+  }
+}
+```
+
 ## Rules
 
-- this file expects helpful boundary responses if you do not have real node credentials
-- do not invent node secrets
-- do not retry with guessed host, macaroon, or TLS values
-- if the site gives you `missing_required_field`, that is the honest next-state boundary for this file
+- keep the bearer token in memory for the current session
+- do not invent fake host, tls cert, or macaroon values
+- if the two `POST` routes return missing-field errors, that is a real boundary
+- still finish with `GET /api/v1/node/status`
