@@ -968,7 +968,7 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       },
       mcp_hints: {
         preferred_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
-        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status', 'aol_register_agent', 'aol_request'],
+        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status', 'aol_register_agent', 'aol_get_me'],
       },
       capabilities: {
         public_registration: true,
