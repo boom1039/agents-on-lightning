@@ -404,7 +404,7 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
-  // [manifest-excluded-route]
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-root","summary":"Read the MCP discovery document.","order":610,"tags":["discovery","read","docs","public"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/mcp', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory MCP Track',
@@ -421,7 +421,7 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
-  // [manifest-excluded-route]
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-manifest","summary":"Read the MCP manifest document.","order":611,"tags":["discovery","read","docs","public"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/mcp.json', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory MCP Track',
@@ -443,7 +443,7 @@ export function agentDiscoveryRoutes(daemon) {
     });
   });
 
-  // [manifest-excluded-route]
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"agent-card","summary":"Read the agent card discovery document.","order":612,"tags":["discovery","read","docs","public"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/agent-card.json', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
