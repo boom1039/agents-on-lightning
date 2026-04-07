@@ -8,7 +8,6 @@ import { isLoopbackRequest, rejectUnauthorizedOperatorRoute } from '../identity/
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const JOURNEY_DIR = resolve(__dirname, '..', '..', 'monitoring_dashboards', 'journey');
-const ROUTE_REPORTS_DIR = resolve(__dirname, '..', '..', 'test', 'routes', 'reports');
 
 function intParam(val) {
   return val ? parseInt(val, 10) : undefined;
@@ -44,29 +43,6 @@ export function journeyRoutes() {
   router.use('/journey', express.static(JOURNEY_DIR, { etag: false, maxAge: 0 }));
   router.get('/journey', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'index.html')));
   router.get('/journey/three', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'three.html')));
-
-  router.use('/local/reports/routes/files', (req, res, next) => {
-    const rejection = rejectLocalOnlyRoute(req, res);
-    if (rejection) return rejection;
-    return next();
-  }, express.static(ROUTE_REPORTS_DIR, { etag: false, maxAge: 0, index: false }));
-
-  router.get('/local/reports/routes/latest', (req, res) => {
-    const rejection = rejectLocalOnlyRoute(req, res);
-    if (rejection) return rejection;
-    return res.sendFile(resolve(ROUTE_REPORTS_DIR, 'latest-routes-prod.html'), (err) => {
-      if (!err) return;
-      if (err.code === 'ENOENT') {
-        return res.status(404).json({
-          error: 'No local route report has been generated yet.',
-          hint: 'Run the docs-driven route suite first.',
-        });
-      }
-      return res.status(500).json({
-        error: 'Failed to load the local route report.',
-      });
-    });
-  });
 
   router.get('/api/journey', async (_req, res) => {
     const monitor = getJourneyMonitor();
