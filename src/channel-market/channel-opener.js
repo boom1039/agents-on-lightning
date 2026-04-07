@@ -113,7 +113,28 @@ const LND_ERROR_MAP = [
   },
 ];
 
+function btcStringToSats(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const [whole, fraction = ''] = normalized.split('.');
+  const sats = `${whole}${fraction.padEnd(8, '0').slice(0, 8)}`;
+  const parsed = Number.parseInt(sats, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function mapLndError(errMsg) {
+  const minSizeMatch = /chan size of ([\d.]+) BTC is below min chan size of ([\d.]+) BTC/i.exec(errMsg);
+  if (minSizeMatch) {
+    const attemptedSats = btcStringToSats(minSizeMatch[1]);
+    const minSats = btcStringToSats(minSizeMatch[2]);
+    if (Number.isFinite(minSats)) {
+      if (Number.isFinite(attemptedSats)) {
+        return `Channel too small. You tried ${attemptedSats} sats, but this peer requires at least ${minSats} sats.`;
+      }
+      return `Channel too small. This peer requires at least ${minSats} sats.`;
+    }
+  }
   for (const { pattern, message } of LND_ERROR_MAP) {
     if (pattern.test(errMsg)) return message;
   }
