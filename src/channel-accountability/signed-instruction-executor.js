@@ -574,15 +574,13 @@ export class SignedInstructionExecutor {
     const channelPoint = assignment.channel_point;
 
     if (action === 'set_fee_policy') {
-      const baseFeeMsat = params.base_fee_msat;
-      const feeRatePpm = params.fee_rate_ppm;
-      // If time_lock_delta not provided, read current and preserve
-      let timeLockDelta = params.time_lock_delta;
-      if (timeLockDelta === undefined || timeLockDelta === null) {
-        const report = await node.feeReport();
-        const current = report.channel_fees?.find(f => f.channel_point === channelPoint);
-        timeLockDelta = current?.time_lock_delta || 40;
-      }
+      const report = await node.feeReport();
+      const current = report.channel_fees?.find(f => f.channel_point === channelPoint);
+      if (!current) throw new Error('Channel not found in feeReport');
+
+      const baseFeeMsat = params.base_fee_msat ?? parseInt(current.base_fee_msat, 10);
+      const feeRatePpm = params.fee_rate_ppm ?? parseInt(current.fee_per_mil, 10);
+      const timeLockDelta = params.time_lock_delta ?? current.time_lock_delta ?? 40;
       await node.updateChannelPolicy(channelPoint, baseFeeMsat, feeRatePpm, timeLockDelta);
     } else if (action === 'update_htlc_limits') {
       // Read current fee state — preserve fees, only change HTLC limits
