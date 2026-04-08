@@ -219,7 +219,7 @@ test('polling marks failed loop swaps as loop_out_failed', async () => {
 
   const flow = await funder.getFlow('agent-lightning', created.flow_id);
   assert.equal(flow.status, 'loop_out_failed');
-  assert.equal(flow.last_error, 'FAILURE_REASON_NO_ROUTE');
+  assert.equal(flow.last_error, 'Loop could not find a Lightning route for the swap payment (FAILURE_REASON_NO_ROUTE).');
 
   const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
   assert.deepEqual(eventTypes, [

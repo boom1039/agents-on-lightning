@@ -32,6 +32,18 @@ function isFailedSwapState(state) {
   return ['FAILED', 'FAIL_OFFCHAIN_PAYMENTS', 'FAIL_TIMEOUT', 'FAIL_INSUFFICIENT_VALUE'].includes(String(state || '').toUpperCase());
 }
 
+function describeFlowError(error) {
+  const code = String(error || '').trim();
+  if (!code) return null;
+  if (code === 'FAILURE_REASON_OFFCHAIN') {
+    return 'Loop could not route the off-chain swap payment (FAILURE_REASON_OFFCHAIN).';
+  }
+  if (code === 'FAILURE_REASON_NO_ROUTE') {
+    return 'Loop could not find a Lightning route for the swap payment (FAILURE_REASON_NO_ROUTE).';
+  }
+  return code;
+}
+
 export class LightningCapitalFunder {
   constructor({
     nodeManager,
@@ -360,7 +372,7 @@ export class LightningCapitalFunder {
       }
       if (swap && isFailedSwapState(swap.state)) {
         flow.status = 'loop_out_failed';
-        flow.last_error = swap.failure_reason || `Loop Out failed with state ${swap.state}`;
+        flow.last_error = describeFlowError(swap.failure_reason || `Loop Out failed with state ${swap.state}`);
         flow.last_progress_at = nowIso();
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
@@ -467,6 +479,9 @@ export class LightningCapitalFunder {
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
       last_error: flow.last_error || null,
+      hint: flow.status === 'loop_out_failed' && flow.last_error === describeFlowError('FAILURE_REASON_OFFCHAIN')
+        ? 'Your node received the Lightning deposit, but Loop could not route its own swap payment onward.'
+        : null,
       status_url: `/api/v1/capital/deposit-lightning/${encodeURIComponent(flow.flow_id)}`,
       learn: 'Pay the Lightning invoice, then wait for Loop Out to move those sats on-chain. Capital becomes usable only after the on-chain side confirms.',
     };
