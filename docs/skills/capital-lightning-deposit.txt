@@ -1,7 +1,7 @@
 # Route Group: capital-lightning-deposit
 
 This is the exact Lightning-to-capital bridge flow.
-The site checks its bridge options first.
+The site checks `Loop`, `Boltz`, and wallet fallback first.
 If one is ready, it creates a Lightning invoice, you pay it outside the site, and then the site finishes the on-chain bridge before capital becomes usable.
 
 If you do not already have auth:
@@ -26,3 +26,4 @@ Rules:
 - wait until the flow returns `confirmed`
 - after it is `confirmed`, switch to the normal capital balance and market open docs
 - if route 2 says `loop_out_failed`, retry that same flow instead of starting over
+- the site may switch bridge providers under the hood, but the route and `flow_id` stay the same

@@ -69,7 +69,7 @@ export const MCP_DOCS = [
     name: 'capital-lightning',
     file: 'capital-lightning.txt',
     title: 'MCP Capital Lightning',
-    description: 'Fund platform capital from a Lightning invoice through Loop Out.',
+    description: 'Fund platform capital from a Lightning invoice through Loop, Boltz, or wallet fallback.',
   },
   {
     name: 'market-state',
@@ -176,12 +176,13 @@ export const MCP_TASK_PROMPTS = [
     name: 'fund_capital_lightning',
     title: 'Fund Capital With Lightning',
     description: 'Create a Lightning capital invoice, pay it, and wait for confirmed capital.',
-    text: [
-      'Read the capital-lightning and capital resources first.',
-      'Register, create a Lightning capital deposit, read the returned bridge_preflight, pay the returned invoice outside the site, then poll the status until it confirms.',
-      'Use aol_create_lightning_capital_deposit, aol_get_lightning_capital_deposit_status, aol_get_capital_balance, and aol_get_capital_activity.',
-      'Reuse saved_values.flow_id, saved_values.invoice, and saved_values.onchain_address from the create tool result.',
-    ].join('\n'),
+      text: [
+        'Read the capital-lightning and capital resources first.',
+        'Register, create a Lightning capital deposit, read the returned bridge_preflight, pay the returned invoice outside the site, then poll the status until it confirms.',
+        'The site may bridge that payment with Loop first, then Boltz, then wallet fallback, but the flow_id stays the same.',
+        'Use aol_create_lightning_capital_deposit, aol_get_lightning_capital_deposit_status, aol_get_capital_balance, and aol_get_capital_activity.',
+        'Reuse saved_values.flow_id, saved_values.invoice, and saved_values.onchain_address from the create tool result.',
+      ].join('\n'),
   },
   {
     name: 'inspect_market',

@@ -14,10 +14,18 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@cashu/cashu-ts": "^2.2.0",
+    "@chenglou/pretext": "^0.0.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@scure/btc-signer": "^2.0.1",
+    "@vulpemventures/secp256k1-zkp": "^3.2.1",
+    "bitcoinjs-lib": "^7.0.1",
+    "boltz-core": "^4.0.3",
     "cors": "^2.8.5",
     "duckdb-async": "^1.4.2",
+    "ecpair": "^3.0.1",
     "express": "^4.21.0",
+    "playwright-core": "^1.59.1",
+    "tiny-secp256k1": "^2.2.4",
     "yaml": "^2.6.0",
     "zod": "^4.3.6"
   },

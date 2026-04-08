@@ -3,7 +3,7 @@
 Use this file when you already have Lightning sats and want to turn them into real platform capital.
 This is a bridge flow.
 Before it creates the invoice, the site checks the bridge providers it knows about.
-It then pays a Lightning invoice first, then the site bridges that value on-chain, then capital becomes usable after on-chain confirmations.
+It then pays a Lightning invoice first, then the site bridges that value on-chain with `Loop`, `Boltz`, or the node wallet fallback, then capital becomes usable after on-chain confirmations.
 
 ## Real path
 
@@ -41,6 +41,6 @@ Tool order:
 - if route 2 refuses to create an invoice, read `bridge_preflight` to see which provider was blocked
 - do not call market open until the Lightning capital flow says `confirmed`
 - `invoice_paid` is not enough yet
-- `loop_out_pending` and `onchain_pending` still mean you must wait
+- `loop_out_pending` and `onchain_pending` still mean you must wait, even when the site switched from `Loop` to `Boltz`
 - the flow is only usable for channel opens after the on-chain side confirms
-- the site may use Loop first, but if that route fails it may still complete the on-chain bridge another way
+- the site may try `Loop` first, then `Boltz`, then its own node wallet if needed

@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash, randomBytes } from 'node:crypto';
 
+import { ECPairFactory } from 'ecpair';
+import * as ecc from 'tiny-secp256k1';
+import { address as btcAddress, networks as btcNetworks, payments } from 'bitcoinjs-lib';
+import { Musig, SwapTreeSerializer, TaprootUtils, reverseSwapTree } from 'boltz-core';
+import { SigHash, Transaction as RawTransaction } from '@scure/btc-signer';
 import { LightningCapitalFunder } from './lightning-capital-funder.js';
 import { mockDataLayer, mockAuditLog, mockMutex, mockNodeManager, mockCapitalLedger } from './test-mock-factories.js';
+
+const TEST_BOLTZ_API_BASE = 'http://127.0.0.1:9';
+const ECPair = ECPairFactory(ecc);
 
 function createDepositTracker() {
   const entries = new Map();
@@ -61,6 +70,7 @@ test('createFlow creates invoice, tracked address, and lightning funding event',
     auditLog: mockAuditLog(),
     mutex: mockMutex(),
     loopClient,
+    config: { boltzApiBase: TEST_BOLTZ_API_BASE },
   });
 
   await funder.load();
@@ -120,6 +130,7 @@ test('polling advances invoice -> loop out -> onchain pending -> confirmed', asy
     loopClient,
     config: {
       pollIntervalMs: 1_000,
+      boltzApiBase: TEST_BOLTZ_API_BASE,
     },
   });
 
@@ -220,6 +231,7 @@ test('polling retries offchain loop swap failures before giving up', async () =>
     loopClient,
     config: {
       retryBackoffMs: 0,
+      boltzApiBase: TEST_BOLTZ_API_BASE,
     },
   });
 
@@ -300,6 +312,7 @@ test('polling marks failed loop swaps as loop_out_failed after retry limit', asy
     config: {
       maxStartAttempts: 1,
       retryBackoffMs: 0,
+      boltzApiBase: TEST_BOLTZ_API_BASE,
     },
   });
 
@@ -355,6 +368,7 @@ test('load revives retryable offchain failures back into invoice_paid', async ()
     },
     config: {
       retryBackoffMs: 0,
+      boltzApiBase: TEST_BOLTZ_API_BASE,
     },
   });
 
@@ -419,6 +433,9 @@ test('createFlow can prefer wallet fallback when Loop is not configured', async 
     auditLog: mockAuditLog(),
     mutex: mockMutex(),
     loopClient: null,
+    config: {
+      boltzApiBase: TEST_BOLTZ_API_BASE,
+    },
   });
 
   await funder.load();
@@ -487,6 +504,9 @@ test('falls back to wallet bridge after route failure and then confirms', async 
     auditLog: mockAuditLog(),
     mutex: mockMutex(),
     loopClient,
+    config: {
+      boltzApiBase: TEST_BOLTZ_API_BASE,
+    },
   });
 
   await funder.load();
@@ -529,4 +549,173 @@ test('falls back to wallet bridge after route failure and then confirms', async 
     'lightning_wallet_bridge_broadcast',
     'lightning_deposit_confirmed',
   ]);
+});
+
+test('falls back to Boltz after a Loop route failure and publishes a claim tx', async () => {
+  const restoreFetch = globalThis.fetch;
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  let invoiceSettled = false;
+  let swapChecks = 0;
+
+  const boltzKeys = ECPair.makeRandom();
+  const lockupAddress = payments.p2wpkh({ pubkey: Buffer.from(boltzKeys.publicKey), network: btcNetworks.bitcoin }).address;
+  const lockupScript = btcAddress.toOutputScript(lockupAddress, btcNetworks.bitcoin);
+  const lockupTx = new RawTransaction();
+  lockupTx.addInput({ txid: '11'.repeat(32), index: 0 });
+  lockupTx.addOutput({ amount: 248442n, script: lockupScript });
+  const lockupHex = lockupTx.hex;
+  const boltzId = 'boltz-swap-1';
+
+  const loopClient = {
+    async quoteOut() {
+      return { stdout: 'quote ok', stderr: '' };
+    },
+    async startLoopOut() {
+      return { swapId: 'loop-1', stdout: 'swap started', stderr: '' };
+    },
+    async getSwapInfo() {
+      swapChecks += 1;
+      if (swapChecks === 1) {
+        return {
+          id: 'loop-1',
+          state: 'FAILED',
+          failure_reason: 'FAILURE_REASON_NO_ROUTE',
+        };
+      }
+      return null;
+    },
+    async listSwaps() {
+      return { swaps: [] };
+    },
+  };
+
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      addInvoice: async (value) => ({
+        payment_request: `lnbc${value}mock`,
+        r_hash: 'hash-boltz',
+        add_index: '54',
+      }),
+      listInvoices: async () => ({
+        invoices: [{
+          add_index: '54',
+          settled: invoiceSettled,
+          state: invoiceSettled ? 'SETTLED' : 'OPEN',
+          value: '250000',
+        }],
+      }),
+      sendPayment: async (invoice) => {
+        if (invoice === 'lnbc250000boltzmock') {
+          return { payment_preimage: 'boltz_preimage', payment_hash: 'boltz_hash', payment_error: '' };
+        }
+        return { payment_preimage: 'loop_preimage', payment_hash: 'loop_hash', payment_error: '' };
+      },
+      publishTransaction: async () => ({}),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+    config: {
+      boltzApiBase: TEST_BOLTZ_API_BASE,
+      providerProbePubkeys: {},
+    },
+  });
+
+  globalThis.fetch = async (url, options = {}) => {
+    const method = String(options.method || 'GET').toUpperCase();
+    if (url === `${TEST_BOLTZ_API_BASE}/swap/reverse` && method === 'GET') {
+      return Response.json({
+        BTC: {
+          BTC: {
+            limits: { minimal: 100000, maximal: 10000000 },
+            fees: { percentage: 0.5, minerFees: { claim: 300, lockup: 200 } },
+          },
+        },
+      });
+    }
+    if (url === `${TEST_BOLTZ_API_BASE}/swap/reverse` && method === 'POST') {
+      const body = JSON.parse(options.body);
+      const swapTree = reverseSwapTree(
+        false,
+        Buffer.from(body.preimageHash, 'hex'),
+        Buffer.from(body.claimPublicKey, 'hex'),
+        Buffer.from(boltzKeys.publicKey),
+        999999,
+      );
+      return Response.json({
+        id: boltzId,
+        invoice: 'lnbc250000boltzmock',
+        swapTree: SwapTreeSerializer.serializeSwapTree(swapTree),
+        refundPublicKey: Buffer.from(boltzKeys.publicKey).toString('hex'),
+        lockupAddress,
+        timeoutBlockHeight: 999999,
+        onchainAmount: 248442,
+      }, { status: 201 });
+    }
+    if (url === `${TEST_BOLTZ_API_BASE}/swap/${boltzId}` && method === 'GET') {
+      return Response.json({
+        status: 'transaction.mempool',
+        transaction: {
+          id: lockupTx.id,
+          hex: lockupHex,
+        },
+      });
+    }
+    if (url === `${TEST_BOLTZ_API_BASE}/swap/reverse/${boltzId}/claim` && method === 'POST') {
+      const body = JSON.parse(options.body);
+      const flow = funder._flows[created.flow_id];
+      const claimPrivateKey = Buffer.from(flow.boltz_claim_private_key, 'hex');
+      const claimPublicKey = Buffer.from(flow.boltz_claim_public_key, 'hex');
+      const boltzPublicKey = Buffer.from(flow.boltz_refund_public_key, 'hex');
+      const swapTree = SwapTreeSerializer.deserializeSwapTree(flow.boltz_swap_tree);
+      const tx = RawTransaction.fromRaw(Buffer.from(body.transaction, 'hex'));
+      const txHash = tx.preimageWitnessV1(0, [lockupScript], SigHash.DEFAULT, [248442n]);
+      const boltzMusig = TaprootUtils.tweakMusig(
+        Musig.create(Buffer.from(boltzKeys.privateKey), [boltzPublicKey, claimPublicKey]),
+        swapTree.tree,
+      );
+      const nonceStage = boltzMusig.message(txHash).generateNonce();
+      const partial = nonceStage
+        .aggregateNonces([[claimPublicKey, Buffer.from(body.pubNonce, 'hex')]])
+        .initializeSession()
+        .signPartial();
+      return Response.json({
+        transactionHash: Buffer.from(txHash).toString('hex'),
+        pubNonce: Buffer.from(nonceStage.publicNonce).toString('hex'),
+        partialSignature: Buffer.from(partial.ourPartialSignature).toString('hex'),
+      });
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+
+  await funder.load();
+  const created = await funder.createFlow('agent-lightning', 250_000);
+
+  invoiceSettled = true;
+  await funder._pollCycle();
+  await funder._pollCycle();
+  await funder._pollCycle();
+
+  let flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.source, 'lightning_boltz_reverse');
+  assert.equal(flow.boltz_swap_id, boltzId);
+  assert.equal(flow.onchain_txid, funder._flows[created.flow_id].boltz_claim_txid);
+
+  const depositEntry = depositTracker._entries.get(flow.deposit_address);
+  depositEntry.status = 'pending_deposit';
+  depositEntry.amount_sats = 248_442;
+  depositEntry.txid = funder._flows[created.flow_id].boltz_claim_txid;
+  depositEntry.confirmations = 1;
+
+  await funder._pollCycle();
+  flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'onchain_pending');
+  assert.equal(flow.source, 'lightning_boltz_reverse');
+
+  globalThis.fetch = restoreFetch;
 });

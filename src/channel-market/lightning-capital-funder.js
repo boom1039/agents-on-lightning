@@ -1,8 +1,16 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { ECPairFactory } from 'ecpair';
+import * as ecc from 'tiny-secp256k1';
+import { address as btcAddress, initEccLib, networks as btcNetworks } from 'bitcoinjs-lib';
+import { Musig, OutputType, SwapTreeSerializer, TaprootUtils, constructClaimTransaction, targetFee } from 'boltz-core';
+import { SigHash, Transaction as RawTransaction } from '@scure/btc-signer';
 
 const STATE_PATH = 'data/channel-market/lightning-capital-flows.json';
 const BOLTZ_API_BASE = 'https://api.boltz.exchange/v2';
 const LIGHTNING_BRIDGE_SOURCE = 'lightning_capital_bridge';
+const ECPair = ECPairFactory(ecc);
+
+initEccLib(ecc);
 
 function nowIso() {
   return new Date().toISOString();
@@ -56,9 +64,30 @@ function isRouteFailure(error) {
   return text.includes('FAILURE_REASON_OFFCHAIN') || text.includes('FAILURE_REASON_NO_ROUTE');
 }
 
+function isBoltzFinalFailure(status) {
+  return ['transaction.failed', 'transaction.refunded', 'invoice.expired', 'swap.expired'].includes(String(status || '').trim());
+}
+
+function bridgeSourceForMode(mode) {
+  if (mode === 'wallet_fallback') return 'lightning_wallet_bridge';
+  if (mode === 'boltz_reverse') return 'lightning_boltz_reverse';
+  return 'lightning_loop_out';
+}
+
+function preferredProviderFromPreflight(preflight) {
+  const ready = Array.isArray(preflight?.providers)
+    ? preflight.providers.filter((entry) => entry?.available && entry?.executable !== false)
+    : [];
+  return ready[0]?.provider || null;
+}
+
 function toInt(value, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function hexToBytes(hex) {
+  return Buffer.from(String(hex || ''), 'hex');
 }
 
 function parseLoopQuoteText(result = {}) {
@@ -124,6 +153,9 @@ export class LightningCapitalFunder {
       fast: config.fast === true,
       enableWalletFallback: config.enableWalletFallback !== false,
       boltzApiBase: config.boltzApiBase || BOLTZ_API_BASE,
+      boltzClaimFeeSatPerVbyte: Number.isFinite(config.boltzClaimFeeSatPerVbyte) ? Number(config.boltzClaimFeeSatPerVbyte) : 2,
+      boltzPaymentTimeoutSeconds: Number.isInteger(config.boltzPaymentTimeoutSeconds) ? config.boltzPaymentTimeoutSeconds : 60,
+      boltzMaxRoutingFeeSats: Number.isInteger(config.boltzMaxRoutingFeeSats) ? config.boltzMaxRoutingFeeSats : 250,
       providerProbePubkeys: config.providerProbePubkeys && typeof config.providerProbePubkeys === 'object'
         ? config.providerProbePubkeys
         : {},
@@ -244,9 +276,23 @@ export class LightningCapitalFunder {
         next_retry_at: null,
         last_error: null,
         last_progress_at: nowIso(),
-        bridge_mode: bridgePreflight.preferred_provider === 'wallet_fallback' ? 'wallet_fallback' : 'loop_out',
+        bridge_mode: preferredProviderFromPreflight(bridgePreflight) || 'wallet_fallback',
         wallet_bridge_label: `lightning-capital-wallet:${flowId}`,
         wallet_bridge_txid: null,
+        boltz_swap_id: null,
+        boltz_status: null,
+        boltz_started_at: null,
+        boltz_invoice: null,
+        boltz_lockup_address: null,
+        boltz_lockup_txid: null,
+        boltz_preimage_hex: null,
+        boltz_claim_private_key: null,
+        boltz_claim_public_key: null,
+        boltz_refund_public_key: null,
+        boltz_swap_tree: null,
+        boltz_claim_tx_hex: null,
+        boltz_claim_txid: null,
+        boltz_claim_broadcast_at: null,
         bridge_preflight: bridgePreflight,
       };
 
@@ -264,7 +310,7 @@ export class LightningCapitalFunder {
       });
       await this._capitalLedger.recordFundingEvent(agentId, 'lightning_invoice_created', {
         amount_sats: amountSats,
-        source: 'lightning_loop_out',
+        source: bridgeSourceForMode(flow.bridge_mode),
         status: 'invoice_created',
         flow_id: flowId,
         address,
@@ -298,7 +344,7 @@ export class LightningCapitalFunder {
     await this._persist();
     await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_retrying', {
       amount_sats: flow.amount_sats,
-      source: 'lightning_loop_out',
+      source: bridgeSourceForMode(flow.bridge_mode),
       status: 'invoice_paid',
       flow_id: flow.flow_id,
       address: flow.deposit_address,
@@ -351,7 +397,7 @@ export class LightningCapitalFunder {
       if (derivedStatus === 'onchain_pending' && previousStatus === 'loop_out_pending') {
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_broadcast', {
           amount_sats: deposit?.amount_sats || flow.amount_sats,
-          source: flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'onchain_pending',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -366,7 +412,7 @@ export class LightningCapitalFunder {
       } else if (derivedStatus === 'confirmed') {
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_confirmed', {
           amount_sats: deposit?.amount_sats || flow.amount_sats,
-          source: flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'confirmed',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -392,7 +438,7 @@ export class LightningCapitalFunder {
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_paid', {
           amount_sats: extractInvoiceAmount(invoice) || flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'invoice_paid',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -407,7 +453,7 @@ export class LightningCapitalFunder {
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
           amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'expired',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -428,7 +474,7 @@ export class LightningCapitalFunder {
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
           amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'recovery_required',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -443,6 +489,84 @@ export class LightningCapitalFunder {
     }
 
     if (flow.status === 'loop_out_pending') {
+      if (flow.bridge_mode === 'boltz_reverse') {
+        let boltzStatus = null;
+        try {
+          boltzStatus = await this._getBoltzStatus(flow);
+        } catch (err) {
+          flow.last_error = err.message;
+          flow.last_progress_at = nowIso();
+          await this._persist();
+          return;
+        }
+
+        flow.boltz_status = boltzStatus?.status || flow.boltz_status;
+        flow.last_progress_at = nowIso();
+        await this._persist();
+
+        if (isBoltzFinalFailure(flow.boltz_status)) {
+          flow.last_error = `Boltz reverse swap failed with status ${flow.boltz_status}.`;
+          flow.last_progress_at = nowIso();
+          if (await this._startWalletFallback(flow, flow.last_error)) {
+            return;
+          }
+          flow.status = 'loop_out_failed';
+          await this._persist();
+          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
+            amount_sats: flow.amount_sats,
+            source: 'lightning_boltz_reverse',
+            status: 'loop_out_failed',
+            flow_id: flow.flow_id,
+            address: flow.deposit_address,
+            boltz_swap_id: flow.boltz_swap_id,
+            reason: flow.last_error,
+            reference: flow.flow_id,
+          });
+          return;
+        }
+
+        if (['transaction.mempool', 'transaction.claim.pending'].includes(flow.boltz_status)) {
+          await this._claimBoltzSwap(flow, boltzStatus);
+        }
+        if (deposit?.status === 'pending_deposit') {
+          flow.status = 'onchain_pending';
+          flow.last_progress_at = nowIso();
+          await this._persist();
+          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_broadcast', {
+            amount_sats: deposit.amount_sats || flow.amount_sats,
+            source: 'lightning_boltz_reverse',
+            status: 'onchain_pending',
+            flow_id: flow.flow_id,
+            address: flow.deposit_address,
+            txid: deposit.txid || flow.boltz_claim_txid || null,
+            confirmations: deposit.confirmations || 0,
+            required_confirmations: deposit.confirmations_required || this._depositTracker._confirmationsRequired,
+            boltz_swap_id: flow.boltz_swap_id,
+            claim_txid: flow.boltz_claim_txid,
+            reference: deposit.txid || flow.boltz_claim_txid || flow.flow_id,
+          });
+          return;
+        }
+        if (flow.boltz_started_at && (nowMs() - Date.parse(flow.boltz_started_at)) > this.config.pendingSwapTimeoutMs) {
+          flow.status = 'recovery_required';
+          flow.last_error = 'Boltz did not produce an on-chain deposit before the timeout window ended.';
+          flow.last_progress_at = nowIso();
+          await this._persist();
+          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
+            amount_sats: flow.amount_sats,
+            source: 'lightning_boltz_reverse',
+            status: 'recovery_required',
+            flow_id: flow.flow_id,
+            address: flow.deposit_address,
+            boltz_swap_id: flow.boltz_swap_id,
+            reason: flow.last_error,
+            reference: flow.flow_id,
+          });
+          return;
+        }
+        return;
+      }
+
       const swap = await this._findLoopSwap(flow);
       if (swap?.id && !flow.loop_out_swap_id) {
         flow.loop_out_swap_id = swap.id;
@@ -450,6 +574,9 @@ export class LightningCapitalFunder {
       if (swap && isFailedSwapState(swap.state)) {
         const reason = swap.failure_reason || `Loop Out failed with state ${swap.state}`;
         const described = describeFlowError(reason);
+        if (isRouteFailure(reason) && await this._startBoltzBridge(flow, described)) {
+          return;
+        }
         if (isRouteFailure(reason) && await this._startWalletFallback(flow, described)) {
           return;
         }
@@ -465,7 +592,7 @@ export class LightningCapitalFunder {
           await this._persist();
           await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_retrying', {
             amount_sats: flow.amount_sats,
-            source: 'lightning_loop_out',
+            source: bridgeSourceForMode(flow.bridge_mode),
             status: 'invoice_paid',
             flow_id: flow.flow_id,
             address: flow.deposit_address,
@@ -480,7 +607,7 @@ export class LightningCapitalFunder {
           await this._persist();
           await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
             amount_sats: flow.amount_sats,
-            source: 'lightning_loop_out',
+            source: bridgeSourceForMode(flow.bridge_mode),
             status: 'loop_out_failed',
             flow_id: flow.flow_id,
             address: flow.deposit_address,
@@ -497,7 +624,7 @@ export class LightningCapitalFunder {
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_broadcast', {
           amount_sats: deposit.amount_sats || flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'onchain_pending',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -516,7 +643,7 @@ export class LightningCapitalFunder {
         await this._persist();
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
           amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: bridgeSourceForMode(flow.bridge_mode),
           status: 'recovery_required',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -569,13 +696,19 @@ export class LightningCapitalFunder {
       || null;
   }
 
+  _getSwapPaymentClient() {
+    return this._nodeManager.getScopedDefaultNodeOrNull('swap')
+      || this._nodeManager.getScopedDefaultNodeOrNull('wallet')
+      || this._nodeManager.getScopedDefaultNodeOrNull('invoice')
+      || null;
+  }
+
   async _buildBridgePreflight(amountSats) {
     const providers = [];
     providers.push(await this._quoteLoopBridge(amountSats));
     providers.push(await this._quoteBoltzBridge(amountSats));
     providers.push(await this._quoteWalletFallback(amountSats));
-    const executable = providers.filter((entry) =>
-      entry.available && (entry.provider === 'loop_out' || entry.provider === 'wallet_fallback'));
+    const executable = providers.filter((entry) => entry.available && entry.executable !== false);
     return {
       checked_at: nowIso(),
       amount_sats: amountSats,
@@ -711,13 +844,18 @@ export class LightningCapitalFunder {
       const serviceFee = Math.ceil(amountSats * percentage / 100);
       const totalFee = serviceFee + claim + lockup;
       const routeProbe = await this._probeRouteToProvider('boltz_reverse', amountSats);
+      const routeBlocked = routeProbe.status === 'unreachable';
       return {
         provider: 'boltz_reverse',
-        available: true,
-        executable: false,
+        available: !routeBlocked,
+        executable: true,
         estimated_total_fee_sats: totalFee,
         receive_amount_sats: Math.max(0, amountSats - totalFee),
+        claim_fee_sats: claim,
+        lockup_fee_sats: lockup,
+        service_fee_percent: percentage,
         route_probe: routeProbe,
+        reason: routeBlocked ? routeProbe.reason : null,
         details: `Boltz BTC reverse quote: ${percentage}% service fee, claim ${claim} sats, lockup ${lockup} sats.`,
       };
     } catch (err) {
@@ -782,9 +920,21 @@ export class LightningCapitalFunder {
       const started = await this._startWalletFallback(flow);
       if (started) return;
     }
+    if (flow.bridge_mode === 'boltz_reverse') {
+      const started = await this._startBoltzBridge(flow);
+      if (started) return;
+      if (await this._startWalletFallback(flow, flow.last_error || 'Boltz bridge could not start.')) {
+        return;
+      }
+      await this._persist();
+      return;
+    }
     if (!this._loopClient) {
       flow.last_error = 'Loop client is not configured.';
       flow.last_progress_at = nowIso();
+      if (await this._startBoltzBridge(flow, flow.last_error)) {
+        return;
+      }
       if (await this._startWalletFallback(flow, flow.last_error)) {
         return;
       }
@@ -821,14 +971,17 @@ export class LightningCapitalFunder {
     } catch (err) {
       flow.last_error = err.message;
       flow.last_progress_at = nowIso();
+      if (await this._startBoltzBridge(flow, err.message)) {
+        return;
+      }
       if (await this._startWalletFallback(flow, err.message)) {
         return;
       }
       if ((nowMs() - Date.parse(flow.invoice_paid_at || flow.created_at)) > this.config.startRetryWindowMs) {
         flow.status = 'recovery_required';
-        await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
-          amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
+      await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
+        amount_sats: flow.amount_sats,
+        source: bridgeSourceForMode(flow.bridge_mode),
           status: 'recovery_required',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
@@ -840,10 +993,270 @@ export class LightningCapitalFunder {
     }
   }
 
+  _getBoltzQuote(flow) {
+    return Array.isArray(flow?.bridge_preflight?.providers)
+      ? flow.bridge_preflight.providers.find((entry) => entry?.provider === 'boltz_reverse') || null
+      : null;
+  }
+
+  async _getBoltzStatus(flow) {
+    if (!flow.boltz_swap_id) return null;
+    const resp = await fetch(`${this.config.boltzApiBase}/swap/${encodeURIComponent(flow.boltz_swap_id)}`);
+    if (!resp.ok) {
+      throw new Error(`Boltz status failed: ${resp.status}`);
+    }
+    return resp.json();
+  }
+
+  async _startBoltzBridge(flow, reason = null) {
+    const boltzQuote = this._getBoltzQuote(flow);
+    if (!boltzQuote?.available || boltzQuote.executable === false) {
+      return false;
+    }
+
+    const paymentClient = this._getSwapPaymentClient();
+    const walletClient = this._getWalletClient();
+    if (!paymentClient || !walletClient || typeof walletClient.publishTransaction !== 'function') {
+      return false;
+    }
+
+    const claimKeys = ECPair.makeRandom();
+    const preimage = randomBytes(32);
+    const preimageHash = createHash('sha256').update(preimage).digest('hex');
+
+    let created = null;
+    try {
+      const createResp = await fetch(`${this.config.boltzApiBase}/swap/reverse`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          invoiceAmount: flow.amount_sats,
+          from: 'BTC',
+          to: 'BTC',
+          claimPublicKey: Buffer.from(claimKeys.publicKey).toString('hex'),
+          preimageHash,
+        }),
+      });
+      if (!createResp.ok) {
+        flow.last_error = `Boltz create failed: ${createResp.status}`;
+        flow.last_progress_at = nowIso();
+        return false;
+      }
+      created = await createResp.json();
+    } catch (err) {
+      flow.last_error = `Boltz create failed: ${err.message}`;
+      flow.last_progress_at = nowIso();
+      return false;
+    }
+
+    if (!created?.id || !created?.invoice || !created?.refundPublicKey || !created?.swapTree) {
+      flow.last_error = 'Boltz create response was missing claim data.';
+      flow.last_progress_at = nowIso();
+      return false;
+    }
+
+    try {
+      flow.loop_out_attempts += 1;
+      const payment = await paymentClient.sendPayment(
+        created.invoice,
+        this.config.boltzPaymentTimeoutSeconds,
+        this.config.boltzMaxRoutingFeeSats,
+      );
+      if (payment?.payment_error) {
+        flow.last_error = payment.payment_error;
+        flow.last_progress_at = nowIso();
+        return false;
+      }
+    } catch (err) {
+      flow.last_error = err.message;
+      flow.last_progress_at = nowIso();
+      return false;
+    }
+
+    flow.bridge_mode = 'boltz_reverse';
+    flow.status = 'loop_out_pending';
+    flow.next_retry_at = null;
+    flow.boltz_swap_id = created.id;
+    flow.boltz_status = 'swap.created';
+    flow.boltz_started_at = nowIso();
+    flow.boltz_invoice = created.invoice;
+    flow.boltz_lockup_address = created.lockupAddress || null;
+    flow.boltz_preimage_hex = preimage.toString('hex');
+    flow.boltz_claim_private_key = Buffer.from(claimKeys.privateKey).toString('hex');
+    flow.boltz_claim_public_key = Buffer.from(claimKeys.publicKey).toString('hex');
+    flow.boltz_refund_public_key = created.refundPublicKey;
+    flow.boltz_swap_tree = created.swapTree;
+    flow.last_error = null;
+    flow.last_progress_at = nowIso();
+    await this._persist();
+    await this._capitalLedger.recordFundingEvent(flow.agent_id, 'boltz_swap_started', {
+      amount_sats: flow.amount_sats,
+      source: 'lightning_boltz_reverse',
+      status: 'loop_out_pending',
+      flow_id: flow.flow_id,
+      address: flow.deposit_address,
+      boltz_swap_id: flow.boltz_swap_id,
+      gross_amount_sats: flow.amount_sats,
+      actual_fee_sats: boltzQuote.estimated_total_fee_sats || null,
+      reason: reason ? describeFlowError(reason) || reason : null,
+      reference: flow.boltz_swap_id,
+    });
+    return true;
+  }
+
+  async _publishBoltzClaim(flow) {
+    if (!flow.boltz_claim_tx_hex || flow.boltz_claim_broadcast_at) return true;
+    const walletClient = this._getWalletClient();
+    if (!walletClient || typeof walletClient.publishTransaction !== 'function') {
+      flow.last_error = 'No wallet client can broadcast the Boltz claim transaction.';
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+    try {
+      await walletClient.publishTransaction(flow.boltz_claim_tx_hex, null, { timeoutMs: 120_000 });
+      flow.boltz_claim_broadcast_at = nowIso();
+      flow.last_error = null;
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      await this._capitalLedger.recordFundingEvent(flow.agent_id, 'boltz_claim_broadcast', {
+        amount_sats: flow.amount_sats,
+        source: 'lightning_boltz_reverse',
+        status: 'onchain_pending',
+        flow_id: flow.flow_id,
+        address: flow.deposit_address,
+        boltz_swap_id: flow.boltz_swap_id,
+        claim_txid: flow.boltz_claim_txid,
+        reference: flow.boltz_claim_txid || flow.boltz_swap_id,
+      });
+      return true;
+    } catch (err) {
+      flow.last_error = `Boltz claim broadcast failed: ${err.message}`;
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+  }
+
+  async _claimBoltzSwap(flow, statusData) {
+    if (flow.boltz_claim_tx_hex && !flow.boltz_claim_broadcast_at) {
+      return this._publishBoltzClaim(flow);
+    }
+
+    const lockupHex = statusData?.transaction?.hex || null;
+    const lockupTxid = statusData?.transaction?.id || null;
+    if (!lockupHex || !flow.boltz_refund_public_key || !flow.boltz_claim_public_key || !flow.boltz_claim_private_key || !flow.boltz_swap_tree) {
+      flow.last_error = 'Boltz lockup details are incomplete, so the claim transaction could not be built yet.';
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+
+    const lockupTx = RawTransaction.fromRaw(hexToBytes(lockupHex));
+    const lockupScript = btcAddress.toOutputScript(flow.boltz_lockup_address, btcNetworks.bitcoin);
+    let swapOutput = null;
+    for (let index = 0; index < lockupTx.outputsLength; index += 1) {
+      const output = lockupTx.getOutput(index);
+      if (Buffer.from(output.script).equals(lockupScript)) {
+        swapOutput = { ...output, vout: index };
+        break;
+      }
+    }
+    if (!swapOutput) {
+      flow.last_error = 'Boltz lockup transaction did not contain the expected swap output.';
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+
+    const claimPrivateKey = hexToBytes(flow.boltz_claim_private_key);
+    const claimPublicKey = hexToBytes(flow.boltz_claim_public_key);
+    const boltzPublicKey = hexToBytes(flow.boltz_refund_public_key);
+    const preimage = hexToBytes(flow.boltz_preimage_hex);
+    const swapTree = SwapTreeSerializer.deserializeSwapTree(flow.boltz_swap_tree);
+    const musig = TaprootUtils.tweakMusig(
+      Musig.create(claimPrivateKey, [boltzPublicKey, claimPublicKey]),
+      swapTree.tree,
+    );
+    const destinationScript = btcAddress.toOutputScript(flow.deposit_address, btcNetworks.bitcoin);
+    const claimTx = targetFee(this.config.boltzClaimFeeSatPerVbyte, (fee) => constructClaimTransaction([{
+      transactionId: lockupTxid || lockupTx.id,
+      vout: swapOutput.vout,
+      script: swapOutput.script,
+      amount: BigInt(swapOutput.amount),
+      privateKey: claimPrivateKey,
+      preimage,
+      type: OutputType.Taproot,
+      cooperative: true,
+      swapTree,
+      internalKey: musig.internalKey,
+    }], destinationScript, fee));
+    const transactionHash = claimTx.preimageWitnessV1(0, [swapOutput.script], SigHash.DEFAULT, [BigInt(swapOutput.amount)]);
+    const nonceStage = musig.message(transactionHash).generateNonce();
+
+    let claimDetails = null;
+    try {
+      const resp = await fetch(`${this.config.boltzApiBase}/swap/reverse/${encodeURIComponent(flow.boltz_swap_id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          index: 0,
+          transaction: claimTx.hex,
+          preimage: flow.boltz_preimage_hex,
+          pubNonce: Buffer.from(nonceStage.publicNonce).toString('hex'),
+        }),
+      });
+      if (!resp.ok) {
+        flow.last_error = `Boltz claim signing failed: ${resp.status}`;
+        flow.last_progress_at = nowIso();
+        await this._persist();
+        return false;
+      }
+      claimDetails = await resp.json();
+    } catch (err) {
+      flow.last_error = `Boltz claim signing failed: ${err.message}`;
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+
+    if (claimDetails?.transactionHash) {
+      const returned = String(claimDetails.transactionHash).toLowerCase();
+      const local = Buffer.from(transactionHash).toString('hex').toLowerCase();
+      if (returned !== local) {
+        flow.last_error = 'Boltz returned a different claim transaction hash than the one the app built.';
+        flow.last_progress_at = nowIso();
+        await this._persist();
+        return false;
+      }
+    }
+    if (!claimDetails?.pubNonce || !claimDetails?.partialSignature) {
+      flow.last_error = 'Boltz claim signing response was missing the partial signature.';
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      return false;
+    }
+
+    const finalSignature = nonceStage
+      .aggregateNonces([[boltzPublicKey, hexToBytes(claimDetails.pubNonce)]])
+      .initializeSession()
+      .addPartial(boltzPublicKey, hexToBytes(claimDetails.partialSignature))
+      .signPartial()
+      .aggregatePartials();
+    claimTx.updateInput(0, { finalScriptWitness: [finalSignature] });
+
+    flow.boltz_claim_tx_hex = claimTx.hex;
+    flow.boltz_claim_txid = claimTx.id;
+    flow.boltz_lockup_txid = lockupTxid || lockupTx.id;
+    flow.boltz_status = statusData?.status || flow.boltz_status || 'transaction.claim.pending';
+    flow.last_progress_at = nowIso();
+    await this._persist();
+    return this._publishBoltzClaim(flow);
+  }
+
   async _startWalletFallback(flow, reason = null) {
     const walletClient = this._getWalletClient();
     if (!walletClient) return false;
-    if (reason && !isRouteFailure(reason) && reason !== 'Loop client is not configured.') return false;
 
     let sendResult = null;
     let recoveredFromUnknown = false;
@@ -908,7 +1321,7 @@ export class LightningCapitalFunder {
     const deposit = this._getDepositForFlow(flow);
     const status = this._deriveStatus(flow, deposit);
     const describedError = describeFlowError(flow.last_error);
-    const source = flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out';
+    const source = bridgeSourceForMode(flow.bridge_mode);
     return {
       flow_id: flow.flow_id,
       agent_id: flow.agent_id,
@@ -922,7 +1335,8 @@ export class LightningCapitalFunder {
       expires_at: flow.expires_at,
       deposit_address: flow.deposit_address,
       loop_out_swap_id: flow.loop_out_swap_id,
-      onchain_txid: deposit?.txid || flow.wallet_bridge_txid || null,
+      boltz_swap_id: flow.boltz_swap_id || null,
+      onchain_txid: deposit?.txid || flow.wallet_bridge_txid || flow.boltz_claim_txid || null,
       bridge_preflight: flow.bridge_preflight || null,
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
@@ -930,10 +1344,14 @@ export class LightningCapitalFunder {
       last_error: describedError || null,
       hint: status === 'loop_out_failed' && describedError === describeFlowError('FAILURE_REASON_OFFCHAIN')
         ? 'Your node received the Lightning deposit, but Loop could not route its own swap payment onward.'
+        : status === 'loop_out_failed' && flow.bridge_mode === 'boltz_reverse'
+          ? 'Your node received the Lightning deposit, but the Boltz on-chain bridge failed before it credited capital.'
         : null,
       status_url: `/api/v1/capital/deposit-lightning/${encodeURIComponent(flow.flow_id)}`,
       learn: source === 'lightning_wallet_bridge'
         ? 'Pay the Lightning invoice, then wait for the site to broadcast the matching on-chain capital deposit. Capital becomes usable only after the on-chain side confirms.'
+        : source === 'lightning_boltz_reverse'
+          ? 'Pay the Lightning invoice, then wait for the site to bridge those sats on-chain through Boltz. Capital becomes usable only after the on-chain side confirms.'
         : 'Pay the Lightning invoice, then wait for Loop Out to move those sats on-chain. Capital becomes usable only after the on-chain side confirms.',
     };
   }

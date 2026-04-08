@@ -253,6 +253,8 @@ export class CapitalLedger {
       'confirmations',
       'required_confirmations',
       'loop_out_swap_id',
+      'boltz_swap_id',
+      'claim_txid',
       'direction',
       'from_bucket',
       'to_bucket',

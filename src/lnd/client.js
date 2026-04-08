@@ -365,6 +365,13 @@ export class NodeClient {
     return this._post('/v1/transactions', body, { timeoutMs: opts.timeoutMs });
   }
 
+  /** Broadcasts a raw on-chain Bitcoin transaction hex. */
+  publishTransaction(txHex, label = null, opts = {}) {
+    const body = { tx_hex: txHex };
+    if (label) body.label = label;
+    return this._post('/v2/wallet/transactions/publish', body, { timeoutMs: opts.timeoutMs });
+  }
+
   // ---------------------------------------------------------------------------
   // Graph queries
   // ---------------------------------------------------------------------------

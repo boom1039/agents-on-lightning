@@ -228,6 +228,7 @@ export function mockNodeManager(clientOverrides = {}) {
     walletBalance: async () => ({ confirmed_balance: '1000000' }),
     getTransactions: async () => ({ transactions: [] }),
     getBestBlock: async () => ({ block_height: 100 }),
+    publishTransaction: async () => ({}),
     forwardingHistory: async () => ({ forwarding_events: [], last_offset_index: '0' }),
     sendPayment: async () => ({ payment_preimage: 'mock_preimage', payment_hash: 'mock_hash', payment_error: '' }),
     addInvoice: async (value) => ({ payment_request: `lnbc${value}mock`, r_hash: 'mock_hash_' + Date.now(), add_index: '1' }),
