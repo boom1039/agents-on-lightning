@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
-import { runIdempotentRoute } from '../identity/idempotency-route.js';
+import { normalizeHttpStatusCode, runIdempotentRoute } from '../identity/idempotency-route.js';
 import { validateChannelIdOrPoint, clampQueryInt } from '../identity/validators.js';
 import { err400Validation } from '../identity/agent-friendly-errors.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
@@ -51,6 +51,14 @@ function buildCooldownBody(message, hint) {
     retryable: true,
     hint,
   };
+}
+
+function pickHttpStatus(result, { successCode = 200, failureCode = 400 } = {}) {
+  const direct = normalizeHttpStatusCode(result?.statusCode, null)
+    ?? normalizeHttpStatusCode(result?.http_status, null)
+    ?? normalizeHttpStatusCode(result?.status, null);
+  if (direct) return direct;
+  return result?.success || result?.valid ? successCode : failureCode;
 }
 
 export function channelAccountabilityRoutes(daemon) {
@@ -139,7 +147,7 @@ export function channelAccountabilityRoutes(daemon) {
         ));
       }
       const result = await daemon.channelExecutor.preview(req.agentId, req.body);
-      const status = result.valid ? 200 : (result.status || 400);
+      const status = pickHttpStatus(result);
       res.status(status).json(result);
     } catch (err) {
       console.error(`[Gateway] ${req.path}: ${err.message}`);
@@ -222,7 +230,7 @@ export function channelAccountabilityRoutes(daemon) {
           };
         }
         const result = await daemon.channelExecutor.execute(req.agentId, req.body);
-        const status = result.success ? 200 : (result.status || 400);
+        const status = pickHttpStatus(result);
         const body = result.success
           ? { status: 'executed', ...result.result, learn: result.learn }
           : { error: result.error, hint: result.hint, failed_at: result.failed_at, checks_passed: result.checks_passed };

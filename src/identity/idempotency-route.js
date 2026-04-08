@@ -1,5 +1,9 @@
 import { agentError } from './agent-friendly-errors.js';
 
+export function normalizeHttpStatusCode(value, fallback = 500) {
+  return Number.isInteger(value) && value >= 100 && value <= 599 ? value : fallback;
+}
+
 export function getIdempotencyKey(req) {
   const headerKey = req.get('Idempotency-Key') || req.get('X-Idempotency-Key');
   if (headerKey && typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
@@ -21,14 +25,14 @@ export async function runIdempotentRoute({ req, res, store, scope, handler, onEr
   const idempotencyKey = getIdempotencyKey(req);
   if (!idempotencyKey || !store) {
     const result = await execute();
-    return res.status(result.statusCode).json(result.body);
+    return res.status(normalizeHttpStatusCode(result?.statusCode)).json(result.body);
   }
 
   const begin = await store.begin(scope, req.agentId, idempotencyKey);
   if (!begin.started) {
     const existing = begin.entry;
     if (existing.status === 'complete' && existing.response) {
-      return res.status(existing.response.statusCode).json(existing.response.body);
+      return res.status(normalizeHttpStatusCode(existing.response.statusCode)).json(existing.response.body);
     }
     return agentError(res, 409, {
       error: 'request_in_progress',
@@ -39,5 +43,5 @@ export async function runIdempotentRoute({ req, res, store, scope, handler, onEr
 
   const result = await execute();
   await store.finish(scope, req.agentId, idempotencyKey, result);
-  return res.status(result.statusCode).json(result.body);
+  return res.status(normalizeHttpStatusCode(result?.statusCode)).json(result.body);
 }

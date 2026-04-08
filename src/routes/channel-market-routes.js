@@ -42,7 +42,7 @@ import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
 import { IdempotencyStore } from '../identity/idempotency-store.js';
-import { runIdempotentRoute } from '../identity/idempotency-route.js';
+import { normalizeHttpStatusCode, runIdempotentRoute } from '../identity/idempotency-route.js';
 import { agentError, err400Validation, err404NotFound, withRecovery } from '../identity/agent-friendly-errors.js';
 import { logAuthorizationDenied } from '../identity/audit-log.js';
 import { getSocketAddress } from '../identity/request-security.js';
@@ -94,6 +94,14 @@ function parseFundingAmount(body) {
 
 function parseRebalanceAmount(body) {
   return body?.instruction?.params?.amount_sats;
+}
+
+function pickHttpStatus(result, { successCode = 200, failureCode = 400 } = {}) {
+  const direct = normalizeHttpStatusCode(result?.statusCode, null)
+    ?? normalizeHttpStatusCode(result?.http_status, null)
+    ?? normalizeHttpStatusCode(result?.status, null);
+  if (direct) return direct;
+  return result?.success || result?.valid ? successCode : failureCode;
 }
 
 function getPendingItems(handler, agentId) {
@@ -427,7 +435,7 @@ export function channelMarketRoutes(daemon) {
       const response = await previewSingleFlight.run(previewKey, async () => {
         const result = await daemon.channelOpener.preview(req.agentId, req.body);
         return {
-          statusCode: result.valid ? 200 : (result.status || 400),
+          statusCode: pickHttpStatus(result),
           body: result,
         };
       });
@@ -647,7 +655,7 @@ export function channelMarketRoutes(daemon) {
         const openBody = result?.success && Number.isInteger(amountSats) && amountSats > 0
           ? { ...result, cost_summary: { action: 'channel_open', amount_sats: amountSats, fee_sats: 0, total_sats: amountSats, unit: 'sat' } }
           : result;
-        return { statusCode: result.success ? 200 : (result.status || 400), body: openBody };
+        return { statusCode: pickHttpStatus(result), body: openBody };
       },
       onError: (err) => {
         console.error(`[market/open] Error: ${err.message}`);
@@ -830,7 +838,7 @@ export function channelMarketRoutes(daemon) {
           ? { ...result, cost_summary: { action: 'channel_close', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' } }
           : result;
         return {
-          statusCode: result?.http_status || (result.success ? 200 : (result.status || 400)),
+          statusCode: pickHttpStatus(result),
           body: closeBody,
         };
       },
@@ -1004,7 +1012,7 @@ export function channelMarketRoutes(daemon) {
       await daemon.channelCloser?.refreshNow?.();
       const result = await daemon.performanceTracker.getChannelPerformance(req.params.chanId, req.agentId);
       if (result.success === false) {
-        return res.status(result.status || 400).json(result);
+        return res.status(pickHttpStatus(result)).json(result);
       }
       res.json(result);
     } catch (err) {
@@ -1120,7 +1128,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
-        return { statusCode: result.success ? 200 : (result.status || 400), body: result };
+        return { statusCode: pickHttpStatus(result), body: result };
       },
       onError: (err) => {
         console.error(`[market/rebalance] Error: ${err.message}`);
@@ -1179,7 +1187,7 @@ export function channelMarketRoutes(daemon) {
       const response = await rebalanceEstimateSingleFlight.run(estimateKey, async () => {
         const result = await daemon.rebalanceExecutor.estimateRebalanceFee(req.agentId, req.body);
         return {
-          statusCode: result.success ? 200 : (result.status || 400),
+          statusCode: pickHttpStatus(result),
           body: result,
         };
       });
@@ -1222,7 +1230,7 @@ export function channelMarketRoutes(daemon) {
       const limit = parseInt(req.query.limit || '10', 10);
       const result = daemon.performanceTracker.getLeaderboard(metric, limit);
       if (result.success === false) {
-        return res.status(result.status || 400).json(result);
+        return res.status(pickHttpStatus(result)).json(result);
       }
       res.json(result);
     } catch (err) {
@@ -1290,7 +1298,7 @@ export function channelMarketRoutes(daemon) {
     try {
       const result = await daemon.marketTransparency.getPeerSafety(req.params.pubkey);
       if (result.success === false) {
-        return res.status(result.status || 400).json(result);
+        return res.status(pickHttpStatus(result)).json(result);
       }
       res.json(result);
     } catch (err) {
@@ -1308,7 +1316,7 @@ export function channelMarketRoutes(daemon) {
     try {
       const result = await daemon.marketTransparency.getFeeCompetition(req.params.peerPubkey);
       if (result.success === false) {
-        return res.status(result.status || 400).json(result);
+        return res.status(pickHttpStatus(result)).json(result);
       }
       res.json(result);
     } catch (err) {
