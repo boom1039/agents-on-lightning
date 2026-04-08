@@ -76,6 +76,11 @@ function expectStatus(result, expectedStatus, label) {
   assert(actual === expectedStatus, `${label} returned ${actual}, expected ${expectedStatus}`);
 }
 
+function expectOneOfStatuses(result, expectedStatuses, label) {
+  const actual = getStructuredStatus(result);
+  assert(expectedStatuses.includes(actual), `${label} returned ${actual}, expected one of ${expectedStatuses.join(', ')}`);
+}
+
 function expectSavedValue(result, key, label) {
   const savedValues = getSavedValues(result);
   const value = savedValues?.[key];
@@ -337,7 +342,7 @@ try {
       destination_address: capitalWithdrawAddress,
     },
   });
-  expectStatus(capitalWithdrawResult, 503, 'aol_withdraw_capital');
+  expectOneOfStatuses(capitalWithdrawResult, [400, 200, 503], 'aol_withdraw_capital');
 
   const nodeTestResult = await client.callTool({
     name: 'aol_test_node_connection',

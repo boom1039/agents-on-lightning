@@ -47,6 +47,10 @@ function isMissingNodeConnectionError(err) {
   return message.includes('No LND node available') || message.includes('No LND node connected');
 }
 
+function isInsufficientCapitalError(err) {
+  return /Insufficient available balance/i.test(String(err?.message || ''));
+}
+
 async function findTransactionByLabel(client, label) {
   const txs = await client.getTransactions();
   const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
@@ -451,6 +455,14 @@ export function agentPaidServicesRoutes(daemon) {
           error: 'service_unavailable',
           message: 'Capital withdrawals are unavailable because no wallet node is connected.',
           hint: 'Try again later.',
+          see: 'GET /api/v1/capital/balance',
+        });
+      }
+      if (isInsufficientCapitalError(err)) {
+        return agentError(res, 400, {
+          error: 'insufficient_capital',
+          message: `You do not have enough available capital to withdraw ${amount_sats} sats.`,
+          hint: 'Check your available capital first, or wait for pending funds to settle.',
           see: 'GET /api/v1/capital/balance',
         });
       }

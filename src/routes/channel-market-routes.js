@@ -54,6 +54,7 @@ import { logAuthorizationDenied } from '../identity/audit-log.js';
 import { getSocketAddress } from '../identity/request-security.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
 import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 function submarineSwapsEnabled() {
   return process.env.ENABLE_SUBMARINE_SWAPS === '1';
@@ -103,6 +104,18 @@ function sendTeachingHelp(res, body) {
     next: body.next,
     example_request: body.example_request,
   });
+}
+
+function buildNodeActionRecovery(action, err, fallback, learn, next) {
+  return withRecovery(
+    {
+      error: 'node_action_failed',
+      message: summarizeLndError(err?.message, { action, fallback }),
+    },
+    'action_needed',
+    learn,
+    next,
+  );
 }
 
 function sendUnexpectedKeys(res, unexpected, see) {
@@ -473,11 +486,12 @@ export function channelMarketRoutes(daemon) {
       res.status(response.statusCode).json(response.body);
     } catch (err) {
       console.error(`[market/preview] Error: ${err.message}`);
-      res.status(500).json(withRecovery(
-        { error: 'Internal error during preview' },
-        'safe', 'Preview is read-only. No funds were locked or spent.', [
-          'Wait a few seconds and retry POST /api/v1/market/preview',
-        ],
+      res.status(500).json(buildNodeActionRecovery(
+        'channel preview',
+        err,
+        'Preview failed.',
+        'Preview is read-only. No funds were locked or spent.',
+        ['Wait a few seconds and retry POST /api/v1/market/preview'],
       ));
     }
   });
@@ -685,9 +699,12 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/open] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: withRecovery(
-            { error: 'Internal error during channel open' },
-            'action_needed', 'Capital may have been locked for this channel open. Check your capital balance and pending opens.', [
+          body: buildNodeActionRecovery(
+            'channel open',
+            err,
+            'Channel open failed.',
+            'Capital may have been locked for this channel open. Check your capital balance and pending opens.',
+            [
               'GET /api/v1/capital/balance to check if capital was locked',
               'GET /api/v1/market/pending to check if the open is in progress',
               'Locked capital auto-releases if the channel open fails to confirm',
@@ -870,9 +887,12 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/close] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: withRecovery(
-            { error: 'Internal error during channel close' },
-            'action_needed', 'The close status may be unknown. Check your close list before retrying.', [
+          body: buildNodeActionRecovery(
+            'channel close',
+            err,
+            'Channel close failed.',
+            'The close status may be unknown. Check your close list before retrying.',
+            [
               'GET /api/v1/market/closes to check if the close was already initiated or settled',
               'GET /api/v1/capital/balance to check whether funds are still locked',
               'Retry POST /api/v1/market/close with the same signed instruction',
@@ -1012,8 +1032,8 @@ export function channelMarketRoutes(daemon) {
     if (!submarineSwapsEnabled()) {
       return agentError(res, 503, {
         error: 'submarine_swaps_disabled',
-        message: 'Submarine swaps are disabled until the funding flow is hardened.',
-        hint: 'This route is intentionally off for safety because it can spend node funds.',
+        message: 'Swap to on-chain is still off for safety.',
+        hint: 'The Boltz claim path is not hardened yet, so this route stays disabled to avoid risking node funds.',
       });
     }
     if (!daemon.swapProvider) {
@@ -1109,9 +1129,12 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/swap/create] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: withRecovery(
-            { error: 'Internal error creating swap' },
-            'pending', 'The swap may have been initiated. Check swap history to verify.', [
+          body: buildNodeActionRecovery(
+            'swap payment',
+            err,
+            'Swap creation failed.',
+            'The swap may have been initiated. Check swap history to verify.',
+            [
               'GET /api/v1/market/swap/history to check if the swap was created',
               'GET /api/v1/capital/balance to verify your capital balance',
             ],
@@ -1245,9 +1268,12 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/fund-from-ecash] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: withRecovery(
-            { error: 'Internal error during ecash channel funding' },
-            'action_needed', 'Ecash may have been melted before the channel open failed. Check your balances.', [
+          body: buildNodeActionRecovery(
+            'ecash-funded channel open',
+            err,
+            'Ecash-funded channel open failed.',
+            'Ecash may have been melted before the channel open failed. Check your balances.',
+            [
               'GET /api/v1/wallet/balance to check ecash balance',
               'GET /api/v1/capital/balance to check if capital was credited',
               'GET /api/v1/market/pending to check if a channel open is in progress',
@@ -1424,9 +1450,12 @@ export function channelMarketRoutes(daemon) {
         console.error(`[market/rebalance] Error: ${err.message}`);
         return {
           statusCode: 500,
-          body: withRecovery(
-            { error: 'Internal error during rebalance' },
-            'pending', 'The rebalance payment may be in-flight. Check rebalance history to verify.', [
+          body: buildNodeActionRecovery(
+            'rebalance',
+            err,
+            'Rebalance failed.',
+            'The rebalance payment may be in-flight. Check rebalance history to verify.',
+            [
               'GET /api/v1/market/rebalances to check if the rebalance completed',
               'GET /api/v1/capital/balance to verify your capital balance',
             ],
