@@ -704,18 +704,21 @@ export class CapitalLedger {
     try {
       const state = await this._readState(agentId);
       let sourceBucket = null;
+      let routingPnlAdjustmentSats = 0;
       let closeFeeSats = 0;
 
       if (state.pending_close >= localBalanceAtClose && localBalanceAtClose > 0) {
         state.pending_close -= localBalanceAtClose;
         state.available += settledAmount;
-        closeFeeSats = Math.max(0, localBalanceAtClose - settledAmount);
-        state.total_routing_pnl += closeFeeSats;
+        routingPnlAdjustmentSats = localBalanceAtClose - settledAmount;
+        state.total_routing_pnl += routingPnlAdjustmentSats;
+        closeFeeSats = Math.max(0, routingPnlAdjustmentSats);
         sourceBucket = 'pending_close';
       } else if (state.locked >= originalLocked) {
         state.locked -= originalLocked;
         state.available += settledAmount;
-        state.total_routing_pnl += (originalLocked - settledAmount);
+        routingPnlAdjustmentSats = originalLocked - settledAmount;
+        state.total_routing_pnl += routingPnlAdjustmentSats;
         closeFeeSats = Math.max(0, localBalanceAtClose - settledAmount);
         sourceBucket = 'locked';
       } else {
@@ -757,6 +760,7 @@ export class CapitalLedger {
         txid,
         channel_point: channelPoint,
         source_bucket: sourceBucket,
+        routing_pnl_adjustment_sats: routingPnlAdjustmentSats,
         close_fee_sats: closeFeeSats,
         balance_after: this._balanceSummary(state),
       });

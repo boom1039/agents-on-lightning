@@ -83,3 +83,38 @@ test('detectSettledCloses reconciles a timed-out close that was rolled back too 
   assert.equal(closer._state[channelPoint].status, 'settled');
   assert.deepEqual(assignmentRegistry.revoked, [channelPoint]);
 });
+
+test('reconcileClosedChannel corrects overestimated routing loss when settled close returns more than pending_close', async () => {
+  const dataLayer = mockDataLayer();
+  const auditLog = mockAuditLog();
+  const mutex = mockMutex();
+  const capitalLedger = new CapitalLedger({ dataLayer, auditLog, mutex });
+  const agentId = 'agent-close-correction';
+
+  await dataLayer.writeJSON(`data/channel-market/capital/${agentId}.json`, {
+    available: 846,
+    locked: 0,
+    pending_deposit: 0,
+    pending_close: 99_037,
+    total_deposited: 101_000,
+    total_withdrawn: 0,
+    total_revenue_credited: 0,
+    total_ecash_funded: 0,
+    total_service_spent: 3,
+    total_routing_pnl: 1_114,
+    processed_refs: [],
+    last_updated: new Date().toISOString(),
+  });
+
+  const balance = await capitalLedger.reconcileClosedChannel(agentId, {
+    settledAmount: 99_849,
+    txid: 'close-tx-correction',
+    channelPoint: 'fundingtx:1',
+    originalLocked: 100_000,
+    localBalanceAtClose: 99_037,
+  });
+
+  assert.equal(balance.available, 100_695);
+  assert.equal(balance.pending_close, 0);
+  assert.equal(balance.total_routing_pnl, 302);
+});
