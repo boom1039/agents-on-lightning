@@ -162,24 +162,31 @@ test('polling advances invoice -> loop out -> onchain pending -> confirmed', asy
   ]);
 });
 
-test('polling marks failed loop swaps as loop_out_failed', async () => {
+test('polling retries offchain loop swap failures before giving up', async () => {
   const dataLayer = mockDataLayer();
   const depositTracker = createDepositTracker();
   const capitalLedger = mockCapitalLedger();
   let invoiceSettled = false;
+  let swapChecks = 0;
+  let starts = 0;
   const loopClient = {
     async quoteOut() {
       return { stdout: 'quote ok', stderr: '' };
     },
     async startLoopOut() {
+      starts += 1;
       return { swapId: '69aba73d84ab72d39c483413907394419b88e1cd4dad7f60300c23da1e9c3c7f', stdout: 'swap started', stderr: '' };
     },
     async getSwapInfo() {
-      return {
-        id: '69aba73d84ab72d39c483413907394419b88e1cd4dad7f60300c23da1e9c3c7f',
-        state: 'FAILED',
-        failure_reason: 'FAILURE_REASON_NO_ROUTE',
-      };
+      swapChecks += 1;
+      if (swapChecks === 1) {
+        return {
+          id: '69aba73d84ab72d39c483413907394419b88e1cd4dad7f60300c23da1e9c3c7f',
+          state: 'FAILED',
+          failure_reason: 'FAILURE_REASON_OFFCHAIN',
+        };
+      }
+      return null;
     },
     async listSwaps() {
       return { swaps: [] };
@@ -207,6 +214,88 @@ test('polling marks failed loop swaps as loop_out_failed', async () => {
     auditLog: mockAuditLog(),
     mutex: mockMutex(),
     loopClient,
+    config: {
+      retryBackoffMs: 0,
+    },
+  });
+
+  await funder.load();
+  const created = await funder.createFlow('agent-lightning', 250_000);
+
+  invoiceSettled = true;
+  await funder._pollCycle();
+  await funder._pollCycle();
+  await funder._pollCycle();
+
+  let flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'invoice_paid');
+  assert.equal(flow.last_error, 'Loop could not route the off-chain swap payment (FAILURE_REASON_OFFCHAIN).');
+  assert.equal(starts, 1);
+
+  await funder._pollCycle();
+  flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'loop_out_pending');
+  assert.equal(starts, 2);
+
+  const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
+  assert.deepEqual(eventTypes, [
+    'lightning_invoice_created',
+    'lightning_paid',
+    'loop_out_started',
+    'lightning_deposit_retrying',
+    'loop_out_started',
+  ]);
+});
+
+test('polling marks failed loop swaps as loop_out_failed after retry limit', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  let invoiceSettled = false;
+  const loopClient = {
+    async quoteOut() {
+      return { stdout: 'quote ok', stderr: '' };
+    },
+    async startLoopOut() {
+      return { swapId: '69aba73d84ab72d39c483413907394419b88e1cd4dad7f60300c23da1e9c3c7f', stdout: 'swap started', stderr: '' };
+    },
+    async getSwapInfo() {
+      return {
+        id: '69aba73d84ab72d39c483413907394419b88e1cd4dad7f60300c23da1e9c3c7f',
+        state: 'FAILED',
+        failure_reason: 'FAILURE_REASON_OFFCHAIN',
+      };
+    },
+    async listSwaps() {
+      return { swaps: [] };
+    },
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      addInvoice: async (value) => ({
+        payment_request: `lnbc${value}mock`,
+        r_hash: 'hash-4',
+        add_index: '52',
+      }),
+      listInvoices: async () => ({
+        invoices: [{
+          add_index: '52',
+          settled: invoiceSettled,
+          state: invoiceSettled ? 'SETTLED' : 'OPEN',
+          value: '250000',
+        }],
+      }),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+    config: {
+      maxStartAttempts: 1,
+      retryBackoffMs: 0,
+    },
   });
 
   await funder.load();
@@ -219,13 +308,5 @@ test('polling marks failed loop swaps as loop_out_failed', async () => {
 
   const flow = await funder.getFlow('agent-lightning', created.flow_id);
   assert.equal(flow.status, 'loop_out_failed');
-  assert.equal(flow.last_error, 'Loop could not find a Lightning route for the swap payment (FAILURE_REASON_NO_ROUTE).');
-
-  const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
-  assert.deepEqual(eventTypes, [
-    'lightning_invoice_created',
-    'lightning_paid',
-    'loop_out_started',
-    'lightning_deposit_failed',
-  ]);
+  assert.equal(flow.last_error, 'Loop could not route the off-chain swap payment (FAILURE_REASON_OFFCHAIN).');
 });

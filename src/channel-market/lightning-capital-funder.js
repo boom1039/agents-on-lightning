@@ -82,6 +82,7 @@ export class LightningCapitalFunder {
       maxStartAttempts: Number.isInteger(config.maxStartAttempts) ? config.maxStartAttempts : 10,
       startRetryWindowMs: Number.isInteger(config.startRetryWindowMs) ? config.startRetryWindowMs : 60 * 60 * 1000,
       pendingSwapTimeoutMs: Number.isInteger(config.pendingSwapTimeoutMs) ? config.pendingSwapTimeoutMs : 6 * 60 * 60 * 1000,
+      retryBackoffMs: Number.isInteger(config.retryBackoffMs) ? config.retryBackoffMs : 60_000,
       fast: config.fast === true,
     };
   }
@@ -172,6 +173,7 @@ export class LightningCapitalFunder {
         loop_out_swap_id: null,
         loop_out_attempts: 0,
         loop_out_started_at: null,
+        next_retry_at: null,
         last_error: null,
         last_progress_at: nowIso(),
       };
@@ -304,6 +306,9 @@ export class LightningCapitalFunder {
     }
 
     if (flow.status === 'invoice_paid') {
+      if (flow.next_retry_at && Date.parse(flow.next_retry_at) > nowMs()) {
+        return;
+      }
       if (flow.loop_out_attempts >= this.config.maxStartAttempts) {
         flow.status = 'recovery_required';
         flow.last_progress_at = nowIso();
@@ -321,6 +326,7 @@ export class LightningCapitalFunder {
       }
 
       try {
+        flow.loop_out_attempts += 1;
         const started = await this._loopClient.startLoopOut({
           amountSats: flow.amount_sats,
           destinationAddress: flow.deposit_address,
@@ -331,6 +337,7 @@ export class LightningCapitalFunder {
         });
         flow.status = 'loop_out_pending';
         flow.loop_out_started_at = nowIso();
+        flow.next_retry_at = null;
         flow.loop_out_swap_id = started.swapId || flow.loop_out_swap_id || null;
         flow.last_error = null;
         flow.last_progress_at = nowIso();
@@ -345,7 +352,6 @@ export class LightningCapitalFunder {
           reference: flow.flow_id,
         });
       } catch (err) {
-        flow.loop_out_attempts += 1;
         flow.last_error = err.message;
         flow.last_progress_at = nowIso();
         if ((nowMs() - Date.parse(flow.invoice_paid_at || flow.created_at)) > this.config.startRetryWindowMs) {
@@ -371,20 +377,44 @@ export class LightningCapitalFunder {
         flow.loop_out_swap_id = swap.id;
       }
       if (swap && isFailedSwapState(swap.state)) {
-        flow.status = 'loop_out_failed';
-        flow.last_error = describeFlowError(swap.failure_reason || `Loop Out failed with state ${swap.state}`);
+        const reason = swap.failure_reason || `Loop Out failed with state ${swap.state}`;
+        const described = describeFlowError(reason);
+        const canRetry =
+          String(reason) === 'FAILURE_REASON_OFFCHAIN'
+          && flow.loop_out_attempts < this.config.maxStartAttempts
+          && (nowMs() - Date.parse(flow.invoice_paid_at || flow.created_at)) <= this.config.startRetryWindowMs;
+        flow.last_error = described;
         flow.last_progress_at = nowIso();
-        await this._persist();
-        await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
-          amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
-          status: 'loop_out_failed',
-          flow_id: flow.flow_id,
-          address: flow.deposit_address,
-          reason: flow.last_error,
-          loop_out_swap_id: flow.loop_out_swap_id,
-          reference: flow.flow_id,
-        });
+        if (canRetry) {
+          flow.status = 'invoice_paid';
+          flow.next_retry_at = new Date(nowMs() + this.config.retryBackoffMs).toISOString();
+          await this._persist();
+          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_retrying', {
+            amount_sats: flow.amount_sats,
+            source: 'lightning_loop_out',
+            status: 'invoice_paid',
+            flow_id: flow.flow_id,
+            address: flow.deposit_address,
+            reason: flow.last_error,
+            loop_out_swap_id: flow.loop_out_swap_id,
+            next_retry_at: flow.next_retry_at,
+            reference: flow.flow_id,
+          });
+        } else {
+          flow.status = 'loop_out_failed';
+          flow.next_retry_at = null;
+          await this._persist();
+          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
+            amount_sats: flow.amount_sats,
+            source: 'lightning_loop_out',
+            status: 'loop_out_failed',
+            flow_id: flow.flow_id,
+            address: flow.deposit_address,
+            reason: flow.last_error,
+            loop_out_swap_id: flow.loop_out_swap_id,
+            reference: flow.flow_id,
+          });
+        }
         return;
       }
       if (deposit?.status === 'pending_deposit') {
@@ -479,6 +509,7 @@ export class LightningCapitalFunder {
       onchain_txid: deposit?.txid || null,
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
+      next_retry_at: flow.next_retry_at || null,
       last_error: describedError || null,
       hint: status === 'loop_out_failed' && describedError === describeFlowError('FAILURE_REASON_OFFCHAIN')
         ? 'Your node received the Lightning deposit, but Loop could not route its own swap payment onward.'
