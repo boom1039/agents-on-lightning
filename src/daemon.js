@@ -164,6 +164,7 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
+      publicLedger: this.publicLedger,
     });
 
     this.analyticsGateway = new AnalyticsGateway({

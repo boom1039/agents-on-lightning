@@ -135,8 +135,9 @@ export class CapitalLedger {
    * @param {import('../data-layer.js').DataLayer} opts.dataLayer
    * @param {import('../channel-accountability/hash-chain-audit-log.js').HashChainAuditLog} opts.auditLog
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
+   * @param {import('../wallet/ledger.js').PublicLedger} [opts.publicLedger]
    */
-  constructor({ dataLayer, auditLog, mutex }) {
+  constructor({ dataLayer, auditLog, mutex, publicLedger = null }) {
     if (!dataLayer) throw new Error('CapitalLedger requires dataLayer');
     if (!auditLog) throw new Error('CapitalLedger requires auditLog');
     if (!mutex) throw new Error('CapitalLedger requires mutex');
@@ -144,6 +145,7 @@ export class CapitalLedger {
     this._dataLayer = dataLayer;
     this._auditLog = auditLog;
     this._mutex = mutex;
+    this._publicLedger = publicLedger;
   }
 
   // ---------------------------------------------------------------------------
@@ -216,10 +218,55 @@ export class CapitalLedger {
   async _logActivity(entry) {
     const agentId = entry.agent_id;
     const logPath = `${STATE_DIR}/${agentId}/activity.jsonl`;
-    await this._dataLayer.appendLog(logPath, {
+    const stamped = {
       ...entry,
       _ts: Date.now(),
-    });
+    };
+    await this._dataLayer.appendLog(logPath, stamped);
+    await this._mirrorPublicLedger(stamped);
+  }
+
+  _publicLedgerEntry(entry) {
+    const mirrored = {
+      source: 'capital_ledger',
+      type: entry.type,
+      agent_id: entry.agent_id,
+    };
+
+    const amountSats = entry.amount_sats
+      ?? entry.actual_fee_sats
+      ?? entry.max_fee_locked_sats
+      ?? entry.refunded_sats
+      ?? entry.local_balance_sats
+      ?? null;
+    if (Number.isInteger(amountSats)) mirrored.amount_sats = amountSats;
+
+    const passthrough = [
+      'service',
+      'direction',
+      'from_bucket',
+      'to_bucket',
+      'reference',
+      'reason',
+      'local_balance_sats',
+      'routing_pnl_sats',
+      'max_fee_locked_sats',
+      'actual_fee_sats',
+      'refunded_sats',
+    ];
+    for (const key of passthrough) {
+      if (entry[key] !== undefined && entry[key] !== null) mirrored[key] = entry[key];
+    }
+    return mirrored;
+  }
+
+  async _mirrorPublicLedger(entry) {
+    if (!this._publicLedger?.record) return;
+    try {
+      await this._publicLedger.record(this._publicLedgerEntry(entry));
+    } catch (err) {
+      console.error(`[CapitalLedger] Public ledger mirror failed for ${entry.type}: ${err.message}`);
+    }
   }
 
   /**
