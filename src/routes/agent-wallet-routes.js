@@ -10,6 +10,36 @@ import { rateLimit } from '../identity/rate-limiter.js';
 import { validateAmount } from '../identity/validators.js';
 import { err400Validation, err400MissingField, err500Internal, agentError, buildRecovery } from '../identity/agent-friendly-errors.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function shortenOpaqueId(value) {
+  if (typeof value !== 'string') return value;
+  if (!UUID_RE.test(value.trim())) return value;
+  return `${value.slice(0, 8)}...`;
+}
+
+export function sanitizePublicLedgerEntry(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+
+  const safe = { ...entry };
+
+  if (typeof safe.address === 'string' && safe.address.trim()) {
+    safe.address_hint = `...${safe.address.trim().slice(-8)}`;
+    delete safe.address;
+  }
+
+  safe.flow_id = shortenOpaqueId(safe.flow_id);
+  safe.reference = shortenOpaqueId(safe.reference);
+
+  delete safe.payment_request;
+  delete safe.invoice;
+  delete safe.preimage;
+  delete safe.token;
+  delete safe.proofs;
+
+  return safe;
+}
+
 export function agentWalletRoutes(daemon) {
   const router = Router();
   const auth = requireAuth(daemon.agentRegistry);
@@ -353,7 +383,12 @@ export function agentWalletRoutes(daemon) {
         limit: limit ? parseInt(limit, 10) : 100,
         offset: offset ? parseInt(offset, 10) : 0,
       });
-      res.json(result);
+      res.json({
+        ...result,
+        entries: Array.isArray(result.entries)
+          ? result.entries.map(sanitizePublicLedgerEntry)
+          : [],
+      });
     } catch (err) {
       return err500Internal(res, 'fetching ledger');
     }

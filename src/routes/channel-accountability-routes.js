@@ -44,6 +44,23 @@ function summarizeVerifyResult(result, extra = {}) {
   };
 }
 
+export function summarizePublicChannelStatus(monitorStatus = {}, chainStatus = {}) {
+  return {
+    monitor: {
+      running: Boolean(monitorStatus.running),
+      violations_detected: Number(monitorStatus.violationsDetected || 0),
+      lnd_connected: Boolean(monitorStatus.lndConnected),
+      assigned_channels: Number(monitorStatus.assignedChannels || 0),
+    },
+    chain: {
+      entries: Number(chainStatus.entries || 0),
+      last_timestamp: chainStatus.lastTimestamp || null,
+      has_integrity_anchor: Boolean(chainStatus.lastHash),
+    },
+    learn: 'Read the fields above and choose your next step.',
+  };
+}
+
 function buildCooldownBody(message, hint) {
   return {
     error: 'cooldown_active',
@@ -361,7 +378,7 @@ export function channelAccountabilityRoutes(daemon) {
     try {
       const monitorStatus = daemon.channelMonitor.getStatus();
       const chainStatus = await daemon.channelAuditLog.getStatus();
-      res.json({ monitor: monitorStatus, chain: chainStatus });
+      res.json(summarizePublicChannelStatus(monitorStatus, chainStatus));
     } catch (err) {
       console.error(`[Gateway] ${_req.path}: ${err.message}`);
       res.status(500).json({ error: 'Internal server error' });

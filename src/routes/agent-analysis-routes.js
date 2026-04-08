@@ -23,6 +23,30 @@ function isMissingNodeError(err) {
   return message.includes('unable to find node') || message.includes('node not found');
 }
 
+export function summarizePublicNetworkHealth({ info = null, networkInfo = null } = {}) {
+  return {
+    source: 'lnd',
+    node: info ? {
+      pubkey: info.identity_pubkey,
+      alias: info.alias,
+      num_active_channels: info.num_active_channels,
+      num_inactive_channels: info.num_inactive_channels,
+      num_pending_channels: info.num_pending_channels,
+      num_peers: info.num_peers,
+      synced_to_chain: info.synced_to_chain,
+      synced_to_graph: info.synced_to_graph,
+      block_height: info.block_height,
+    } : null,
+    network: networkInfo ? {
+      num_nodes: networkInfo.num_nodes,
+      num_channels: networkInfo.num_channels,
+      total_network_capacity: networkInfo.total_network_capacity,
+      avg_channel_size: networkInfo.avg_channel_size,
+    } : null,
+    hint: 'For deeper analysis, see /api/v1/analysis/node/:pubkey or /api/v1/analysis/suggest-peers/:pubkey',
+  };
+}
+
 async function buildPeerOfPeerFallbackCandidates(client, firstHopPubkeys = [], excluded = new Set(), limit = 30) {
   const secondHopPubkeys = new Set();
 
@@ -81,38 +105,12 @@ export function agentAnalysisRoutes(daemon) {
         });
       }
 
-      const [info, chanBalance, networkInfo] = await Promise.all([
+      const [info, networkInfo] = await Promise.all([
         client.getInfo().catch(() => null),
-        client.channelBalance().catch(() => null),
         client.getNetworkInfo().catch(() => null),
       ]);
 
-      res.json({
-        source: 'lnd',
-        node: info ? {
-          pubkey: info.identity_pubkey,
-          alias: info.alias,
-          num_active_channels: info.num_active_channels,
-          num_inactive_channels: info.num_inactive_channels,
-          num_pending_channels: info.num_pending_channels,
-          num_peers: info.num_peers,
-          synced_to_chain: info.synced_to_chain,
-          synced_to_graph: info.synced_to_graph,
-          block_height: info.block_height,
-          version: info.version,
-        } : null,
-        channel_balance: chanBalance ? {
-          local_balance_sat: chanBalance.local_balance?.sat || '0',
-          remote_balance_sat: chanBalance.remote_balance?.sat || '0',
-        } : null,
-        network: networkInfo ? {
-          num_nodes: networkInfo.num_nodes,
-          num_channels: networkInfo.num_channels,
-          total_network_capacity: networkInfo.total_network_capacity,
-          avg_channel_size: networkInfo.avg_channel_size,
-        } : null,
-        hint: 'For deeper analysis, see /api/v1/analysis/node/:pubkey or /api/v1/analysis/suggest-peers/:pubkey',
-      });
+      res.json(summarizePublicNetworkHealth({ info, networkInfo }));
     } catch (err) {
       return err500Internal(res, 'reading network health');
     }
