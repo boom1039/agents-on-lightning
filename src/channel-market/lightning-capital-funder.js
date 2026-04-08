@@ -64,6 +64,18 @@ function isRouteFailure(error) {
   return text.includes('FAILURE_REASON_OFFCHAIN') || text.includes('FAILURE_REASON_NO_ROUTE');
 }
 
+function isTransientLoopError(error) {
+  const text = String(error || '').toLowerCase();
+  return text.includes('timed out')
+    || text.includes('timeout')
+    || text.includes('temporarily unavailable')
+    || text.includes('code = unavailable')
+    || text.includes('connection reset')
+    || text.includes('connection refused')
+    || text.includes('econnrefused')
+    || text.includes('socket');
+}
+
 function isBoltzFinalFailure(status) {
   return ['transaction.failed', 'transaction.refunded', 'invoice.expired', 'swap.expired'].includes(String(status || '').trim());
 }
@@ -786,31 +798,40 @@ export class LightningCapitalFunder {
         reason: 'Loop client is not configured.',
       };
     }
-    try {
-      const result = await this._loopClient.quoteOut(amountSats, {
-        confTarget: this.config.loopOutConfTarget,
-        fast: this.config.fast,
-      });
-      const parsed = parseLoopQuoteText(result);
-      const routeProbe = await this._probeRouteToProvider('loop_out', amountSats);
-      const routeBlocked = routeProbe.status === 'unreachable';
-      return {
-        provider: 'loop_out',
-        available: !routeBlocked,
-        executable: true,
-        estimated_total_fee_sats: parsed.estimated_total_fee_sats,
-        receive_amount_sats: parsed.receive_onchain_sats,
-        route_probe: routeProbe,
-        reason: routeBlocked ? routeProbe.reason : null,
-        details: parsed.raw_quote,
-      };
-    } catch (err) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await this._loopClient.quoteOut(amountSats, {
+          confTarget: this.config.loopOutConfTarget,
+          fast: this.config.fast,
+        });
+        const parsed = parseLoopQuoteText(result);
+        const routeProbe = await this._probeRouteToProvider('loop_out', amountSats);
+        const routeBlocked = routeProbe.status === 'unreachable';
+        return {
+          provider: 'loop_out',
+          available: !routeBlocked,
+          executable: true,
+          estimated_total_fee_sats: parsed.estimated_total_fee_sats,
+          receive_amount_sats: parsed.receive_onchain_sats,
+          route_probe: routeProbe,
+          reason: routeBlocked ? routeProbe.reason : null,
+          details: parsed.raw_quote,
+        };
+      } catch (err) {
+        lastError = err;
+        if (!isTransientLoopError(err?.message || err) || attempt > 0) {
+          break;
+        }
+      }
+    }
+    {
       return {
         provider: 'loop_out',
         available: false,
         executable: true,
         route_probe: await this._probeRouteToProvider('loop_out', amountSats),
-        reason: err.message,
+        reason: lastError?.message || 'Loop quote failed.',
       };
     }
   }

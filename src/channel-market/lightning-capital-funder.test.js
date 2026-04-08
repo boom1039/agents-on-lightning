@@ -87,6 +87,48 @@ test('createFlow creates invoice, tracked address, and lightning funding event',
   assert.equal(capitalLedger.fundingEvents[1].type, 'lightning_invoice_created');
 });
 
+test('createFlow retries a transient Loop quote failure once before falling back', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  const loopClient = {
+    quoteCalls: 0,
+    async quoteOut() {
+      this.quoteCalls += 1;
+      if (this.quoteCalls === 1) {
+        throw new Error('[loop] rpc error: code = Unavailable desc = error reading from server: read tcp 127.0.0.1:1->127.0.0.1:2: read: operation timed out');
+      }
+      return { stdout: 'Send off-chain: 250000 sat\nReceive on-chain: 249553 sat\nEstimated total fee: 447 sat', stderr: '' };
+    },
+    async startLoopOut() {
+      return { swapId: '55', stdout: 'swap started', stderr: '' };
+    },
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      addInvoice: async (value) => ({
+        payment_request: `lnbc${value}mock`,
+        r_hash: 'hash-loop-retry',
+        add_index: '43',
+      }),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+    config: { boltzApiBase: TEST_BOLTZ_API_BASE },
+  });
+
+  await funder.load();
+  const flow = await funder.createFlow('agent-lightning', 250_000);
+
+  assert.equal(loopClient.quoteCalls, 2);
+  assert.equal(flow.bridge_preflight.preferred_provider, 'loop_out');
+  assert.equal(flow.bridge_preflight.providers[0].available, true);
+});
+
 test('polling advances invoice -> loop out -> onchain pending -> confirmed', async () => {
   const dataLayer = mockDataLayer();
   const depositTracker = createDepositTracker();
