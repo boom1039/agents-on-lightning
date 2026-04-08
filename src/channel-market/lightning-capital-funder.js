@@ -465,6 +465,7 @@ export class LightningCapitalFunder {
   _summarizeFlow(flow) {
     const deposit = this._getDepositForFlow(flow);
     const status = this._deriveStatus(flow, deposit);
+    const describedError = describeFlowError(flow.last_error);
     return {
       flow_id: flow.flow_id,
       agent_id: flow.agent_id,
@@ -478,8 +479,8 @@ export class LightningCapitalFunder {
       onchain_txid: deposit?.txid || null,
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
-      last_error: flow.last_error || null,
-      hint: flow.status === 'loop_out_failed' && flow.last_error === describeFlowError('FAILURE_REASON_OFFCHAIN')
+      last_error: describedError || null,
+      hint: status === 'loop_out_failed' && describedError === describeFlowError('FAILURE_REASON_OFFCHAIN')
         ? 'Your node received the Lightning deposit, but Loop could not route its own swap payment onward.'
         : null,
       status_url: `/api/v1/capital/deposit-lightning/${encodeURIComponent(flow.flow_id)}`,
