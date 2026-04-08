@@ -486,7 +486,11 @@ export class AgentCashuWalletOperations {
 
   async restoreFromSeed(agentId) {
     if (!this._seedManager) {
-      throw new Error('Seed recovery requires deterministic mode (seedManager not configured)');
+      return {
+        recovered: 0,
+        balance: await this.getBalance(agentId),
+        restoreSupported: false,
+      };
     }
 
     const wallet = await this._getAgentWallet(agentId);
@@ -515,7 +519,7 @@ export class AgentCashuWalletOperations {
       const balance = unspent.reduce((s, p) => s + (p.amount || 0), 0);
       console.log(`[AgentCashuWallet] Restored ${unspent.length} proofs (${balance} sats) for agent ${agentId}`);
 
-      return { recovered: unspent.length, balance };
+      return { recovered: unspent.length, balance, restoreSupported: true };
     } finally {
       unlock();
     }

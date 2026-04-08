@@ -296,6 +296,7 @@ export function agentWalletRoutes(daemon) {
         agent_id: req.agentId,
         recovered_proofs: result.recovered,
         balance_sats: result.balance,
+        restore_supported: result.restoreSupported !== false,
       });
     } catch (err) {
       return agentError(res, 500, {
