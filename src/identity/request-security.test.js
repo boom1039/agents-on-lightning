@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 
 import { rejectUnauthorizedJourneyRoute } from './request-security.js';
 
-function mockReq({ remoteAddress = '203.0.113.10', headers = {}, path = '/journey' } = {}) {
+function mockReq({ remoteAddress = '203.0.113.10', ip = null, headers = {}, path = '/journey' } = {}) {
   return {
     path,
     agentId: null,
+    ip,
     socket: { remoteAddress },
     connection: { remoteAddress },
     get(name) {
@@ -81,6 +82,24 @@ test('journey guard allows loopback requests without extra auth', () => {
     }), res);
     assert.equal(result, null);
     assert.equal(res.statusCode, 200);
+  } finally {
+    if (prev === undefined) delete process.env.OPERATOR_API_SECRET;
+    else process.env.OPERATOR_API_SECRET = prev;
+  }
+});
+
+test('journey guard blocks forwarded public requests behind a loopback proxy', () => {
+  const prev = process.env.OPERATOR_API_SECRET;
+  process.env.OPERATOR_API_SECRET = 'topsecret';
+  try {
+    const res = mockRes();
+    const result = rejectUnauthorizedJourneyRoute(mockReq({
+      remoteAddress: '127.0.0.1',
+      ip: '203.0.113.10',
+    }), res);
+    assert.equal(result, res);
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.body?.error, 'authentication_required');
   } finally {
     if (prev === undefined) delete process.env.OPERATOR_API_SECRET;
     else process.env.OPERATOR_API_SECRET = prev;

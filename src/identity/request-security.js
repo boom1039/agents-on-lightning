@@ -20,7 +20,7 @@ const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const HOSTNAME_RE = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/;
 
 export function getSocketAddress(req) {
-  return req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+  return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
 }
 
 export function isLoopbackAddress(address) {
