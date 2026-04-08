@@ -142,6 +142,7 @@ export function mockCapitalLedger(overrides = {}) {
   const ecashCredits = [];
   const serviceSpends = [];
   const serviceRefunds = [];
+  const fundingEvents = [];
   return {
     getBalance: async (_agentId) => ({ available: 1_000_000, locked: 0, pending_deposit: 0, pending_close: 0, total_service_spent: 0 }),
     lockForChannel: async (agentId, amount, ref) => {
@@ -171,6 +172,9 @@ export function mockCapitalLedger(overrides = {}) {
     refundServiceSpend: async (agentId, amount, reference, service, reason) => {
       serviceRefunds.push({ agentId, amount, reference, service, reason });
     },
+    recordFundingEvent: async (agentId, type, details = {}) => {
+      fundingEvents.push({ agentId, type, ...details });
+    },
     settleRebalance: async (agentId, maxFeeLocked, actualFee, reference) => {
       calls.push({ method: 'settleRebalance', agentId, maxFeeLocked, actualFee, reference });
     },
@@ -180,6 +184,7 @@ export function mockCapitalLedger(overrides = {}) {
     ecashCredits,
     serviceSpends,
     serviceRefunds,
+    fundingEvents,
   };
 }
 

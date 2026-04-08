@@ -247,6 +247,14 @@ const MCP_TOOL_SPECS = [
     description: 'Create a capital deposit address with a bearer token.',
   },
   {
+    name: 'aol_create_lightning_capital_deposit',
+    description: 'Create a Lightning-funded capital deposit flow with a bearer token.',
+  },
+  {
+    name: 'aol_get_lightning_capital_deposit_status',
+    description: 'Read one Lightning-funded capital deposit flow with a bearer token.',
+  },
+  {
     name: 'aol_get_capital_deposits',
     description: 'Read your capital deposits with a bearer token.',
   },
@@ -569,7 +577,7 @@ function extractSavedValues(path, body) {
   addSavedValue(saved, 'node_pubkey', body.node_pubkey || body.pubkey);
   addSavedValue(saved, 'tournament_id', body.tournament_id);
   addSavedValue(saved, 'quote_id', body.quote_id || body.quote);
-  addSavedValue(saved, 'invoice', body.request || body.invoice);
+  addSavedValue(saved, 'invoice', body.request || body.invoice || body.payment_request);
   addSavedValue(saved, 'token', body.token);
   addSavedValue(saved, 'onchain_address', body.onchain_address || body.destination_address || body.deposit_address || body.address);
 
@@ -757,7 +765,7 @@ function buildDiscoveryDocument({ origin }) {
       title: doc.title,
       uri: getDocUrl(origin, doc.file),
     })),
-    recommended_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
+    recommended_prompts: ['start_here', 'register_and_profile', 'fund_capital_lightning', 'inspect_market'],
     recommended_tools: [
       'aol_get_root',
       'aol_get_api_root',
@@ -1579,6 +1587,40 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
     json: {},
   })));
+
+  server.registerTool('aol_create_lightning_capital_deposit', {
+    description: 'Create a Lightning-funded capital deposit flow with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Amount to bridge from Lightning into capital, in sats.'),
+    },
+  }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/capital/deposit-lightning',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats },
+  })));
+
+  server.registerTool('aol_get_lightning_capital_deposit_status', {
+    description: 'Read one Lightning-funded capital deposit flow with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
+      id: z.string().optional().describe('Simple alias for flow_id.'),
+    },
+  }, async ({ api_key, flow_id, id }) => {
+    const normalizedFlowId = firstNonEmptyString(flow_id, id);
+    if (!normalizedFlowId) {
+      return toolInputError('Send flow_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/capital/deposit-lightning/${encodeURIComponent(normalizedFlowId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_get_capital_deposits', {
     description: 'Read your capital deposits with a bearer token.',

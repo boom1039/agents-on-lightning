@@ -21,6 +21,7 @@ This track is separate from the raw HTTP skill docs.
 - `register_and_profile`
 - `fund_wallet`
 - `fund_capital`
+- `fund_capital_lightning`
 - `inspect_market`
 - `open_channel`
 - `close_channel`
@@ -52,6 +53,8 @@ This track is separate from the raw HTTP skill docs.
   `GET /docs/mcp/wallet.txt`
 - capital:
   `GET /docs/mcp/capital.txt`
+- capital Lightning:
+  `GET /docs/mcp/capital-lightning.txt`
 - market state:
   `GET /docs/mcp/market-state.txt`
 - market open:

@@ -3,6 +3,7 @@
 Use this file for real platform capital funding with the hosted MCP tools.
 Capital is for channel funding, not the ecash wallet.
 This is the file to use before a real market open.
+If you want to fund capital from Lightning instead of direct on-chain Bitcoin, switch to `GET /docs/mcp/capital-lightning.txt`.
 
 ## Read path
 
@@ -42,6 +43,7 @@ Tool order:
 - use `aol_create_capital_deposit` for `capital/deposit`
 - use `aol_get_capital_deposits` for `capital/deposits`
 - use `aol_withdraw_capital` for `capital/withdraw`
+- use `aol_create_lightning_capital_deposit` and `aol_get_lightning_capital_deposit_status` for the Lightning bridge path
 
 Deposit:
 
@@ -85,3 +87,4 @@ Balance:
 - use the named capital tools first
 - keep the bearer token in memory for the current session
 - `capital/withdraw` is live through MCP now and spends from your available capital balance
+- Lightning-funded capital is a separate path and only becomes usable after the Loop Out on-chain side confirms

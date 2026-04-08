@@ -243,6 +243,14 @@ export class CapitalLedger {
 
     const passthrough = [
       'service',
+      'source',
+      'status',
+      'flow_id',
+      'address',
+      'txid',
+      'confirmations',
+      'required_confirmations',
+      'loop_out_swap_id',
       'direction',
       'from_bucket',
       'to_bucket',
@@ -1142,6 +1150,38 @@ export class CapitalLedger {
       });
 
       return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
+   * Record a capital-related event that does not change balances.
+   * Used for long-running funding flows like Lightning -> Loop Out -> capital.
+   */
+  async recordFundingEvent(agentId, type, details = {}) {
+    assertAgentId(agentId);
+    if (!type || typeof type !== 'string') {
+      throw new Error('recordFundingEvent requires a type string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+      const activity = {
+        agent_id: agentId,
+        type,
+        balance_after: this._balanceSummary(state),
+        ...details,
+      };
+      await this._logActivity(activity);
+      await this._logAudit({
+        type,
+        agent_id: agentId,
+        ...details,
+        balance_after: this._balanceSummary(state),
+      });
+      return activity;
     } finally {
       unlock();
     }

@@ -9,6 +9,7 @@ import { DataLayer } from './data-layer.js';
 import { NodeManager } from './lnd/index.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { LoopClient } from './loop/client.js';
 
 // Identity
 import { AgentRegistry } from './identity/registry.js';
@@ -51,7 +52,7 @@ import {
   CapitalLedger, DepositTracker, ChannelOpener, ChannelCloser,
   RevenueAttributionTracker, SubmarineSwapProvider, MarketTransparency,
   PerformanceTracker, EcashChannelFunder, AnalyticsGateway, HelpEndpoint,
-  LndCache, RebalanceExecutor,
+  LndCache, RebalanceExecutor, LightningCapitalFunder,
 } from './channel-market/index.js';
 
 export class AgentDaemon {
@@ -187,6 +188,33 @@ export class AgentDaemon {
     await this.depositTracker.load();
     this.depositTracker.startPolling();
 
+    try {
+      if (this.config.loop?.tlsCertPath && this.config.loop?.macaroonPath) {
+        this.loopClient = new LoopClient(this.config.loop);
+        this.lightningCapitalFunder = new LightningCapitalFunder({
+          nodeManager: this.nodeManager,
+          depositTracker: this.depositTracker,
+          capitalLedger: this.capitalLedger,
+          dataLayer: this.dataLayer,
+          auditLog: this.channelAuditLog,
+          mutex: channelMutex,
+          loopClient: this.loopClient,
+          config: this.config.loop,
+        });
+        await this.lightningCapitalFunder.load();
+        this.lightningCapitalFunder.startPolling();
+      } else {
+        this.loopClient = null;
+        this.lightningCapitalFunder = null;
+        this._startupWarnings.push('loop config missing');
+      }
+    } catch (err) {
+      console.warn(`[AgentDaemon] Lightning capital funder init failed: ${err.message}`);
+      this._startupWarnings.push(`Lightning capital funder unavailable: ${err.message}`);
+      this.loopClient = null;
+      this.lightningCapitalFunder = null;
+    }
+
     this.channelOpener = new ChannelOpener({
       capitalLedger: this.capitalLedger,
       nodeManager: this.nodeManager,
@@ -320,6 +348,7 @@ export class AgentDaemon {
     clearInterval(this._leaderboardTimer);
     this.channelMonitor?.stop?.();
     this.depositTracker?.stopPolling?.();
+    this.lightningCapitalFunder?.stopPolling?.();
     this.channelOpener?.stopPolling?.();
     this.channelCloser?.stopPolling?.();
     this.revenueTracker?.stopPolling?.();

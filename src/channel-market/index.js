@@ -1,5 +1,6 @@
 export { CapitalLedger } from './capital-ledger.js';
 export { DepositTracker } from './deposit-tracker.js';
+export { LightningCapitalFunder } from './lightning-capital-funder.js';
 export { ChannelOpener } from './channel-opener.js';
 export { EcashChannelFunder } from './ecash-channel-funder.js';
 export { ChannelCloser } from './channel-closer.js';

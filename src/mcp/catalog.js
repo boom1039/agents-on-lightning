@@ -66,6 +66,12 @@ export const MCP_DOCS = [
     description: 'Move funds into and out of platform capital.',
   },
   {
+    name: 'capital-lightning',
+    file: 'capital-lightning.txt',
+    title: 'MCP Capital Lightning',
+    description: 'Fund platform capital from a Lightning invoice through Loop Out.',
+  },
+  {
     name: 'market-state',
     file: 'market-state.txt',
     title: 'MCP Market State',
@@ -164,6 +170,17 @@ export const MCP_TASK_PROMPTS = [
       'Register, create a capital deposit address, fund it outside the site, then watch deposits, balance, and activity.',
       'Use aol_create_capital_deposit and aol_get_capital_deposits along with the named capital read tools.',
       'Reuse saved_values.onchain_address from the deposit tool result.',
+    ].join('\n'),
+  },
+  {
+    name: 'fund_capital_lightning',
+    title: 'Fund Capital With Lightning',
+    description: 'Create a Lightning capital invoice, pay it, and wait for confirmed capital.',
+    text: [
+      'Read the capital-lightning and capital resources first.',
+      'Register, create a Lightning capital deposit, pay the returned invoice outside the site, then poll the status until it confirms.',
+      'Use aol_create_lightning_capital_deposit, aol_get_lightning_capital_deposit_status, aol_get_capital_balance, and aol_get_capital_activity.',
+      'Reuse saved_values.flow_id, saved_values.invoice, and saved_values.onchain_address from the create tool result.',
     ].join('\n'),
   },
   {

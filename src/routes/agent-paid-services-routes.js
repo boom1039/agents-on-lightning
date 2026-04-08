@@ -47,6 +47,11 @@ function isMissingNodeConnectionError(err) {
   return message.includes('No LND node available') || message.includes('No LND node connected');
 }
 
+function isMissingLoopError(err) {
+  const message = String(err?.message || '');
+  return message.includes('loop') || message.includes('Loop');
+}
+
 function isInsufficientCapitalError(err) {
   return /Insufficient available balance/i.test(String(err?.message || ''));
 }
@@ -537,6 +542,95 @@ export function agentPaidServicesRoutes(daemon) {
     });
   });
 
+  // Create a Lightning-funded capital deposit flow.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposit-lightning","summary":"Create Lightning-funded capital deposit flow.","order":135,"tags":["capital","write","agent"],"doc":["skills/capital-lightning-deposit.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.post('/api/v1/capital/deposit-lightning', auth, rateLimit('capital_write'), async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capital/balance');
+    }
+    if (!daemon.lightningCapitalFunder) {
+      return err503Service(res, 'Lightning capital deposit');
+    }
+    return runIdempotentRoute({
+      req,
+      res,
+      store: idempotencyStore,
+      scope: 'capital:deposit-lightning',
+      handler: async () => {
+        const { amount_sats } = req.body || {};
+        if (!Number.isInteger(amount_sats) || amount_sats <= 0) {
+          return {
+            statusCode: 400,
+            body: {
+              error: 'validation_error',
+              message: 'amount_sats must be a positive integer.',
+              hint: 'Send a whole number of sats like 250000.',
+              see: 'GET /api/v1/capital/balance',
+            },
+          };
+        }
+        const flow = await daemon.lightningCapitalFunder.createFlow(req.agentId, amount_sats);
+        return {
+          statusCode: 200,
+          body: {
+            ...flow,
+            instructions: 'Pay the returned Lightning invoice outside the site, then poll the status_url until the deposit is confirmed.',
+            cost_summary: { action: 'deposit_lightning', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' },
+          },
+        };
+      },
+      onError: (err) => {
+        if (isMissingNodeConnectionError(err) || isMissingLoopError(err)) {
+          return {
+            statusCode: 503,
+            body: withRecovery(
+              {
+                error: 'service_unavailable',
+                message: err.message,
+              },
+              'safe', 'No Lightning capital invoice was created. No funds are at risk.', [
+                'Retry POST /api/v1/capital/deposit-lightning later',
+              ],
+            ),
+          };
+        }
+        return {
+          statusCode: 400,
+          body: {
+            error: 'capital_lightning_error',
+            message: err.message,
+            hint: 'Try a supported amount and retry. This flow must pass the current Loop Out checks before the invoice is created.',
+            see: 'GET /api/v1/capital/balance',
+          },
+        };
+      },
+    });
+  });
+
+  // Read one Lightning-funded capital deposit flow.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposit-lightning-status","summary":"Read Lightning-funded capital deposit flow.","order":136,"tags":["capital","read","agent"],"doc":["skills/capital-lightning-deposit.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/capital/deposit-lightning/:flowId', auth, rateLimit('capital_read'), async (req, res) => {
+    try {
+      if (!daemon.lightningCapitalFunder) {
+        return err503Service(res, 'Lightning capital deposit');
+      }
+      const flow = await daemon.lightningCapitalFunder.getFlow(req.agentId, req.params.flowId);
+      if (!flow) {
+        return agentError(res, 404, {
+          error: 'not_found',
+          message: 'No Lightning capital deposit flow found for that id.',
+          hint: 'Create a new flow first or use a flow_id returned by POST /api/v1/capital/deposit-lightning.',
+          see: 'POST /api/v1/capital/deposit-lightning',
+        });
+      }
+      return res.json(flow);
+    } catch (err) {
+      console.error(`[Gateway] ${req.path}: ${err.message}`);
+      return err500Internal(res, 'reading Lightning capital deposit status');
+    }
+  });
+
   // Read capital deposits.
   // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposits","summary":"Read capital deposits.","order":140,"tags":["capital","read","agent"],"doc":["skills/capital-deposit-and-status.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/capital/deposits', auth, rateLimit('capital_read'), async (req, res) => {
@@ -544,7 +638,10 @@ export function agentPaidServicesRoutes(daemon) {
       if (!daemon.depositTracker) {
         return err503Service(res, 'Deposit tracker');
       }
-      const { deposits } = daemon.depositTracker.getDepositStatus(req.agentId);
+      const { deposits: rawDeposits } = daemon.depositTracker.getDepositStatus(req.agentId);
+      const deposits = daemon.lightningCapitalFunder
+        ? daemon.lightningCapitalFunder.annotateDeposits(req.agentId, rawDeposits)
+        : rawDeposits;
       res.json({
         agent_id: req.agentId,
         deposits,
@@ -553,6 +650,10 @@ export function agentPaidServicesRoutes(daemon) {
             watching: 'Address generated, waiting for incoming transaction.',
             pending_deposit: 'Transaction detected, waiting for confirmations.',
             confirmed: 'Deposit confirmed and credited to your available balance.',
+          },
+          sources: {
+            onchain: 'A normal on-chain capital deposit address.',
+            lightning_loop_out: 'A Lightning-funded capital deposit that is being bridged on-chain through Loop Out.',
           },
         },
       });

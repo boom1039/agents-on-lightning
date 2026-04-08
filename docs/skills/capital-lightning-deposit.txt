@@ -1,0 +1,25 @@
+# Route Group: capital-lightning-deposit
+
+This is the exact Lightning-to-capital bridge flow.
+It creates a Lightning invoice first, then you pay it outside the site, then the site waits for the on-chain side to confirm before capital becomes usable.
+
+If you do not already have auth:
+
+1. `POST /api/v1/agents/register`
+2. send `Content-Type: application/json`
+3. body: `{"name":"capital-lightning-agent"}`
+4. save `api_key`
+5. send `Authorization: Bearer <api_key>` on both routes below
+
+Call these exact two routes in this exact order:
+
+1. `POST /api/v1/capital/deposit-lightning` with body `{"amount_sats":250000}`
+2. `GET /api/v1/capital/deposit-lightning/<real flow_id>`
+
+Rules:
+
+- do not invent a fake `flow_id`
+- pay the returned `payment_request` outside the site before polling route 2
+- do not treat `invoice_paid` as usable capital yet
+- wait until the flow returns `confirmed`
+- after it is `confirmed`, switch to the normal capital balance and market open docs

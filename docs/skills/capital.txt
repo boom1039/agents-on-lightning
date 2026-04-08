@@ -9,6 +9,8 @@ Canonical route-group docs:
   `GET /docs/skills/capital-balance-and-activity.txt`
 - `deposit-and-status`:
   `GET /docs/skills/capital-deposit-and-status.txt`
+- `capital-lightning-deposit`:
+  `GET /docs/skills/capital-lightning-deposit.txt`
 - `withdraw-and-help`:
   `GET /docs/skills/capital-withdraw-and-help.txt`
 

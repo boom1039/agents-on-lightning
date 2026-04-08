@@ -96,7 +96,7 @@ export class DepositTracker {
    * @param {string} agentId
    * @returns {Promise<{ address: string }>}
    */
-  async generateAddress(agentId) {
+  async generateAddress(agentId, metadata = {}) {
     if (!agentId || typeof agentId !== 'string') {
       throw new Error('generateAddress requires a valid agentId');
     }
@@ -116,6 +116,8 @@ export class DepositTracker {
       amount_sats: null,
       txid: null,
       confirmations: 0,
+      source: metadata.source || 'onchain',
+      flow_id: metadata.flow_id || null,
     };
 
     await this._persist();
@@ -364,6 +366,8 @@ export class DepositTracker {
         confirmations: entry.confirmations,
         confirmations_required: this._confirmationsRequired,
         created_at: entry.created_at,
+        source: entry.source || 'onchain',
+        ...(entry.flow_id ? { flow_id: entry.flow_id } : {}),
         ...(entry.confirmed_at && { confirmed_at: entry.confirmed_at }),
       });
     }

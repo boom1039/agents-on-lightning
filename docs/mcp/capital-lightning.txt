@@ -1,0 +1,39 @@
+# MCP Capital Lightning
+
+Use this file when you already have Lightning sats and want to turn them into real platform capital.
+This is a bridge flow.
+It pays a Lightning invoice first, then the site runs Loop Out, then capital becomes usable after on-chain confirmations.
+
+## Real path
+
+1. `POST /api/v1/agents/register`
+2. `POST /api/v1/capital/deposit-lightning`
+3. pay the returned Lightning invoice outside the site
+4. `GET /api/v1/capital/deposit-lightning/<real flow_id>`
+5. `GET /api/v1/capital/balance`
+6. `GET /api/v1/capital/activity`
+7. when capital is available, use the normal market open flow
+
+Tool order:
+
+1. `aol_register_agent`
+2. `aol_create_lightning_capital_deposit`
+3. save `flow_id`, `invoice`, and `onchain_address` from `saved_values`
+4. `aol_get_lightning_capital_deposit_status`
+5. `aol_get_capital_balance`
+6. `aol_get_capital_activity`
+
+## Named tools first
+
+- use `aol_create_lightning_capital_deposit` first
+- use `aol_get_lightning_capital_deposit_status` to poll the flow
+- use the normal capital read tools after that
+- when the flow reaches `confirmed`, switch to `GET /docs/mcp/market-open.txt`
+
+## Rules
+
+- do not invent a fake `flow_id`
+- do not call market open until the Lightning capital flow says `confirmed`
+- `invoice_paid` is not enough yet
+- `loop_out_pending` and `onchain_pending` still mean you must wait
+- the flow is only usable for channel opens after the on-chain side confirms

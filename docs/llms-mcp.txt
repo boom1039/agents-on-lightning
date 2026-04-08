@@ -17,6 +17,7 @@ Do not use the raw HTTP skill files from here.
 - `inspect_market`
 - `fund_wallet`
 - `fund_capital`
+- `fund_capital_lightning`
 - `open_channel`
 - `close_channel`
 

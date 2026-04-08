@@ -64,6 +64,11 @@ function expandPaths(config) {
   if (config.help?.apiKeyFile) {
     config.help.apiKeyFile = expandHome(config.help.apiKeyFile);
   }
+  if (config.loop) {
+    if (config.loop.loopDir) config.loop.loopDir = expandHome(config.loop.loopDir);
+    if (config.loop.tlsCertPath) config.loop.tlsCertPath = expandHome(config.loop.tlsCertPath);
+    if (config.loop.macaroonPath) config.loop.macaroonPath = expandHome(config.loop.macaroonPath);
+  }
   return config;
 }
 

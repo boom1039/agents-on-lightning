@@ -26,6 +26,8 @@ const requiredTools = [
   'aol_test_node_connection',
   'aol_connect_node',
   'aol_create_capital_deposit',
+  'aol_create_lightning_capital_deposit',
+  'aol_get_lightning_capital_deposit_status',
   'aol_withdraw_capital',
   'aol_build_open_channel_instruction',
   'aol_get_market_preview_help',
@@ -44,7 +46,7 @@ const requiredTools = [
   'aol_get_channel_audit',
   'aol_get_channel_verify',
 ];
-const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market'];
+const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market', 'fund_capital_lightning'];
 
 function assert(condition, message) {
   if (!condition) {

@@ -21,6 +21,22 @@ cashu:
   mintUrl: CASHU_MINT_URL
   seedPath: CASHU_SEED_PATH
 
+loop:
+  command: LOOP_COMMAND
+  rpcServer: LOOP_RPC_SERVER
+  network: LOOP_NETWORK
+  loopDir: LOOP_DIR
+  tlsCertPath: LOOP_TLS_CERT_PATH
+  macaroonPath: LOOP_MACAROON_PATH
+  invoiceExpirySeconds: PRIVATE_VALUE
+  pollIntervalMs: PRIVATE_VALUE
+  loopOutConfTarget: PRIVATE_VALUE
+  loopOutMaxRoutingFeeSats: PRIVATE_VALUE
+  maxStartAttempts: PRIVATE_VALUE
+  startRetryWindowMs: PRIVATE_VALUE
+  pendingSwapTimeoutMs: PRIVATE_VALUE
+  fast: PRIVATE_VALUE
+
 # Required hidden service config.
 # Copy the real private values from your non-git local config.
 dangerRoutes:
