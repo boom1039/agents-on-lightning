@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import {
+  agentError,
   err403AbuseDenied,
   err403LoopbackOnly,
   err403OperatorSecretRequired,
@@ -250,6 +251,28 @@ export function rejectUnauthorizedOperatorRoute(req, res) {
   if (!hasValidOperatorSecret(req)) {
     logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);
     return err403OperatorSecretRequired(res);
+  }
+  return null;
+}
+
+function sendJourneyAuthRequired(res) {
+  res.set('WWW-Authenticate', 'Basic realm="Journey"');
+  return agentError(res, 401, {
+    error: 'authentication_required',
+    message: 'Journey access requires operator auth.',
+    hint: 'Use the operator secret with Basic auth or x-operator-secret.',
+  });
+}
+
+export function rejectUnauthorizedJourneyRoute(req, res) {
+  if (isLoopbackRequest(req)) return null;
+  if (!hasConfiguredOperatorSecret()) {
+    logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);
+    return err503OperatorMisconfigured(res);
+  }
+  if (!hasValidOperatorSecret(req)) {
+    logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);
+    return sendJourneyAuthRequired(res);
   }
   return null;
 }

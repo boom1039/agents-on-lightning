@@ -5,13 +5,24 @@ import { fileURLToPath } from 'node:url';
 import { getAgentSurfaceManifest, getAgentSurfaceSummary } from '../monitor/agent-surface-inventory.js';
 import { getJourneyMonitor } from '../monitor/journey-monitor.js';
 import { err404HiddenRoute } from '../identity/agent-friendly-errors.js';
-import { isLoopbackRequest, rejectUnauthorizedOperatorRoute } from '../identity/request-security.js';
+import {
+  isLoopbackRequest,
+  rejectUnauthorizedJourneyRoute,
+  rejectUnauthorizedOperatorRoute,
+} from '../identity/request-security.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const JOURNEY_DIR = resolve(__dirname, '..', '..', 'monitoring_dashboards', 'journey');
+const PRETEXT_DIST_DIR = resolve(__dirname, '..', '..', 'node_modules', '@chenglou', 'pretext', 'dist');
 
 function intParam(val) {
   return val ? parseInt(val, 10) : undefined;
+}
+
+function requireJourneyAccess(req, res, next) {
+  const rejection = rejectUnauthorizedJourneyRoute(req, res);
+  if (rejection) return rejection;
+  return next();
 }
 
 function analyticsHandler(fn, errorStatus = 500) {
@@ -42,7 +53,7 @@ function getJourneyUpstreamOrigin(env = process.env) {
   const raw = typeof env.AOL_JOURNEY_UPSTREAM_ORIGIN === 'string'
     ? env.AOL_JOURNEY_UPSTREAM_ORIGIN.trim()
     : '';
-  return raw || null;
+  return raw || 'https://agentsonlightning.com';
 }
 
 function getJourneySource(req) {
@@ -81,6 +92,8 @@ async function proxyJourneyJson(req, res, origin) {
     headers: {
       Accept: req.get('accept') || 'application/json',
       'User-Agent': 'agents-on-lightning-local-journey-proxy',
+      ...(req.get('authorization') ? { Authorization: req.get('authorization') } : {}),
+      ...(req.get('x-operator-secret') ? { 'x-operator-secret': req.get('x-operator-secret') } : {}),
     },
   });
   const body = Buffer.from(await upstream.arrayBuffer());
@@ -96,6 +109,8 @@ async function proxyJourneyStream(req, res, origin) {
       Accept: req.get('accept') || 'text/event-stream',
       'Cache-Control': 'no-cache',
       'User-Agent': 'agents-on-lightning-local-journey-proxy',
+      ...(req.get('authorization') ? { Authorization: req.get('authorization') } : {}),
+      ...(req.get('x-operator-secret') ? { 'x-operator-secret': req.get('x-operator-secret') } : {}),
     },
     signal: controller.signal,
   });
@@ -119,6 +134,12 @@ export function journeyRoutes() {
   const router = Router();
   const journeyUpstreamOrigin = getJourneyUpstreamOrigin();
 
+  router.use('/journey', requireJourneyAccess);
+  router.use('/api/journey', requireJourneyAccess);
+  router.use('/api/analytics', requireJourneyAccess);
+  router.use('/api/demo/synthetic', requireJourneyAccess);
+
+  router.use('/journey/vendor/pretext', express.static(PRETEXT_DIST_DIR, { etag: false, maxAge: 0 }));
   router.use('/journey', express.static(JOURNEY_DIR, { etag: false, maxAge: 0 }));
   router.get('/journey', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'index.html')));
   router.get('/journey/three', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'three.html')));

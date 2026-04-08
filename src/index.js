@@ -71,7 +71,7 @@ export async function startServer() {
     if (origin && allowedOrigins.has(origin)) {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Operator-Secret');
       res.header('Vary', 'Origin');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
