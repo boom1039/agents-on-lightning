@@ -222,6 +222,33 @@ export class LightningCapitalFunder {
     return this._summarizeFlow(flow);
   }
 
+  async retryFlow(agentId, flowId) {
+    const flow = this._flows[flowId];
+    if (!flow || flow.agent_id !== agentId) return null;
+    if (!flow.invoice_paid_at) {
+      throw new Error('This Lightning deposit has not been paid yet.');
+    }
+    if (!['loop_out_failed', 'recovery_required'].includes(flow.status)) {
+      throw new Error('This Lightning deposit is not in a retryable state.');
+    }
+    flow.status = 'invoice_paid';
+    flow.next_retry_at = nowIso();
+    flow.last_progress_at = nowIso();
+    await this._persist();
+    await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_retrying', {
+      amount_sats: flow.amount_sats,
+      source: 'lightning_loop_out',
+      status: 'invoice_paid',
+      flow_id: flow.flow_id,
+      address: flow.deposit_address,
+      reason: describeFlowError(flow.last_error),
+      loop_out_swap_id: flow.loop_out_swap_id,
+      next_retry_at: flow.next_retry_at,
+      reference: flow.flow_id,
+    });
+    return this._summarizeFlow(flow);
+  }
+
   annotateDeposits(agentId, deposits) {
     const byAddress = new Map();
     for (const flow of Object.values(this._flows)) {

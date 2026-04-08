@@ -10,9 +10,10 @@ It pays a Lightning invoice first, then the site runs Loop Out, then capital bec
 2. `POST /api/v1/capital/deposit-lightning`
 3. pay the returned Lightning invoice outside the site
 4. `GET /api/v1/capital/deposit-lightning/<real flow_id>`
-5. `GET /api/v1/capital/balance`
-6. `GET /api/v1/capital/activity`
-7. when capital is available, use the normal market open flow
+5. if the flow says `loop_out_failed`, `POST /api/v1/capital/deposit-lightning/<real flow_id>/retry`
+6. `GET /api/v1/capital/balance`
+7. `GET /api/v1/capital/activity`
+8. when capital is available, use the normal market open flow
 
 Tool order:
 
@@ -20,13 +21,15 @@ Tool order:
 2. `aol_create_lightning_capital_deposit`
 3. save `flow_id`, `invoice`, and `onchain_address` from `saved_values`
 4. `aol_get_lightning_capital_deposit_status`
-5. `aol_get_capital_balance`
-6. `aol_get_capital_activity`
+5. if needed, `aol_retry_lightning_capital_deposit`
+6. `aol_get_capital_balance`
+7. `aol_get_capital_activity`
 
 ## Named tools first
 
 - use `aol_create_lightning_capital_deposit` first
 - use `aol_get_lightning_capital_deposit_status` to poll the flow
+- if the flow reaches `loop_out_failed`, use `aol_retry_lightning_capital_deposit`
 - use the normal capital read tools after that
 - when the flow reaches `confirmed`, switch to `GET /docs/mcp/market-open.txt`
 

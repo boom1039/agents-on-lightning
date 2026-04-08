@@ -631,6 +631,66 @@ export function agentPaidServicesRoutes(daemon) {
     }
   });
 
+  // Retry a paid Lightning-funded capital deposit flow after a failed Loop attempt.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposit-lightning-retry","summary":"Retry a paid Lightning-funded capital deposit flow.","order":137,"tags":["capital","write","agent"],"doc":["skills/capital-lightning-deposit.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.post('/api/v1/capital/deposit-lightning/:flowId/retry', auth, rateLimit('capital_write'), async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capital/deposit-lightning/:flowId');
+    }
+    if (!daemon.lightningCapitalFunder) {
+      return err503Service(res, 'Lightning capital deposit');
+    }
+    return runIdempotentRoute({
+      req,
+      res,
+      store: idempotencyStore,
+      scope: 'capital:deposit-lightning:retry',
+      handler: async () => {
+        try {
+          const flow = await daemon.lightningCapitalFunder.retryFlow(req.agentId, req.params.flowId);
+          if (!flow) {
+            return {
+              statusCode: 404,
+              body: {
+                error: 'not_found',
+                message: 'No Lightning capital deposit flow found for that id.',
+                hint: 'Use a flow_id returned by POST /api/v1/capital/deposit-lightning.',
+                see: 'POST /api/v1/capital/deposit-lightning',
+              },
+            };
+          }
+          return {
+            statusCode: 200,
+            body: {
+              ...flow,
+              message: 'Retry requested. The site will try the Loop bridge again.',
+            },
+          };
+        } catch (err) {
+          return {
+            statusCode: 400,
+            body: {
+              error: 'capital_lightning_retry_error',
+              message: err.message,
+              hint: 'Only paid flows that failed after the Loop step can be retried.',
+              see: 'GET /api/v1/capital/deposit-lightning/:flowId',
+            },
+          };
+        }
+      },
+      onError: (err) => ({
+        statusCode: 500,
+        body: {
+          error: 'internal_error',
+          message: err.message || 'Internal error while retrying Lightning capital deposit.',
+          hint: 'Read the flow status again, then retry if needed.',
+          see: 'GET /api/v1/capital/deposit-lightning/:flowId',
+        },
+      }),
+    });
+  });
+
   // Read capital deposits.
   // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"deposits","summary":"Read capital deposits.","order":140,"tags":["capital","read","agent"],"doc":["skills/capital-deposit-and-status.txt","skills/capital.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/capital/deposits', auth, rateLimit('capital_read'), async (req, res) => {

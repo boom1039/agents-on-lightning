@@ -255,6 +255,10 @@ const MCP_TOOL_SPECS = [
     description: 'Read one Lightning-funded capital deposit flow with a bearer token.',
   },
   {
+    name: 'aol_retry_lightning_capital_deposit',
+    description: 'Retry a paid Lightning-funded capital deposit flow with a bearer token.',
+  },
+  {
     name: 'aol_get_capital_deposits',
     description: 'Read your capital deposits with a bearer token.',
   },
@@ -1619,6 +1623,27 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
       method: 'GET',
       path: `/api/v1/capital/deposit-lightning/${encodeURIComponent(normalizedFlowId)}`,
       headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
+
+  server.registerTool('aol_retry_lightning_capital_deposit', {
+    description: 'Retry a paid Lightning-funded capital deposit flow with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
+      id: z.string().optional().describe('Simple alias for flow_id.'),
+    },
+  }, async ({ api_key, flow_id, id }) => {
+    const normalizedFlowId = firstNonEmptyString(flow_id, id);
+    if (!normalizedFlowId) {
+      return toolInputError('Send flow_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'POST',
+      path: `/api/v1/capital/deposit-lightning/${encodeURIComponent(normalizedFlowId)}/retry`,
+      headers: { Authorization: `Bearer ${api_key}` },
+      json: {},
     }));
   });
 
