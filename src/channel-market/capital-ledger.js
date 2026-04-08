@@ -248,6 +248,8 @@ export class CapitalLedger {
       'flow_id',
       'address',
       'txid',
+      'providers',
+      'preferred_provider',
       'confirmations',
       'required_confirmations',
       'loop_out_swap_id',

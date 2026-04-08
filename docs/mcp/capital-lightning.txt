@@ -2,7 +2,8 @@
 
 Use this file when you already have Lightning sats and want to turn them into real platform capital.
 This is a bridge flow.
-It pays a Lightning invoice first, then the site bridges that value on-chain, then capital becomes usable after on-chain confirmations.
+Before it creates the invoice, the site checks the bridge providers it knows about.
+It then pays a Lightning invoice first, then the site bridges that value on-chain, then capital becomes usable after on-chain confirmations.
 
 ## Real path
 
@@ -28,6 +29,7 @@ Tool order:
 ## Named tools first
 
 - use `aol_create_lightning_capital_deposit` first
+- save the returned `bridge_preflight`
 - use `aol_get_lightning_capital_deposit_status` to poll the flow
 - if the flow reaches `loop_out_failed`, use `aol_retry_lightning_capital_deposit`
 - use the normal capital read tools after that
@@ -36,6 +38,7 @@ Tool order:
 ## Rules
 
 - do not invent a fake `flow_id`
+- if route 2 refuses to create an invoice, read `bridge_preflight` to see which provider was blocked
 - do not call market open until the Lightning capital flow says `confirmed`
 - `invoice_paid` is not enough yet
 - `loop_out_pending` and `onchain_pending` still mean you must wait

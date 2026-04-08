@@ -189,24 +189,23 @@ export class AgentDaemon {
     this.depositTracker.startPolling();
 
     try {
-      if (this.config.loop?.tlsCertPath && this.config.loop?.macaroonPath) {
-        this.loopClient = new LoopClient(this.config.loop);
-        this.lightningCapitalFunder = new LightningCapitalFunder({
-          nodeManager: this.nodeManager,
-          depositTracker: this.depositTracker,
-          capitalLedger: this.capitalLedger,
-          dataLayer: this.dataLayer,
-          auditLog: this.channelAuditLog,
-          mutex: channelMutex,
-          loopClient: this.loopClient,
-          config: this.config.loop,
-        });
-        await this.lightningCapitalFunder.load();
-        this.lightningCapitalFunder.startPolling();
-      } else {
-        this.loopClient = null;
-        this.lightningCapitalFunder = null;
-        this._startupWarnings.push('loop config missing');
+      this.loopClient = this.config.loop?.tlsCertPath && this.config.loop?.macaroonPath
+        ? new LoopClient(this.config.loop)
+        : null;
+      this.lightningCapitalFunder = new LightningCapitalFunder({
+        nodeManager: this.nodeManager,
+        depositTracker: this.depositTracker,
+        capitalLedger: this.capitalLedger,
+        dataLayer: this.dataLayer,
+        auditLog: this.channelAuditLog,
+        mutex: channelMutex,
+        loopClient: this.loopClient,
+        config: this.config.loop || {},
+      });
+      await this.lightningCapitalFunder.load();
+      this.lightningCapitalFunder.startPolling();
+      if (!this.loopClient) {
+        this._startupWarnings.push('loop config missing; Lightning capital deposits will use non-Loop bridge checks only');
       }
     } catch (err) {
       console.warn(`[AgentDaemon] Lightning capital funder init failed: ${err.message}`);

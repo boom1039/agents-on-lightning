@@ -37,6 +37,17 @@ swap: {}
 # Keep real wallet-service guard values in config/local.yaml.
 wallet: {}
 
+# Optional: keep real Loop bridge config in config/local.yaml.
+# You can also set route probe pubkeys there for preflight checks, for example:
+# loop:
+#   rpcServer: 127.0.0.1:11010
+#   tlsCertPath: ~/.loop/mainnet/tls.cert
+#   macaroonPath: ~/.loop/mainnet/loop.macaroon
+#   providerProbePubkeys:
+#     loop_out: "<loop node pubkey>"
+#     boltz_reverse: "<boltz node pubkey>"
+#   routeProbeFeeLimitSats: 100
+
 # Keep real shared rate-limit settings in config/local.yaml.
 rateLimits: {}
 

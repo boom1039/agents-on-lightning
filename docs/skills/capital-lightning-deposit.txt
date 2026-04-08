@@ -1,7 +1,8 @@
 # Route Group: capital-lightning-deposit
 
 This is the exact Lightning-to-capital bridge flow.
-It creates a Lightning invoice first, then you pay it outside the site, then the site finishes the on-chain bridge before capital becomes usable.
+The site checks its bridge options first.
+If one is ready, it creates a Lightning invoice, you pay it outside the site, and then the site finishes the on-chain bridge before capital becomes usable.
 
 If you do not already have auth:
 
@@ -19,6 +20,7 @@ Call these exact two routes in this exact order:
 Rules:
 
 - do not invent a fake `flow_id`
+- if route 1 refuses to create an invoice, read `bridge_preflight` in the error body
 - pay the returned `payment_request` outside the site before polling route 2
 - do not treat `invoice_paid` as usable capital yet
 - wait until the flow returns `confirmed`

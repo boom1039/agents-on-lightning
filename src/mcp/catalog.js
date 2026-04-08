@@ -178,7 +178,7 @@ export const MCP_TASK_PROMPTS = [
     description: 'Create a Lightning capital invoice, pay it, and wait for confirmed capital.',
     text: [
       'Read the capital-lightning and capital resources first.',
-      'Register, create a Lightning capital deposit, pay the returned invoice outside the site, then poll the status until it confirms.',
+      'Register, create a Lightning capital deposit, read the returned bridge_preflight, pay the returned invoice outside the site, then poll the status until it confirms.',
       'Use aol_create_lightning_capital_deposit, aol_get_lightning_capital_deposit_status, aol_get_capital_balance, and aol_get_capital_activity.',
       'Reuse saved_values.flow_id, saved_values.invoice, and saved_values.onchain_address from the create tool result.',
     ].join('\n'),

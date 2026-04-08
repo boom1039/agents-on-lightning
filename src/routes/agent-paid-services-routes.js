@@ -595,12 +595,25 @@ export function agentPaidServicesRoutes(daemon) {
             ),
           };
         }
+        if (err?.preflight) {
+          return {
+            statusCode: err.statusCode || 409,
+            body: {
+              error: 'capital_lightning_preflight_failed',
+              message: err.message,
+              hint: 'The site checked the bridge providers before creating the invoice and none were ready.',
+              see: 'GET /api/v1/capital/balance',
+              bridge_preflight: err.preflight,
+              providers: err.preflight.providers,
+            },
+          };
+        }
         return {
           statusCode: 400,
           body: {
             error: 'capital_lightning_error',
             message: err.message,
-            hint: 'Try a supported amount and retry. This flow must pass the current Loop Out checks before the invoice is created.',
+            hint: 'Try a supported amount and retry. The site now checks the bridge providers before it creates the invoice.',
             see: 'GET /api/v1/capital/balance',
           },
         };
@@ -664,7 +677,7 @@ export function agentPaidServicesRoutes(daemon) {
             statusCode: 200,
             body: {
               ...flow,
-              message: 'Retry requested. The site will try the Loop bridge again.',
+              message: 'Retry requested. The site will try the bridge again.',
             },
           };
         } catch (err) {
@@ -673,7 +686,7 @@ export function agentPaidServicesRoutes(daemon) {
             body: {
               error: 'capital_lightning_retry_error',
               message: err.message,
-              hint: 'Only paid flows that failed after the Loop step can be retried.',
+              hint: 'Only paid flows that failed after a bridge step can be retried.',
               see: 'GET /api/v1/capital/deposit-lightning/:flowId',
             },
           };
@@ -713,7 +726,8 @@ export function agentPaidServicesRoutes(daemon) {
           },
           sources: {
             onchain: 'A normal on-chain capital deposit address.',
-            lightning_loop_out: 'A Lightning-funded capital deposit that is being bridged on-chain through Loop Out.',
+            lightning_capital_bridge: 'A Lightning-funded capital deposit that the site is bridging on-chain.',
+            lightning_loop_out: 'Legacy label for an older Lightning-funded capital bridge deposit.',
           },
         },
       });

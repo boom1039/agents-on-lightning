@@ -70,8 +70,11 @@ test('createFlow creates invoice, tracked address, and lightning funding event',
   assert.equal(flow.amount_sats, 250_000);
   assert.match(flow.payment_request, /^lnbc250000mock$/);
   assert.ok(flow.flow_id);
+  assert.equal(flow.bridge_preflight.any_available, true);
+  assert.equal(flow.bridge_preflight.preferred_provider, 'loop_out');
   assert.equal(loopClient.quoteCalls.length, 1);
-  assert.equal(capitalLedger.fundingEvents[0].type, 'lightning_invoice_created');
+  assert.equal(capitalLedger.fundingEvents[0].type, 'lightning_bridge_preflight');
+  assert.equal(capitalLedger.fundingEvents[1].type, 'lightning_invoice_created');
 });
 
 test('polling advances invoice -> loop out -> onchain pending -> confirmed', async () => {
@@ -154,6 +157,7 @@ test('polling advances invoice -> loop out -> onchain pending -> confirmed', asy
 
   const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
   assert.deepEqual(eventTypes, [
+    'lightning_bridge_preflight',
     'lightning_invoice_created',
     'lightning_paid',
     'loop_out_started',
@@ -239,6 +243,7 @@ test('polling retries offchain loop swap failures before giving up', async () =>
 
   const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
   assert.deepEqual(eventTypes, [
+    'lightning_bridge_preflight',
     'lightning_invoice_created',
     'lightning_paid',
     'loop_out_started',
@@ -358,6 +363,73 @@ test('load revives retryable offchain failures back into invoice_paid', async ()
   assert.equal(flow.status, 'invoice_paid');
 });
 
+test('createFlow rejects when no bridge provider is ready', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  const loopClient = {
+    async quoteOut() {
+      throw new Error('loop unavailable');
+    },
+    async startLoopOut() {
+      throw new Error('should not run');
+    },
+    async getSwapInfo() {
+      return null;
+    },
+    async listSwaps() {
+      return { swaps: [] };
+    },
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      walletBalance: async () => ({ confirmed_balance: '0' }),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+    config: {
+      enableWalletFallback: true,
+      boltzApiBase: 'http://127.0.0.1:9',
+    },
+  });
+
+  await funder.load();
+  await assert.rejects(
+    () => funder.createFlow('agent-lightning', 250_000),
+    /No Lightning-to-capital bridge is ready right now for this amount/,
+  );
+  assert.equal(capitalLedger.fundingEvents[0].type, 'lightning_bridge_preflight_rejected');
+});
+
+test('createFlow can prefer wallet fallback when Loop is not configured', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      walletBalance: async () => ({ confirmed_balance: '300000' }),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient: null,
+  });
+
+  await funder.load();
+  const flow = await funder.createFlow('agent-lightning', 250_000);
+  assert.equal(flow.bridge_preflight.preferred_provider, 'wallet_fallback');
+  assert.equal(flow.bridge_preflight.providers[0].provider, 'loop_out');
+  assert.equal(flow.bridge_preflight.providers[0].available, false);
+  assert.equal(flow.bridge_preflight.providers[2].provider, 'wallet_fallback');
+  assert.equal(flow.bridge_preflight.providers[2].available, true);
+});
+
 test('falls back to wallet bridge after route failure and then confirms', async () => {
   const dataLayer = mockDataLayer();
   const depositTracker = createDepositTracker();
@@ -450,6 +522,7 @@ test('falls back to wallet bridge after route failure and then confirms', async 
 
   const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
   assert.deepEqual(eventTypes, [
+    'lightning_bridge_preflight',
     'lightning_invoice_created',
     'lightning_paid',
     'loop_out_started',

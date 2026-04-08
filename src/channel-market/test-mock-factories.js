@@ -225,6 +225,7 @@ export function mockNodeManager(clientOverrides = {}) {
     pendingChannels: async () => ({ pending_open_channels: [] }),
     closeChannel: async () => ({}),
     newAddress: async () => ({ address: 'bc1p_mock_address' }),
+    walletBalance: async () => ({ confirmed_balance: '1000000' }),
     getTransactions: async () => ({ transactions: [] }),
     getBestBlock: async () => ({ block_height: 100 }),
     forwardingHistory: async () => ({ forwarding_events: [], last_offset_index: '0' }),
