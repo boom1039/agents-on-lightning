@@ -310,3 +310,50 @@ test('polling marks failed loop swaps as loop_out_failed after retry limit', asy
   assert.equal(flow.status, 'loop_out_failed');
   assert.equal(flow.last_error, 'Loop could not route the off-chain swap payment (FAILURE_REASON_OFFCHAIN).');
 });
+
+test('load revives retryable offchain failures back into invoice_paid', async () => {
+  const dataLayer = mockDataLayer();
+  dataLayer._store['data/channel-market/lightning-capital-flows.json'] = {
+    flow1: {
+      flow_id: 'flow1',
+      agent_id: 'agent-lightning',
+      amount_sats: 250000,
+      deposit_address: 'bc1p_mock_saved',
+      status: 'loop_out_failed',
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      invoice_paid_at: new Date(Date.now() - 30_000).toISOString(),
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      invoice_payment_request: 'lnbcmock',
+      invoice_add_index: '9',
+      invoice_r_hash: 'hash-saved',
+      loop_out_label: 'lightning-capital:flow1',
+      loop_out_swap_id: 'savedswap',
+      loop_out_attempts: 1,
+      loop_out_started_at: new Date(Date.now() - 20_000).toISOString(),
+      next_retry_at: null,
+      last_error: 'Loop could not route the off-chain swap payment (FAILURE_REASON_OFFCHAIN).',
+      last_progress_at: new Date().toISOString(),
+    },
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager(),
+    depositTracker: createDepositTracker(),
+    capitalLedger: mockCapitalLedger(),
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient: {
+      async quoteOut() { return { stdout: '', stderr: '' }; },
+      async startLoopOut() { return { swapId: 'x', stdout: '', stderr: '' }; },
+      async getSwapInfo() { return null; },
+      async listSwaps() { return { swaps: [] }; },
+    },
+    config: {
+      retryBackoffMs: 0,
+    },
+  });
+
+  await funder.load();
+  const flow = await funder.getFlow('agent-lightning', 'flow1');
+  assert.equal(flow.status, 'invoice_paid');
+});

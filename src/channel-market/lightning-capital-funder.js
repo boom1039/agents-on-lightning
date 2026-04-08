@@ -44,6 +44,11 @@ function describeFlowError(error) {
   return code;
 }
 
+function isRetryableOffchainError(error) {
+  const text = String(error || '');
+  return text.includes('FAILURE_REASON_OFFCHAIN');
+}
+
 export class LightningCapitalFunder {
   constructor({
     nodeManager,
@@ -96,6 +101,22 @@ export class LightningCapitalFunder {
       } else {
         throw err;
       }
+    }
+    let changed = false;
+    for (const flow of Object.values(this._flows)) {
+      if (flow?.status !== 'loop_out_failed') continue;
+      if (!isRetryableOffchainError(flow?.last_error)) continue;
+      const paidAt = Date.parse(flow.invoice_paid_at || flow.created_at || '');
+      if (!Number.isFinite(paidAt)) continue;
+      if ((nowMs() - paidAt) > this.config.startRetryWindowMs) continue;
+      if ((flow.loop_out_attempts || 0) >= this.config.maxStartAttempts) continue;
+      flow.status = 'invoice_paid';
+      flow.next_retry_at = new Date(nowMs() + this.config.retryBackoffMs).toISOString();
+      flow.last_progress_at = nowIso();
+      changed = true;
+    }
+    if (changed) {
+      await this._persist();
     }
   }
 
