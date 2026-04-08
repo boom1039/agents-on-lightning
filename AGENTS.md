@@ -2,6 +2,7 @@
 
 ## Formatting Memory
 
+Only stop a task if the user explicitly asks to stop.
 When showing tables in terminal responses for this repo, use a fixed-width code block table, not markdown tables, with vertically aligned columns.
 When a list is easier to reference, use numbered points instead of plain bullets.
 

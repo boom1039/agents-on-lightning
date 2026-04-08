@@ -710,10 +710,13 @@ export class LightningCapitalFunder {
   }
 
   _getRouteProbeClient() {
-    return this._nodeManager.getScopedDefaultNodeOrNull('read')
-      || this._nodeManager.getScopedDefaultNodeOrNull('wallet')
-      || this._nodeManager.getScopedDefaultNodeOrNull('invoice')
-      || null;
+    return [
+      this._nodeManager.getScopedDefaultNodeOrNull('read'),
+      this._nodeManager.getScopedDefaultNodeOrNull('wallet'),
+      this._nodeManager.getScopedDefaultNodeOrNull('open'),
+      this._nodeManager.getScopedDefaultNodeOrNull('swap'),
+      this._nodeManager.getScopedDefaultNodeOrNull('invoice'),
+    ].filter(Boolean);
   }
 
   _getSwapPaymentClient() {
@@ -748,8 +751,8 @@ export class LightningCapitalFunder {
       };
     }
 
-    const client = this._getRouteProbeClient();
-    if (!client || typeof client.queryRoutes !== 'function') {
+    const clients = this._getRouteProbeClient();
+    if (!Array.isArray(clients) || clients.length === 0) {
       return {
         status: 'unknown',
         pubkey,
@@ -757,23 +760,45 @@ export class LightningCapitalFunder {
       };
     }
 
+    let lastError = null;
+    let sawPermissionDenied = false;
     try {
-      const result = await client.queryRoutes(pubkey, amountSats, {
-        feeLimit: this.config.routeProbeFeeLimitSats,
-      });
-      const routes = Array.isArray(result?.routes) ? result.routes : [];
-      const best = routes[0] || null;
-      if (!best) {
-        return {
-          status: 'unreachable',
-          pubkey,
-          reason: `No public route found to provider node for ${amountSats} sats.`,
-        };
+      for (const client of clients) {
+        if (!client || typeof client.queryRoutes !== 'function') continue;
+        try {
+          const result = await client.queryRoutes(pubkey, amountSats, {
+            feeLimit: this.config.routeProbeFeeLimitSats,
+          });
+          const routes = Array.isArray(result?.routes) ? result.routes : [];
+          const best = routes[0] || null;
+          if (!best) {
+            lastError = new Error(`No public route found to provider node for ${amountSats} sats.`);
+            continue;
+          }
+          return {
+            status: 'reachable',
+            pubkey,
+            fee_sats: toInt(best.total_fees),
+          };
+        } catch (err) {
+          lastError = err;
+          if (String(err?.message || '').toLowerCase().includes('permission denied')) {
+            sawPermissionDenied = true;
+            continue;
+          }
+          return {
+            status: 'unreachable',
+            pubkey,
+            reason: err.message,
+          };
+        }
       }
       return {
-        status: 'reachable',
+        status: 'unreachable',
         pubkey,
-        fee_sats: toInt(best.total_fees),
+        reason: sawPermissionDenied && lastError
+          ? `All configured route-probe clients were denied or had no route. Last error: ${lastError.message}`
+          : (lastError?.message || `No public route found to provider node for ${amountSats} sats.`),
       };
     } catch (err) {
       return {
