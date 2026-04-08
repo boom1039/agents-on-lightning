@@ -351,11 +351,13 @@ export class LightningCapitalFunder {
       if (derivedStatus === 'onchain_pending' && previousStatus === 'loop_out_pending') {
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_broadcast', {
           amount_sats: deposit?.amount_sats || flow.amount_sats,
-          source: 'lightning_loop_out',
+          source: flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out',
           status: 'onchain_pending',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
           txid: deposit?.txid || null,
+          gross_amount_sats: deposit?.gross_amount_sats || flow.amount_sats,
+          actual_fee_sats: deposit?.bridge_fee_sats || 0,
           confirmations: deposit?.confirmations || 0,
           required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
           loop_out_swap_id: flow.loop_out_swap_id,
@@ -363,12 +365,14 @@ export class LightningCapitalFunder {
         });
       } else if (derivedStatus === 'confirmed') {
         await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_confirmed', {
-          amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
+          amount_sats: deposit?.amount_sats || flow.amount_sats,
+          source: flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out',
           status: 'confirmed',
           flow_id: flow.flow_id,
           address: flow.deposit_address,
           txid: deposit?.txid || null,
+          gross_amount_sats: deposit?.gross_amount_sats || flow.amount_sats,
+          actual_fee_sats: deposit?.bridge_fee_sats || 0,
           confirmations: deposit?.confirmations || 0,
           required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
           reference: deposit?.txid || flow.flow_id,
@@ -909,6 +913,9 @@ export class LightningCapitalFunder {
       flow_id: flow.flow_id,
       agent_id: flow.agent_id,
       amount_sats: flow.amount_sats,
+      credited_amount_sats: deposit?.amount_sats || null,
+      gross_amount_sats: deposit?.gross_amount_sats || flow.amount_sats,
+      actual_fee_sats: deposit?.bridge_fee_sats || 0,
       source,
       status,
       payment_request: flow.invoice_payment_request,

@@ -262,6 +262,7 @@ export class CapitalLedger {
       'routing_pnl_sats',
       'max_fee_locked_sats',
       'actual_fee_sats',
+      'gross_amount_sats',
       'refunded_sats',
     ];
     for (const key of passthrough) {
@@ -344,7 +345,7 @@ export class CapitalLedger {
    * Record a pending deposit (detected but not yet confirmed).
    * pending_deposit += amount, total_deposited += amount
    */
-  async recordDeposit(agentId, amount, txid) {
+  async recordDeposit(agentId, amount, txid, details = {}) {
     assertAgentId(agentId);
     assertPositiveSats(amount, 'deposit amount');
     if (!txid || typeof txid !== 'string') {
@@ -368,6 +369,7 @@ export class CapitalLedger {
         from_bucket: null,
         to_bucket: 'pending_deposit',
         reference: txid,
+        ...details,
         balance_after: this._balanceSummary(state),
       };
       await this._logActivity(activity);
@@ -376,6 +378,7 @@ export class CapitalLedger {
         agent_id: agentId,
         amount_sats: amount,
         txid,
+        ...details,
         balance_after: this._balanceSummary(state),
       });
 
@@ -389,7 +392,7 @@ export class CapitalLedger {
    * Confirm a previously pending deposit.
    * pending_deposit -= amount, available += amount
    */
-  async confirmDeposit(agentId, amount, txid) {
+  async confirmDeposit(agentId, amount, txid, details = {}) {
     assertAgentId(agentId);
     assertPositiveSats(amount, 'confirm deposit amount');
     if (!txid || typeof txid !== 'string') {
@@ -420,6 +423,7 @@ export class CapitalLedger {
         from_bucket: 'pending_deposit',
         to_bucket: 'available',
         reference: txid,
+        ...details,
         balance_after: this._balanceSummary(state),
       };
       await this._logActivity(activity);
@@ -428,6 +432,7 @@ export class CapitalLedger {
         agent_id: agentId,
         amount_sats: amount,
         txid,
+        ...details,
         balance_after: this._balanceSummary(state),
       });
 

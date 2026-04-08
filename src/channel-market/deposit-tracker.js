@@ -16,6 +16,8 @@
 
 const STATE_PATH = 'data/channel-market/deposit-addresses.json';
 const DUST_THRESHOLD_SATS = 10_000;
+const LIGHTNING_BRIDGE_SOURCE = 'lightning_capital_bridge';
+const WALLET_BRIDGE_LABEL_PREFIX = 'lightning-capital-wallet:';
 
 export class DepositTracker {
   /**
@@ -208,6 +210,8 @@ export class DepositTracker {
       const txid = tx.tx_hash;
       const confirmations = tx.num_confirmations || 0;
       const blockHeight = tx.block_height || 0;
+      const txLabel = typeof tx.label === 'string' ? tx.label : '';
+      const txFeeSats = parseInt(tx.total_fees || tx.total_fees_sat || '0', 10) || 0;
 
       for (const output of outputs) {
         const addr = output.address;
@@ -219,24 +223,39 @@ export class DepositTracker {
 
         // --- Phase 1: Detect new deposit ---
         if (entry.status === 'watching' && !entry.txid) {
+          const isWalletBridgeDeposit =
+            entry.source === LIGHTNING_BRIDGE_SOURCE &&
+            txLabel.startsWith(WALLET_BRIDGE_LABEL_PREFIX);
+          const grossAmountSats = amountSats;
+          const bridgeFeeSats = isWalletBridgeDeposit ? Math.max(0, txFeeSats) : 0;
+          const creditedAmountSats = Math.max(0, grossAmountSats - bridgeFeeSats);
+
           entry.txid = txid;
-          entry.amount_sats = amountSats;
+          entry.amount_sats = creditedAmountSats;
+          entry.gross_amount_sats = grossAmountSats;
+          entry.bridge_fee_sats = bridgeFeeSats;
           entry.confirmations = confirmations;
           entry.block_height = blockHeight;
 
-          if (amountSats < DUST_THRESHOLD_SATS) {
+          if (creditedAmountSats < DUST_THRESHOLD_SATS) {
             console.warn(
-              `[DepositTracker] Dust deposit: ${amountSats} sats to ${addr} ` +
+              `[DepositTracker] Dust deposit: ${creditedAmountSats} sats to ${addr} ` +
               `(below ${DUST_THRESHOLD_SATS} threshold) — crediting anyway`
             );
           }
 
           try {
-            await this._capitalLedger.recordDeposit(entry.agent_id, amountSats, txid);
+            await this._capitalLedger.recordDeposit(entry.agent_id, creditedAmountSats, txid, {
+              source: entry.source || 'onchain',
+              flow_id: entry.flow_id || null,
+              address: addr,
+              actual_fee_sats: bridgeFeeSats,
+              gross_amount_sats: grossAmountSats,
+            });
             entry.status = 'pending_deposit';
             stateChanged = true;
             console.log(
-              `[DepositTracker] Deposit detected: ${amountSats} sats from ${txid} ` +
+              `[DepositTracker] Deposit detected: ${creditedAmountSats} sats from ${txid} ` +
               `for agent ${entry.agent_id} (${confirmations} confirmations)`
             );
             await this._auditLog.append({
@@ -244,7 +263,9 @@ export class DepositTracker {
               type: 'deposit_detected',
               agent_id: entry.agent_id,
               address: addr,
-              amount_sats: amountSats,
+              amount_sats: creditedAmountSats,
+              gross_amount_sats: grossAmountSats,
+              actual_fee_sats: bridgeFeeSats,
               txid,
               confirmations,
             });
@@ -272,7 +293,13 @@ export class DepositTracker {
 
           if (confirmations >= this._confirmationsRequired) {
             try {
-              await this._capitalLedger.confirmDeposit(entry.agent_id, entry.amount_sats, txid);
+              await this._capitalLedger.confirmDeposit(entry.agent_id, entry.amount_sats, txid, {
+                source: entry.source || 'onchain',
+                flow_id: entry.flow_id || null,
+                address: addr,
+                actual_fee_sats: entry.bridge_fee_sats || 0,
+                gross_amount_sats: entry.gross_amount_sats || entry.amount_sats,
+              });
               entry.status = 'confirmed';
               entry.confirmed_at = new Date().toISOString();
               stateChanged = true;
@@ -286,6 +313,8 @@ export class DepositTracker {
                 agent_id: entry.agent_id,
                 address: addr,
                 amount_sats: entry.amount_sats,
+                gross_amount_sats: entry.gross_amount_sats || entry.amount_sats,
+                actual_fee_sats: entry.bridge_fee_sats || 0,
                 txid,
                 confirmations,
               });
@@ -362,6 +391,8 @@ export class DepositTracker {
         address: addr,
         status: entry.status,
         amount_sats: entry.amount_sats,
+        ...(entry.gross_amount_sats != null ? { gross_amount_sats: entry.gross_amount_sats } : {}),
+        ...(entry.bridge_fee_sats != null ? { actual_fee_sats: entry.bridge_fee_sats } : {}),
         txid: entry.txid,
         confirmations: entry.confirmations,
         confirmations_required: this._confirmationsRequired,
