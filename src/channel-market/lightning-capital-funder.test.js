@@ -551,6 +551,59 @@ test('falls back to wallet bridge after route failure and then confirms', async 
   ]);
 });
 
+test('wallet fallback preflight uses a balance-capable client even when withdraw is separate', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  const loopClient = {
+    async quoteOut() {
+      return { stdout: 'quote ok', stderr: '' };
+    },
+    async startLoopOut() {
+      return { swapId: '55', stdout: 'swap started', stderr: '' };
+    },
+  };
+  const withdrawClient = {
+    sendCoins: async () => ({ txid: 'wallet-send-txid' }),
+  };
+  const walletClient = {
+    walletBalance: async () => ({ confirmed_balance: '400000' }),
+  };
+  const invoiceClient = {
+    addInvoice: async (value) => ({
+      payment_request: `lnbc${value}mock`,
+      r_hash: 'hash-balance-client',
+      add_index: '61',
+    }),
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: {
+      getDefaultNodeOrNull: () => invoiceClient,
+      getScopedDefaultNodeOrNull: (role) => {
+        if (role === 'withdraw') return withdrawClient;
+        if (role === 'wallet') return walletClient;
+        if (role === 'invoice') return invoiceClient;
+        if (role === 'read') return null;
+        return invoiceClient;
+      },
+    },
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+    config: { boltzApiBase: TEST_BOLTZ_API_BASE },
+  });
+
+  await funder.load();
+  const flow = await funder.createFlow('agent-lightning', 250_000);
+
+  const walletFallback = flow.bridge_preflight.providers.find((entry) => entry.provider === 'wallet_fallback');
+  assert.equal(walletFallback.available, true);
+  assert.equal(walletFallback.confirmed_balance_sats, 400000);
+});
+
 test('falls back to Boltz after a Loop route failure and publishes a claim tx', async () => {
   const restoreFetch = globalThis.fetch;
   const dataLayer = mockDataLayer();

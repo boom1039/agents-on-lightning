@@ -689,6 +689,14 @@ export class LightningCapitalFunder {
       || null;
   }
 
+  _getWalletBalanceClient() {
+    if (!this.config.enableWalletFallback) return null;
+    return this._nodeManager.getScopedDefaultNodeOrNull('wallet')
+      || this._nodeManager.getScopedDefaultNodeOrNull('read')
+      || this._nodeManager.getScopedDefaultNodeOrNull('withdraw')
+      || null;
+  }
+
   _getRouteProbeClient() {
     return this._nodeManager.getScopedDefaultNodeOrNull('read')
       || this._nodeManager.getScopedDefaultNodeOrNull('wallet')
@@ -870,7 +878,7 @@ export class LightningCapitalFunder {
   }
 
   async _quoteWalletFallback(amountSats) {
-    const walletClient = this._getWalletClient();
+    const walletClient = this._getWalletBalanceClient();
     if (!walletClient) {
       return {
         provider: 'wallet_fallback',
