@@ -166,12 +166,16 @@ async function enrichPendingFundingStatus(daemon, pendingItems) {
     }
   } catch {}
 
+  let txById = new Map();
   try {
     const txResp = txClient && typeof txClient.getTransactions === 'function'
       ? await txClient.getTransactions()
       : { transactions: [] };
     const txs = Array.isArray(txResp?.transactions) ? txResp.transactions : [];
-    const txById = new Map(txs.map((tx) => [tx?.tx_hash, tx]));
+    txById = new Map(txs.map((tx) => [tx?.tx_hash, tx]));
+  } catch {}
+
+  try {
     return await Promise.all(pendingItems.map(async (entry) => {
       const tx = txById.get(entry.funding_txid);
       if (tx) {

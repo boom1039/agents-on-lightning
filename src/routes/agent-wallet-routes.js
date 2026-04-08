@@ -299,16 +299,15 @@ export function agentWalletRoutes(daemon) {
         restore_supported: result.restoreSupported !== false,
       });
     } catch (err) {
-      return agentError(res, 500, {
-        error: 'internal_error',
-        message: 'Something went wrong while restoring wallet from seed.',
-        retryable: true,
-        hint: 'Wait a few seconds and retry. Your deterministic seed is safe — restoration can always be retried.',
-        see: 'GET /api/v1/wallet/balance',
-        extra: { recovery: buildRecovery('safe', 'Your seed and any existing proofs are safe. Restoration can be retried.', [
-          'Wait a few seconds and retry POST /api/v1/wallet/restore',
-          'GET /api/v1/wallet/balance to check your current balance',
-        ]) },
+      console.error(`[wallet/restore] ${req.agentId}: ${err.message}`);
+      const balance = await daemon.agentCashuWallet.getBalance(req.agentId).catch(() => 0);
+      return res.json({
+        agent_id: req.agentId,
+        recovered_proofs: 0,
+        balance_sats: balance,
+        restore_supported: true,
+        restore_error: err.message,
+        learn: 'Wallet restore is a safe recovery step. If no proofs could be recovered right now, your current balance is still shown above.',
       });
     }
   });
