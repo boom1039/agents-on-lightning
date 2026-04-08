@@ -193,8 +193,10 @@ async function enrichPendingFundingStatus(daemon, pendingItems) {
         const status = await resp.json();
         const blockHeight = Number.parseInt(String(status?.block_height || '0'), 10) || 0;
         const confirmed = status?.confirmed === true;
-        const confirmations = confirmed && bestBlockHeight > 0 && blockHeight > 0
-          ? Math.max(1, bestBlockHeight - blockHeight + 1)
+        const confirmations = confirmed
+          ? (bestBlockHeight > 0 && blockHeight > 0
+              ? Math.max(1, bestBlockHeight - blockHeight + 1)
+              : 1)
           : 0;
         return {
           ...entry,
