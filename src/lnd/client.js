@@ -346,6 +346,25 @@ export class NodeClient {
     return this._get('/v1/transactions', { start_height: startHeight, end_height: endHeight });
   }
 
+  /**
+   * Sends Bitcoin on-chain to one destination address.
+   * @param {string} addr
+   * @param {number} amount
+   * @param {Object} [opts={}]
+   */
+  sendCoins(addr, amount, opts = {}) {
+    const body = {
+      addr,
+      amount: String(amount),
+    };
+    if (opts.label) body.label = opts.label;
+    if (opts.targetConf != null) body.target_conf = opts.targetConf;
+    if (opts.satPerVbyte != null) body.sat_per_vbyte = String(opts.satPerVbyte);
+    if (opts.minConfs != null) body.min_confs = opts.minConfs;
+    if (opts.spendUnconfirmed != null) body.spend_unconfirmed = opts.spendUnconfirmed;
+    return this._post('/v1/transactions', body, { timeoutMs: opts.timeoutMs });
+  }
+
   // ---------------------------------------------------------------------------
   // Graph queries
   // ---------------------------------------------------------------------------

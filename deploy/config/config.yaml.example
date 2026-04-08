@@ -9,6 +9,7 @@ nodes:
     macaroonRoles:
       read: LND_READ_MACAROON_PATH
       wallet: LND_WALLET_MACAROON_PATH
+      withdraw: LND_WITHDRAW_MACAROON_PATH
       open: LND_OPEN_MACAROON_PATH
       close: LND_CLOSE_MACAROON_PATH
       rebalance: LND_REBALANCE_MACAROON_PATH

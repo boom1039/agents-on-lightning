@@ -882,6 +882,59 @@ export class CapitalLedger {
   }
 
   /**
+   * Refund a withdrawal that never broadcast successfully.
+   * available += amount, total_withdrawn -= amount
+   */
+  async refundWithdrawal(agentId, amount, destinationAddress, reason = 'withdrawal_failed') {
+    assertAgentId(agentId);
+    assertPositiveSats(amount, 'withdrawal refund amount');
+    if (!destinationAddress || typeof destinationAddress !== 'string') {
+      throw new Error('refundWithdrawal requires a destinationAddress string');
+    }
+
+    const unlock = await this._mutex.acquire(`capital:${agentId}`);
+    try {
+      const state = await this._readState(agentId);
+
+      if (state.total_withdrawn < amount) {
+        throw new Error(
+          `Insufficient withdrawn balance for refund on ${agentId}: ` +
+          `has ${state.total_withdrawn}, need ${amount}`
+        );
+      }
+
+      state.total_withdrawn -= amount;
+      state.available += amount;
+
+      await this._writeState(agentId, state, `refund-withdrawal:${agentId}`);
+
+      const activity = {
+        agent_id: agentId,
+        type: 'withdrawal_refunded',
+        amount_sats: amount,
+        from_bucket: 'withdrawn',
+        to_bucket: 'available',
+        reference: destinationAddress,
+        reason,
+        balance_after: this._balanceSummary(state),
+      };
+      await this._logActivity(activity);
+      await this._logAudit({
+        type: 'withdrawal_refunded',
+        agent_id: agentId,
+        amount_sats: amount,
+        destination_address: destinationAddress,
+        reason,
+        balance_after: this._balanceSummary(state),
+      });
+
+      return this._balanceSummary(state);
+    } finally {
+      unlock();
+    }
+  }
+
+  /**
    * Spend available capital on a paid platform service.
    * available -= amount, total_service_spent += amount
    */

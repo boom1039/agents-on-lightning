@@ -4,6 +4,7 @@ import { SnapshotNodeClient } from './snapshot-node-client.js';
 const SCOPED_NODE_ROLES = new Set([
   'read',
   'wallet',
+  'withdraw',
   'operator',
   'open',
   'close',

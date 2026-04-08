@@ -4,6 +4,7 @@
  * Paid analytics gateway, capital ledger, help concierge.
  */
 
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
@@ -12,6 +13,8 @@ import { runIdempotentRoute } from '../identity/idempotency-route.js';
 import { err503Service, err400MissingField, err400Validation, err500Internal, agentError, buildRecovery, withRecovery } from '../identity/agent-friendly-errors.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
 import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
+import { validateBitcoinAddress } from '../identity/validators.js';
+import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 function depositExplorerLinks(address) {
   return {
@@ -42,6 +45,12 @@ function buildCooldownError(message, hint) {
 function isMissingNodeConnectionError(err) {
   const message = String(err?.message || '');
   return message.includes('No LND node available') || message.includes('No LND node connected');
+}
+
+async function findTransactionByLabel(client, label) {
+  const txs = await client.getTransactions();
+  const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
+  return list.find((tx) => tx?.label === label) || null;
 }
 
 export function agentPaidServicesRoutes(daemon) {
@@ -271,12 +280,182 @@ export function agentPaidServicesRoutes(daemon) {
     if (unexpected.length > 0) {
       return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capital/balance');
     }
-    return agentError(res, 503, {
-      error: 'capital_withdrawals_disabled',
-      message: 'Capital withdrawals are not live yet.',
-      hint: 'This route is back in the public surface, but it still needs a real on-chain sender before it can safely move funds.',
-      see: 'GET /api/v1/capital/balance',
+    if (!daemon.capitalLedger) {
+      return err503Service(res, 'Capital ledger');
+    }
+
+    const { amount_sats, destination_address } = req.body || {};
+    if (!Number.isInteger(amount_sats) || amount_sats <= 0) {
+      return err400Validation(res, 'amount_sats must be a positive integer.', {
+        hint: 'Send an integer number of sats, like 10000.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+    if (!destination_address) {
+      return err400MissingField(res, 'destination_address', {
+        hint: 'Send a Bitcoin on-chain address to receive the withdrawal.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+    const addressCheck = validateBitcoinAddress(destination_address);
+    if (!addressCheck.valid) {
+      return err400Validation(res, `destination_address: ${addressCheck.reason}`, {
+        hint: 'Send a valid Bitcoin address.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+
+    const attempts = await checkAndIncrement(
+      `danger:capital_withdraw:attempt:${req.agentId}`,
+      safety.capitalWithdraw.attemptLimit,
+      safety.capitalWithdraw.attemptWindowMs,
+    );
+    if (!attempts.allowed) {
+      return res.status(429).json({
+        ...buildCooldownError('Too many capital withdrawal attempts right now.', 'Wait before trying another withdrawal.'),
+        retry_after_ms: attempts.retryAfterMs,
+        retry_at_ms: attempts.retryAtMs,
+      });
+    }
+
+    const cooldown = await dangerPolicy.checkCooldown({
+      scope: 'capital_withdraw',
+      agentId: req.agentId,
+      cooldownMs: safety.capitalWithdraw.cooldownMs,
     });
+    if (!cooldown.allowed) {
+      return res.status(429).json({
+        ...buildCooldownError('A recent capital withdrawal is still cooling down.', 'Wait for the cooldown before withdrawing again.'),
+        retry_after_ms: cooldown.retryAfterMs,
+        retry_at_ms: cooldown.retryAtMs,
+      });
+    }
+
+    const caps = safety.capitalWithdraw.caps || {};
+    const policy = await dangerPolicy.assessAmount({
+      scope: 'capital_withdraw',
+      agentId: req.agentId,
+      amountSats: amount_sats,
+      ...caps,
+    });
+    if (policy.decision === 'hard_cap') {
+      return agentError(res, 403, {
+        error: 'capital_withdraw_amount_rejected',
+        message: 'That withdrawal is above this node’s current capital-withdraw safety cap.',
+        hint: 'Try a smaller amount.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+    if (policy.decision === 'review_required') {
+      return agentError(res, 403, {
+        error: 'capital_withdraw_manual_review_required',
+        message: 'That withdrawal needs manual review on this node right now.',
+        hint: 'Try a smaller amount or wait for the current review window to clear.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+
+    const client = daemon.nodeManager?.getScopedDefaultNodeOrNull?.('withdraw')
+      || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('wallet')
+      || null;
+    if (!client) {
+      return agentError(res, 503, {
+        error: 'service_unavailable',
+        message: 'Capital withdrawals are unavailable because no withdraw-capable wallet node is connected.',
+        hint: 'Try again later.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+
+    const withdrawalLabel = `capital-withdraw:${req.agentId}:${randomUUID()}`;
+    let debited = false;
+    try {
+      const balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, amount_sats, destination_address);
+      debited = true;
+
+      let sendResult = null;
+      let recoveredFromUnknown = false;
+      try {
+        sendResult = await client.sendCoins(destination_address, amount_sats, {
+          label: withdrawalLabel,
+          minConfs: 1,
+          spendUnconfirmed: false,
+          timeoutMs: 120000,
+        });
+      } catch (err) {
+        const detail = String(err?.message || '');
+        const unknownOutcome = /timed out|timeout|socket|network|reset|eai_again/i.test(detail);
+        if (unknownOutcome) {
+          try {
+            const knownTx = await findTransactionByLabel(client, withdrawalLabel);
+            if (knownTx?.tx_hash) {
+              sendResult = { txid: knownTx.tx_hash };
+              recoveredFromUnknown = true;
+            }
+          } catch {}
+        }
+        if (!sendResult?.txid) {
+          await daemon.capitalLedger.refundWithdrawal(
+            req.agentId,
+            amount_sats,
+            destination_address,
+            unknownOutcome ? 'withdraw_unknown_outcome_refunded' : 'withdraw_send_failed',
+          );
+          debited = false;
+          return agentError(res, unknownOutcome ? 502 : 400, {
+            error: 'capital_withdraw_failed',
+            message: summarizeLndError(detail, {
+              action: 'capital withdrawal',
+              fallback: 'Capital withdrawal failed before broadcast.',
+            }),
+            hint: 'Your capital was returned to available balance.',
+            see: 'GET /api/v1/capital/activity',
+          });
+        }
+      }
+
+      await dangerPolicy.recordSuccess({
+        scope: 'capital_withdraw',
+        agentId: req.agentId,
+        amountSats: amount_sats,
+      });
+
+      return res.json({
+        success: true,
+        agent_id: req.agentId,
+        amount_sats,
+        destination_address,
+        txid: sendResult.txid,
+        label: withdrawalLabel,
+        status: 'broadcast',
+        recovered_from_unknown: recoveredFromUnknown,
+        balance_after: balanceAfter,
+        learn: 'The withdrawal broadcast on-chain. Watch the txid in a block explorer or your destination wallet.',
+      });
+    } catch (err) {
+      if (debited) {
+        try {
+          await daemon.capitalLedger.refundWithdrawal(
+            req.agentId,
+            amount_sats,
+            destination_address,
+            'withdraw_internal_error_refunded',
+          );
+        } catch (refundErr) {
+          console.error(`[Gateway] capital withdraw refund failed for ${req.agentId}: ${refundErr.message}`);
+        }
+      }
+      console.error(`[Gateway] ${req.path}: ${err.message}`);
+      if (isMissingNodeConnectionError(err)) {
+        return agentError(res, 503, {
+          error: 'service_unavailable',
+          message: 'Capital withdrawals are unavailable because no wallet node is connected.',
+          hint: 'Try again later.',
+          see: 'GET /api/v1/capital/balance',
+        });
+      }
+      return err500Internal(res, 'processing capital withdrawal');
+    }
   });
 
   // =========================================================================
