@@ -147,26 +147,61 @@ function getPendingItems(handler, agentId) {
 
 async function enrichPendingFundingStatus(daemon, pendingItems) {
   if (!Array.isArray(pendingItems) || pendingItems.length === 0) return pendingItems;
-  const client =
+  const bestBlockClient =
     daemon.nodeManager?.getScopedDefaultNodeOrNull?.('read')
     || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('wallet')
+    || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('open')
     || null;
-  if (!client || typeof client.getTransactions !== 'function') return pendingItems;
+  const txClient =
+    daemon.nodeManager?.getScopedDefaultNodeOrNull?.('read')
+    || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('wallet')
+    || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('withdraw')
+    || null;
+
+  let bestBlockHeight = 0;
+  try {
+    if (bestBlockClient && typeof bestBlockClient.getBestBlock === 'function') {
+      const best = await bestBlockClient.getBestBlock();
+      bestBlockHeight = Number.parseInt(String(best?.block_height || '0'), 10) || 0;
+    }
+  } catch {}
 
   try {
-    const txResp = await client.getTransactions();
+    const txResp = txClient && typeof txClient.getTransactions === 'function'
+      ? await txClient.getTransactions()
+      : { transactions: [] };
     const txs = Array.isArray(txResp?.transactions) ? txResp.transactions : [];
     const txById = new Map(txs.map((tx) => [tx?.tx_hash, tx]));
-    return pendingItems.map((entry) => {
+    return await Promise.all(pendingItems.map(async (entry) => {
       const tx = txById.get(entry.funding_txid);
-      if (!tx) return entry;
-      return {
-        ...entry,
-        funding_tx_confirmed: (tx.num_confirmations || 0) > 0,
-        funding_tx_confirmations: tx.num_confirmations || 0,
-        funding_tx_block_height: tx.block_height || 0,
-      };
-    });
+      if (tx) {
+        return {
+          ...entry,
+          funding_tx_confirmed: (tx.num_confirmations || 0) > 0,
+          funding_tx_confirmations: tx.num_confirmations || 0,
+          funding_tx_block_height: tx.block_height || 0,
+        };
+      }
+      if (!entry.funding_txid) return entry;
+      try {
+        const resp = await fetch(`https://mempool.space/api/tx/${encodeURIComponent(entry.funding_txid)}/status`);
+        if (!resp.ok) return entry;
+        const status = await resp.json();
+        const blockHeight = Number.parseInt(String(status?.block_height || '0'), 10) || 0;
+        const confirmed = status?.confirmed === true;
+        const confirmations = confirmed && bestBlockHeight > 0 && blockHeight > 0
+          ? Math.max(1, bestBlockHeight - blockHeight + 1)
+          : 0;
+        return {
+          ...entry,
+          funding_tx_confirmed: confirmed,
+          funding_tx_confirmations: confirmations,
+          funding_tx_block_height: blockHeight || 0,
+        };
+      } catch {
+        return entry;
+      }
+    }));
   } catch {
     return pendingItems;
   }
