@@ -8,6 +8,7 @@ nodes:
     macaroonPath: LND_READ_MACAROON_PATH
     macaroonRoles:
       read: LND_READ_MACAROON_PATH
+      invoice: LND_INVOICE_MACAROON_PATH
       wallet: LND_WALLET_MACAROON_PATH
       withdraw: LND_WITHDRAW_MACAROON_PATH
       open: LND_OPEN_MACAROON_PATH

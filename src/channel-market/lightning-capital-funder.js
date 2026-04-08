@@ -114,9 +114,11 @@ export class LightningCapitalFunder {
       throw new Error('amount_sats must be a positive integer');
     }
 
-    const walletClient = this._nodeManager.getScopedDefaultNodeOrNull('wallet');
-    if (!walletClient) {
-      throw new Error('No wallet-capable node is connected for Lightning capital deposits');
+    const invoiceClient =
+      this._nodeManager.getScopedDefaultNodeOrNull('invoice')
+      || this._nodeManager.getScopedDefaultNodeOrNull('wallet');
+    if (!invoiceClient) {
+      throw new Error('No invoice-capable node is connected for Lightning capital deposits');
     }
 
     await this._loopClient.quoteOut(amountSats, {
@@ -133,7 +135,7 @@ export class LightningCapitalFunder {
         source: 'lightning_loop_out',
         flow_id: flowId,
       });
-      const invoice = await walletClient.addInvoice(
+      const invoice = await invoiceClient.addInvoice(
         amountSats,
         `lightning capital deposit ${flowId}`,
         this.config.invoiceExpirySeconds,
@@ -200,16 +202,18 @@ export class LightningCapitalFunder {
   }
 
   async _pollCycle() {
-    const walletClient = this._nodeManager.getScopedDefaultNodeOrNull('wallet');
-    if (!walletClient) return;
+    const invoiceClient =
+      this._nodeManager.getScopedDefaultNodeOrNull('invoice')
+      || this._nodeManager.getScopedDefaultNodeOrNull('wallet');
+    if (!invoiceClient) return;
 
     for (const flow of Object.values(this._flows)) {
       if (isTerminalStatus(flow.status)) continue;
-      await this._advanceFlow(walletClient, flow);
+      await this._advanceFlow(invoiceClient, flow);
     }
   }
 
-  async _advanceFlow(walletClient, flow) {
+  async _advanceFlow(invoiceClient, flow) {
     const deposit = this._getDepositForFlow(flow);
     const derivedStatus = this._deriveStatus(flow, deposit);
 
@@ -248,7 +252,7 @@ export class LightningCapitalFunder {
     }
 
     if (flow.status === 'invoice_created') {
-      const invoice = await this._findInvoice(walletClient, flow);
+      const invoice = await this._findInvoice(invoiceClient, flow);
       if (isInvoiceSettled(invoice)) {
         flow.status = 'invoice_paid';
         flow.invoice_paid_at = nowIso();

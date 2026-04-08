@@ -3,6 +3,7 @@ import { SnapshotNodeClient } from './snapshot-node-client.js';
 
 const SCOPED_NODE_ROLES = new Set([
   'read',
+  'invoice',
   'wallet',
   'withdraw',
   'operator',
@@ -50,6 +51,10 @@ export class NodeManager {
 
   async _probeClient(client, name, config, role = 'read') {
     try {
+      if (role === 'invoice') {
+        await client.listInvoices(0, 1, false);
+        return { alias: name, identity_pubkey: null, num_active_channels: 0, num_peers: 0, synced_to_chain: true };
+      }
       if (role === 'withdraw') {
         await client.getTransactions();
         return { alias: name, identity_pubkey: null, num_active_channels: 0, num_peers: 0, synced_to_chain: true };

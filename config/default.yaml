@@ -6,7 +6,7 @@ web:
   port: 3302
 
 # Add real node settings in config/local.yaml.
-# Optional: split one node into read, wallet, withdraw, open, close, rebalance, swap, and policy macaroon paths.
+# Optional: split one node into read, invoice, wallet, withdraw, open, close, rebalance, swap, and policy macaroon paths.
 nodes: {}
 
 # Add real Cashu settings in config/local.yaml.
