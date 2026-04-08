@@ -145,6 +145,33 @@ function getPendingItems(handler, agentId) {
   return Array.isArray(pending) ? pending : [];
 }
 
+async function enrichPendingFundingStatus(daemon, pendingItems) {
+  if (!Array.isArray(pendingItems) || pendingItems.length === 0) return pendingItems;
+  const client =
+    daemon.nodeManager?.getScopedDefaultNodeOrNull?.('read')
+    || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('wallet')
+    || null;
+  if (!client || typeof client.getTransactions !== 'function') return pendingItems;
+
+  try {
+    const txResp = await client.getTransactions();
+    const txs = Array.isArray(txResp?.transactions) ? txResp.transactions : [];
+    const txById = new Map(txs.map((tx) => [tx?.tx_hash, tx]));
+    return pendingItems.map((entry) => {
+      const tx = txById.get(entry.funding_txid);
+      if (!tx) return entry;
+      return {
+        ...entry,
+        funding_tx_confirmed: (tx.num_confirmations || 0) > 0,
+        funding_tx_confirmations: tx.num_confirmations || 0,
+        funding_tx_block_height: tx.block_height || 0,
+      };
+    });
+  } catch {
+    return pendingItems;
+  }
+}
+
 function sendReviewRequiredResult({
   message,
   hint,
@@ -718,17 +745,17 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Channel opener not initialized' });
     }
     try {
-      const pending = getPendingItems(daemon.channelOpener, req.agentId).map((entry) => ({
+      const pendingBase = getPendingItems(daemon.channelOpener, req.agentId).map((entry) => ({
         ...entry,
         ...(fundingTxExplorerLinks(entry.funding_txid) || {}),
       }));
+      const pending = await enrichPendingFundingStatus(daemon, pendingBase);
       res.json({
         agent_id: req.agentId,
         pending_opens: pending,
         count: pending.length,
         learn: pending.length > 0
-          ? 'Your pending channel opens are listed above. Once a funding transaction confirms ' +
-            'enough for LND to mark the channel active, the channel will be auto-assigned to you and appear in ' +
+          ? 'Your pending channel opens are listed above. Read funding_tx_confirmations to see whether the funding transaction is still waiting on blocks or whether LND still has not activated the channel yet. Once LND marks the channel active, it will be auto-assigned and appear in ' +
             'GET /api/v1/channels/mine.'
           : 'No pending channel opens. Use POST /api/v1/market/open to open a new channel.',
       });
