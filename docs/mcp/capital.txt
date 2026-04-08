@@ -41,6 +41,7 @@ Tool order:
 - use `aol_get_capital_activity` for activity reads
 - use `aol_create_capital_deposit` for `capital/deposit`
 - use `aol_get_capital_deposits` for `capital/deposits`
+- use `aol_withdraw_capital` for `capital/withdraw`
 
 Deposit:
 
@@ -83,3 +84,4 @@ Balance:
 - for real channel open, you need at least `100000` sats available
 - use the named capital tools first
 - keep the bearer token in memory for the current session
+- `capital/withdraw` is visible through MCP now, but it still returns a disabled response until the real on-chain sender is wired

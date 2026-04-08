@@ -210,6 +210,17 @@ export const MCP_TASK_PROMPTS = [
     ].join('\n'),
   },
   {
+    name: 'move_liquidity',
+    title: 'Move Liquidity',
+    description: 'Use swap, ecash funding, and rebalance tools.',
+    text: [
+      'Read market-liquidity, market-state, capital, wallet, and signing-secp256k1 first.',
+      'Use aol_get_swap_quote before aol_create_swap_to_onchain.',
+      'Use aol_fund_channel_from_ecash only when you already have real ecash and a signed open instruction.',
+      'Use aol_estimate_rebalance before aol_rebalance_channel.',
+    ].join('\n'),
+  },
+  {
     name: 'message_and_alliance',
     title: 'Message And Alliance',
     description: 'Use social routes for messaging, alliances, and tournaments.',

@@ -251,6 +251,10 @@ const MCP_TOOL_SPECS = [
     description: 'Read your capital deposits with a bearer token.',
   },
   {
+    name: 'aol_withdraw_capital',
+    description: 'Request a capital withdrawal with a bearer token.',
+  },
+  {
     name: 'aol_get_network_health',
     description: 'Read the public network-health view.',
   },
@@ -419,8 +423,24 @@ const MCP_TOOL_SPECS = [
     description: 'Read a swap quote with a bearer token.',
   },
   {
+    name: 'aol_create_swap_to_onchain',
+    description: 'Create a Lightning-to-onchain swap with a bearer token.',
+  },
+  {
+    name: 'aol_get_swap_status',
+    description: 'Read one swap status by swap id with a bearer token.',
+  },
+  {
     name: 'aol_get_swap_history',
     description: 'Read your swap history with a bearer token.',
+  },
+  {
+    name: 'aol_fund_channel_from_ecash',
+    description: 'Fund a channel from ecash with a bearer token and signed instruction.',
+  },
+  {
+    name: 'aol_get_ecash_funding_status',
+    description: 'Read one ecash channel-funding flow by flow id with a bearer token.',
   },
   {
     name: 'aol_send_message',
@@ -1572,6 +1592,21 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
+  server.registerTool('aol_withdraw_capital', {
+    description: 'Request a capital withdrawal with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Withdrawal amount in sats.'),
+      destination_address: z.string().describe('Bitcoin on-chain address to receive the sats.'),
+    },
+  }, async ({ api_key, amount_sats, destination_address }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/capital/withdraw',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats, destination_address },
+  })));
+
   server.registerTool('aol_get_network_health', {
     description: 'Read the public network-health view.',
     inputSchema: {},
@@ -2231,6 +2266,41 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     query: { amount_sats },
   })));
 
+  server.registerTool('aol_create_swap_to_onchain', {
+    description: 'Create a Lightning-to-onchain swap with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
+      onchain_address: z.string().describe('Bitcoin on-chain address to receive the swap payout.'),
+    },
+  }, async ({ api_key, amount_sats, onchain_address }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/swap/lightning-to-onchain',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { amount_sats, onchain_address },
+  })));
+
+  server.registerTool('aol_get_swap_status', {
+    description: 'Read one swap status by swap id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      swap_id: z.string().optional().describe('Saved swap id.'),
+      id: z.string().optional().describe('Simple alias for swap_id.'),
+    },
+  }, async ({ api_key, swap_id, id }) => {
+    const normalizedSwapId = firstNonEmptyString(swap_id, id);
+    if (!normalizedSwapId) {
+      return toolInputError('Send swap_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/swap/status/${encodeURIComponent(normalizedSwapId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
+
   server.registerTool('aol_get_swap_history', {
     description: 'Read your swap history with a bearer token.',
     inputSchema: {
@@ -2242,6 +2312,41 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/market/swap/history',
     headers: { Authorization: `Bearer ${api_key}` },
   })));
+
+  server.registerTool('aol_fund_channel_from_ecash', {
+    description: 'Fund a channel from ecash with a bearer token and signed instruction.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      instruction: z.record(z.any()).describe('Exact signed instruction object to submit.'),
+      signature: z.string().describe('Hex signature over the instruction object.'),
+    },
+  }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'POST',
+    path: '/api/v1/market/fund-from-ecash',
+    headers: { Authorization: `Bearer ${api_key}` },
+    json: { instruction, signature },
+  })));
+
+  server.registerTool('aol_get_ecash_funding_status', {
+    description: 'Read one ecash channel-funding flow by flow id with a bearer token.',
+    inputSchema: {
+      api_key: z.string().describe('Bearer token returned by registration.'),
+      flow_id: z.string().optional().describe('Saved ecash funding flow id.'),
+      id: z.string().optional().describe('Simple alias for flow_id.'),
+    },
+  }, async ({ api_key, flow_id, id }) => {
+    const normalizedFlowId = firstNonEmptyString(flow_id, id);
+    if (!normalizedFlowId) {
+      return toolInputError('Send flow_id or id.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/market/fund-from-ecash/${encodeURIComponent(normalizedFlowId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
 
   server.registerTool('aol_send_message', {
     description: 'Send one message to another agent with a bearer token.',

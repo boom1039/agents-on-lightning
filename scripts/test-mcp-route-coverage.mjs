@@ -280,6 +280,14 @@ try {
 
   const capitalDeposits = await callTool('aol_get_capital_deposits', { api_key: agentAKey });
   markResult('GET /api/v1/capital/deposits', 'aol_get_capital_deposits', capitalDeposits, { success: [200] });
+  const capitalDepositAddress = getSaved(capitalDeposit).onchain_address || getBody(capitalDeposit)?.address || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+
+  const capitalWithdraw = await callTool('aol_withdraw_capital', {
+    api_key: agentAKey,
+    amount_sats: 1000,
+    destination_address: capitalDepositAddress,
+  });
+  markResult('POST /api/v1/capital/withdraw', 'aol_withdraw_capital', capitalWithdraw, { boundary: [503] });
 
   const networkHealth = await callTool('aol_get_network_health');
   markResult('GET /api/v1/analysis/network-health', 'aol_get_network_health', networkHealth, { success: [200] });
@@ -398,8 +406,42 @@ try {
   const swapQuote = await callTool('aol_get_swap_quote', { api_key: agentAKey, amount_sats: 100000 });
   markResult('GET /api/v1/market/swap/quote', 'aol_get_swap_quote', swapQuote, { success: [200] });
 
+  const swapCreate = await callTool('aol_create_swap_to_onchain', {
+    api_key: agentAKey,
+    amount_sats: 50000,
+    onchain_address: capitalDepositAddress,
+  });
+  markResult('POST /api/v1/market/swap/lightning-to-onchain', 'aol_create_swap_to_onchain', swapCreate, { boundary: [400, 402, 429, 503] });
+  const swapId = getSaved(swapCreate).swap_id || getBody(swapCreate)?.swap_id || 'swap-missing';
+
+  const swapStatus = await callTool('aol_get_swap_status', { api_key: agentAKey, swap_id: swapId });
+  markResult('GET /api/v1/market/swap/status/:swapId', 'aol_get_swap_status', swapStatus, swapId === 'swap-missing'
+    ? { boundary: [404] }
+    : { success: [200] });
+
   const swapHistory = await callTool('aol_get_swap_history', { api_key: agentAKey });
   markResult('GET /api/v1/market/swap/history', 'aol_get_swap_history', swapHistory, { success: [200] });
+
+  const ecashFund = await callTool('aol_fund_channel_from_ecash', {
+    api_key: agentAKey,
+    instruction: {
+      action: 'channel_open',
+      agent_id: agentAId,
+      params: {
+        local_funding_amount_sats: 100000,
+        peer_pubkey: `02${'1'.repeat(64)}`,
+      },
+      timestamp: Math.floor(Date.now() / 1000),
+    },
+    signature: '00',
+  });
+  markResult('POST /api/v1/market/fund-from-ecash', 'aol_fund_channel_from_ecash', ecashFund, { boundary: [400, 401, 402, 429, 503] });
+  const flowId = getSaved(ecashFund).flow_id || getBody(ecashFund)?.flow_id || 'flow-missing';
+
+  const ecashFundingStatus = await callTool('aol_get_ecash_funding_status', { api_key: agentAKey, flow_id: flowId });
+  markResult('GET /api/v1/market/fund-from-ecash/:flowId', 'aol_get_ecash_funding_status', ecashFundingStatus, flowId === 'flow-missing'
+    ? { boundary: [404] }
+    : { success: [200] });
 
   const openInstruction = await callTool('aol_build_open_channel_instruction', {
     api_key: agentAKey,

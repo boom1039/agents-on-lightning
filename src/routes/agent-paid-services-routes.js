@@ -264,6 +264,21 @@ export function agentPaidServicesRoutes(daemon) {
     }
   });
 
+  // Withdraw from capital.
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"withdraw","summary":"Withdraw from capital.","order":120,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
+  router.post('/api/v1/capital/withdraw', auth, rateLimit('capital_write'), async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'destination_address', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/capital/balance');
+    }
+    return agentError(res, 503, {
+      error: 'capital_withdrawals_disabled',
+      message: 'Capital withdrawals are not live yet.',
+      hint: 'This route is back in the public surface, but it still needs a real on-chain sender before it can safely move funds.',
+      see: 'GET /api/v1/capital/balance',
+    });
+  });
+
   // =========================================================================
   // DEPOSIT SYSTEM (Plan C)
   // =========================================================================

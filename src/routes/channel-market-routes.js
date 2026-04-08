@@ -18,7 +18,13 @@
  *
  * Plan I: Submarine Swap
  *   GET  /api/v1/market/swap/quote                  — Fee estimate
+ *   POST /api/v1/market/swap/lightning-to-onchain   — Initiate swap
+ *   GET  /api/v1/market/swap/status/:swapId         — Check swap status
  *   GET  /api/v1/market/swap/history                — Past swaps
+
+ * Plan J: Ecash Channel Funding
+ *   POST /api/v1/market/fund-from-ecash      — One-click ecash → channel
+ *   GET  /api/v1/market/fund-from-ecash/:id  — Check flow status
  *
  * Plan G: Performance Dashboard
  *   GET  /api/v1/market/performance          — Own agent performance summary (auth)
@@ -54,8 +60,26 @@ function submarineSwapsEnabled() {
 }
 
 const EXPENSIVE_RESULT_CACHE_TTL_MS = 5_000;
+const HOUR_MS = 60 * 60 * 1000;
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+const SHARED_MARKET_SUCCESS_COOLDOWN_MS = 5 * 60 * 1000;
+const MAX_PENDING_MARKET_OPS = 2;
+const SHARED_MARKET_SWAP_ATTEMPT_LIMIT = 12;
+const SHARED_MARKET_FUND_FROM_ECASH_ATTEMPT_LIMIT = 12;
 const OPEN_CAPS = {
   scope: 'market_open',
+};
+const SWAP_CAPS = {
+  scope: 'market_swap',
+  autoApproveSats: 50_000,
+  hardCapSats: 100_000,
+  dailyAutoApproveSats: 250_000,
+  dailyHardCapSats: 500_000,
+  sharedDailyAutoApproveSats: 250_000,
+  sharedDailyHardCapSats: 500_000,
+};
+const FUND_FROM_ECASH_CAPS = {
+  scope: 'market_fund_from_ecash',
 };
 const REBALANCE_CAPS = {
   scope: 'market_rebalance',
@@ -978,9 +1002,275 @@ export function channelMarketRoutes(daemon) {
     });
   });
 
-  // =========================================================================
-  // Plan J: Ecash Channel Funding
-  // =========================================================================
+  // Run market swap lightning to onchain.
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"lightning-to-onchain","summary":"Run market swap lightning to onchain.","order":810,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
+  router.post('/api/v1/market/swap/lightning-to-onchain', auth, marketWrite, async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'onchain_address', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/market/swap/quote');
+    }
+    if (!submarineSwapsEnabled()) {
+      return agentError(res, 503, {
+        error: 'submarine_swaps_disabled',
+        message: 'Submarine swaps are disabled until the funding flow is hardened.',
+        hint: 'This route is intentionally off for safety because it can spend node funds.',
+      });
+    }
+    if (!daemon.swapProvider) {
+      return res.status(503).json({ error: 'Swap provider not initialized' });
+    }
+    return runIdempotentRoute({
+      req,
+      res,
+      store: idempotencyStore,
+      scope: 'market:swap:create',
+      handler: async () => {
+        const amountSats = req.body?.amount_sats;
+        const attempts = await checkAndIncrement(`danger:market_swap:attempt:${req.agentId}`, 3, HOUR_MS);
+        if (!attempts.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'Too many swap attempts this hour.',
+              'Wait before trying another swap.',
+              attempts,
+              'market_swap_attempts',
+            ),
+          };
+        }
+        const sharedAttempts = await checkAndIncrement('danger:market_swap:attempt:__shared__', SHARED_MARKET_SWAP_ATTEMPT_LIMIT, HOUR_MS);
+        if (!sharedAttempts.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'The node is handling too many swap attempts right now.',
+              'Wait a bit, then try another swap.',
+              sharedAttempts,
+              'market_swap_shared_attempts',
+            ),
+          };
+        }
+        const cooldown = await dangerPolicy.checkCooldown({
+          scope: SWAP_CAPS.scope,
+          agentId: req.agentId,
+          cooldownMs: FIFTEEN_MIN_MS,
+        });
+        if (!cooldown.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'A recent swap is still cooling down.',
+              'Wait for the cooldown window to pass before swapping again.',
+              cooldown,
+              'market_swap_success',
+            ),
+          };
+        }
+        const sharedCooldown = await sharedDangerCooldown({
+          dangerPolicy,
+          scope: SWAP_CAPS.scope,
+          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+        });
+        if (!sharedCooldown.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'The node is cooling down after a recent swap.',
+              'Wait a bit before another agent starts a swap on this node.',
+              sharedCooldown,
+              'market_swap_shared_success',
+            ),
+          };
+        }
+        if (Number.isInteger(amountSats) && amountSats > 0) {
+          const policy = await applyMoneyPolicy({
+            dangerPolicy,
+            caps: SWAP_CAPS,
+            agentId: req.agentId,
+            amountSats,
+          });
+          if (policy) return policy;
+        }
+        const result = await daemon.swapProvider.createSwap(req.agentId, req.body);
+        if (result?.success && Number.isInteger(amountSats) && amountSats > 0) {
+          await dangerPolicy.recordSuccess({
+            scope: SWAP_CAPS.scope,
+            agentId: req.agentId,
+            amountSats,
+          });
+          await dangerPolicy.recordSuccess({
+            scope: SWAP_CAPS.scope,
+            agentId: '__shared__',
+          });
+        }
+        return { statusCode: pickHttpStatus(result), body: result };
+      },
+      onError: (err) => {
+        console.error(`[market/swap/create] Error: ${err.message}`);
+        return {
+          statusCode: 500,
+          body: withRecovery(
+            { error: 'Internal error creating swap' },
+            'pending', 'The swap may have been initiated. Check swap history to verify.', [
+              'GET /api/v1/market/swap/history to check if the swap was created',
+              'GET /api/v1/capital/balance to verify your capital balance',
+            ],
+          ),
+        };
+      },
+    });
+  });
+
+  // Read market swap status by swapId.
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"swap-status","summary":"Read market swap status by swapId.","order":820,"tags":["market","read","dynamic","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/market/swap/status/:swapId', auth, marketPrivateRead, async (req, res) => {
+    if (!daemon.swapProvider) {
+      return res.status(503).json({ error: 'Swap provider not initialized' });
+    }
+    const status = daemon.swapProvider.getSwapStatus(req.params.swapId);
+    if (!status || status.agent_id !== req.agentId) {
+      logAuthorizationDenied(req.path, req.agentId, req.params.swapId, getSocketAddress(req) || null);
+      return err404NotFound(res, 'Swap');
+    }
+    res.json(status);
+  });
+
+  // Run market fund from ecash.
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"fund-from-ecash","summary":"Run market fund from ecash.","order":600,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+  router.post('/api/v1/market/fund-from-ecash', auth, marketWrite, async (req, res) => {
+    const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
+    if (unexpected.length > 0) {
+      return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/wallet/balance');
+    }
+    if (!daemon.ecashChannelFunder) {
+      return res.status(503).json({ error: 'Ecash channel funder not initialized' });
+    }
+    return runIdempotentRoute({
+      req,
+      res,
+      store: idempotencyStore,
+      scope: 'market:fund-from-ecash',
+      handler: async () => {
+        const amountSats = parseFundingAmount(req.body);
+        const attempts = await checkAndIncrement(`danger:market_fund_from_ecash:attempt:${req.agentId}`, 3, HOUR_MS);
+        if (!attempts.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'Too many ecash funding attempts this hour.',
+              'Wait before trying another ecash-funded channel open.',
+              attempts,
+              'market_fund_from_ecash_attempts',
+            ),
+          };
+        }
+        const sharedAttempts = await checkAndIncrement('danger:market_fund_from_ecash:attempt:__shared__', SHARED_MARKET_FUND_FROM_ECASH_ATTEMPT_LIMIT, HOUR_MS);
+        if (!sharedAttempts.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'The node is handling too many ecash-funded channel opens right now.',
+              'Wait a bit, then try another ecash-funded channel open.',
+              sharedAttempts,
+              'market_fund_from_ecash_shared_attempts',
+            ),
+          };
+        }
+        const cooldown = await dangerPolicy.checkCooldown({
+          scope: FUND_FROM_ECASH_CAPS.scope,
+          agentId: req.agentId,
+          cooldownMs: FIFTEEN_MIN_MS,
+        });
+        if (!cooldown.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'A recent ecash-funded channel open is still cooling down.',
+              'Wait for the cooldown window to pass before funding another channel from ecash.',
+              cooldown,
+              'market_fund_from_ecash_success',
+            ),
+          };
+        }
+        const sharedCooldown = await sharedDangerCooldown({
+          dangerPolicy,
+          scope: FUND_FROM_ECASH_CAPS.scope,
+          cooldownMs: SHARED_MARKET_SUCCESS_COOLDOWN_MS,
+        });
+        if (!sharedCooldown.allowed) {
+          return {
+            statusCode: 429,
+            body: buildCooldownBody(
+              'The node is cooling down after a recent ecash-funded channel open.',
+              'Wait a bit before another agent funds a channel from ecash on this node.',
+              sharedCooldown,
+              'market_fund_from_ecash_shared_success',
+            ),
+          };
+        }
+        if (getPendingItems(daemon.ecashChannelFunder, req.agentId).length >= MAX_PENDING_MARKET_OPS) {
+          return {
+            statusCode: 429,
+            body: {
+              error: 'too_many_pending_operations',
+              message: 'You already have too many pending market actions.',
+              hint: 'Wait for a pending ecash funding flow to settle before starting another.',
+            },
+          };
+        }
+        if (Number.isInteger(amountSats) && amountSats > 0) {
+          const policy = await applyMoneyPolicy({
+            dangerPolicy,
+            caps: FUND_FROM_ECASH_CAPS,
+            agentId: req.agentId,
+            amountSats,
+          });
+          if (policy) return policy;
+        }
+        const result = await daemon.ecashChannelFunder.fundChannelFromEcash(req.agentId, req.body);
+        if (result?.success && Number.isInteger(amountSats) && amountSats > 0) {
+          await dangerPolicy.recordSuccess({
+            scope: FUND_FROM_ECASH_CAPS.scope,
+            agentId: req.agentId,
+            amountSats,
+          });
+          await dangerPolicy.recordSuccess({
+            scope: FUND_FROM_ECASH_CAPS.scope,
+            agentId: '__shared__',
+          });
+        }
+        return { statusCode: pickHttpStatus(result), body: result };
+      },
+      onError: (err) => {
+        console.error(`[market/fund-from-ecash] Error: ${err.message}`);
+        return {
+          statusCode: 500,
+          body: withRecovery(
+            { error: 'Internal error during ecash channel funding' },
+            'action_needed', 'Ecash may have been melted before the channel open failed. Check your balances.', [
+              'GET /api/v1/wallet/balance to check ecash balance',
+              'GET /api/v1/capital/balance to check if capital was credited',
+              'GET /api/v1/market/pending to check if a channel open is in progress',
+            ],
+          ),
+        };
+      },
+    });
+  });
+
+  // Read market fund from ecash by flowId.
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"funding-status","summary":"Read market fund from ecash by flowId.","order":610,"tags":["market","read","dynamic","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/market/fund-from-ecash/:flowId', auth, marketPrivateRead, async (req, res) => {
+    if (!daemon.ecashChannelFunder) {
+      return res.status(503).json({ error: 'Ecash channel funder not initialized' });
+    }
+    const status = daemon.ecashChannelFunder.getFlowStatus(req.params.flowId);
+    if (!status || status.agent_id !== req.agentId) {
+      logAuthorizationDenied(req.path, req.agentId, req.params.flowId, getSocketAddress(req) || null);
+      return err404NotFound(res, 'Funding flow');
+    }
+    res.json(status);
+  });
 
   // =========================================================================
   // Plan G: Performance Dashboard

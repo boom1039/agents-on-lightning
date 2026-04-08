@@ -26,6 +26,7 @@ const requiredTools = [
   'aol_test_node_connection',
   'aol_connect_node',
   'aol_create_capital_deposit',
+  'aol_withdraw_capital',
   'aol_build_open_channel_instruction',
   'aol_get_market_preview_help',
   'aol_get_market_open_help',
@@ -33,6 +34,10 @@ const requiredTools = [
   'aol_get_market_close_help',
   'aol_build_channel_policy_instruction',
   'aol_build_rebalance_instruction',
+  'aol_create_swap_to_onchain',
+  'aol_get_swap_status',
+  'aol_fund_channel_from_ecash',
+  'aol_get_ecash_funding_status',
   'aol_get_channels_audit',
   'aol_get_market_performance',
   'aol_get_market_agent',
@@ -322,6 +327,17 @@ try {
     expectStatus(capitalDepositResult, 200, 'aol_create_capital_deposit');
     expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
   }
+  const capitalWithdrawAddress = getSavedValues(capitalDepositResult).onchain_address || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+
+  const capitalWithdrawResult = await client.callTool({
+    name: 'aol_withdraw_capital',
+    arguments: {
+      api_key: apiKey,
+      amount_sats: 1000,
+      destination_address: capitalWithdrawAddress,
+    },
+  });
+  expectStatus(capitalWithdrawResult, 503, 'aol_withdraw_capital');
 
   const nodeTestResult = await client.callTool({
     name: 'aol_test_node_connection',
@@ -379,6 +395,53 @@ try {
     arguments: {},
   });
   assert(!marketConfigResult?.isError, 'aol_get_market_config failed');
+
+  const swapCreateResult = await client.callTool({
+    name: 'aol_create_swap_to_onchain',
+    arguments: {
+      api_key: apiKey,
+      amount_sats: 50000,
+      onchain_address: capitalWithdrawAddress,
+    },
+  });
+  expectStatus(swapCreateResult, 503, 'aol_create_swap_to_onchain');
+
+  const swapStatusResult = await client.callTool({
+    name: 'aol_get_swap_status',
+    arguments: {
+      api_key: apiKey,
+      swap_id: 'swap-missing',
+    },
+  });
+  expectStatus(swapStatusResult, 404, 'aol_get_swap_status');
+
+  const ecashFundResult = await client.callTool({
+    name: 'aol_fund_channel_from_ecash',
+    arguments: {
+      api_key: apiKey,
+      instruction: {
+        action: 'channel_open',
+        agent_id: 'missing-agent',
+        params: {
+          local_funding_amount_sats: 100000,
+          peer_pubkey: `02${'1'.repeat(64)}`,
+        },
+        timestamp: Math.floor(Date.now() / 1000),
+      },
+      signature: '00',
+    },
+  });
+  const ecashFundStatus = getStructuredStatus(ecashFundResult);
+  assert([400, 401, 402, 503].includes(ecashFundStatus), `aol_fund_channel_from_ecash returned ${ecashFundStatus}`);
+
+  const ecashFlowStatusResult = await client.callTool({
+    name: 'aol_get_ecash_funding_status',
+    arguments: {
+      api_key: apiKey,
+      flow_id: 'flow-missing',
+    },
+  });
+  expectStatus(ecashFlowStatusResult, 404, 'aol_get_ecash_funding_status');
 
   const marketPreviewHelp = await client.callTool({
     name: 'aol_get_market_preview_help',

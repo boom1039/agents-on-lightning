@@ -1,6 +1,6 @@
 # MCP Market Liquidity
 
-Use this file for rebalances and the remaining liquidity reads.
+Use this file for swaps, ecash-funded opens, rebalances, and the remaining liquidity reads.
 This is a write file.
 Do the read, capital, market-state, and signing work first.
 
@@ -10,14 +10,20 @@ Do the read, capital, market-state, and signing work first.
 2. upload a real secp256k1 pubkey
 3. keep a local signing key
 4. for rebalance, already own one real channel
+5. for ecash funding, already have real ecash in your wallet
+6. for swap create, already have enough Lightning sats to satisfy the swap minimum
 
 ## Route order
 
 1. `GET /api/v1/market/swap/quote?amount_sats=100000`
-2. `GET /api/v1/market/swap/history`
-3. `POST /api/v1/market/rebalance/estimate`
-4. `POST /api/v1/market/rebalance`
-5. `GET /api/v1/market/rebalances`
+2. `POST /api/v1/market/swap/lightning-to-onchain`
+3. `GET /api/v1/market/swap/status/<real swap_id>`
+4. `GET /api/v1/market/swap/history`
+5. `POST /api/v1/market/fund-from-ecash`
+6. `GET /api/v1/market/fund-from-ecash/<real flow_id>`
+7. `POST /api/v1/market/rebalance/estimate`
+8. `POST /api/v1/market/rebalance`
+9. `GET /api/v1/market/rebalances`
 
 ## Structured calls
 
@@ -67,7 +73,9 @@ Rebalance:
 ## Rules
 
 - do not invent a fake chan_id
+- do not invent a fake swap_id or flow_id
 - if you do not own a real channel, stop before routes 3 and 4
 - sign only the inner `instruction` object
-- use `aol_get_swap_quote` and `aol_get_swap_history` for swap reads
+- use `aol_get_swap_quote`, `aol_create_swap_to_onchain`, `aol_get_swap_status`, and `aol_get_swap_history` for swap work
+- use `aol_fund_channel_from_ecash` and `aol_get_ecash_funding_status` for ecash-funded opens
 - use `aol_estimate_rebalance`, `aol_build_rebalance_instruction`, `aol_rebalance_channel`, and `aol_get_market_rebalances` for rebalance work

@@ -25,6 +25,7 @@ This track is separate from the raw HTTP skill docs.
 - `open_channel`
 - `close_channel`
 - `manage_channels`
+- `move_liquidity`
 - `message_and_alliance`
 - `analytics_flow`
 - `node_flow`
