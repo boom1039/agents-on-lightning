@@ -49,6 +49,11 @@ function isRetryableOffchainError(error) {
   return text.includes('FAILURE_REASON_OFFCHAIN');
 }
 
+function isRouteFailure(error) {
+  const text = String(error || '');
+  return text.includes('FAILURE_REASON_OFFCHAIN') || text.includes('FAILURE_REASON_NO_ROUTE');
+}
+
 export class LightningCapitalFunder {
   constructor({
     nodeManager,
@@ -89,6 +94,7 @@ export class LightningCapitalFunder {
       pendingSwapTimeoutMs: Number.isInteger(config.pendingSwapTimeoutMs) ? config.pendingSwapTimeoutMs : 6 * 60 * 60 * 1000,
       retryBackoffMs: Number.isInteger(config.retryBackoffMs) ? config.retryBackoffMs : 60_000,
       fast: config.fast === true,
+      enableWalletFallback: config.enableWalletFallback !== false,
     };
   }
 
@@ -159,10 +165,16 @@ export class LightningCapitalFunder {
       throw new Error('No invoice-capable node is connected for Lightning capital deposits');
     }
 
-    await this._loopClient.quoteOut(amountSats, {
-      confTarget: this.config.loopOutConfTarget,
-      fast: this.config.fast,
-    });
+    try {
+      await this._loopClient.quoteOut(amountSats, {
+        confTarget: this.config.loopOutConfTarget,
+        fast: this.config.fast,
+      });
+    } catch (err) {
+      if (!this._getWalletClient()) {
+        throw err;
+      }
+    }
 
     const unlock = await this._mutex.acquire(`lightning-capital:${agentId}`);
     try {
@@ -197,6 +209,9 @@ export class LightningCapitalFunder {
         next_retry_at: null,
         last_error: null,
         last_progress_at: nowIso(),
+        bridge_mode: 'loop_out',
+        wallet_bridge_label: `lightning-capital-wallet:${flowId}`,
+        wallet_bridge_txid: null,
       };
 
       this._flows[flowId] = flow;
@@ -373,49 +388,7 @@ export class LightningCapitalFunder {
         return;
       }
 
-      try {
-        flow.loop_out_attempts += 1;
-        const started = await this._loopClient.startLoopOut({
-          amountSats: flow.amount_sats,
-          destinationAddress: flow.deposit_address,
-          label: flow.loop_out_label,
-          confTarget: this.config.loopOutConfTarget,
-          maxSwapRoutingFeeSats: this.config.loopOutMaxRoutingFeeSats,
-          fast: this.config.fast,
-        });
-        flow.status = 'loop_out_pending';
-        flow.loop_out_started_at = nowIso();
-        flow.next_retry_at = null;
-        flow.loop_out_swap_id = started.swapId || flow.loop_out_swap_id || null;
-        flow.last_error = null;
-        flow.last_progress_at = nowIso();
-        await this._persist();
-        await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_started', {
-          amount_sats: flow.amount_sats,
-          source: 'lightning_loop_out',
-          status: 'loop_out_pending',
-          flow_id: flow.flow_id,
-          address: flow.deposit_address,
-          loop_out_swap_id: flow.loop_out_swap_id,
-          reference: flow.flow_id,
-        });
-      } catch (err) {
-        flow.last_error = err.message;
-        flow.last_progress_at = nowIso();
-        if ((nowMs() - Date.parse(flow.invoice_paid_at || flow.created_at)) > this.config.startRetryWindowMs) {
-          flow.status = 'recovery_required';
-          await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
-            amount_sats: flow.amount_sats,
-            source: 'lightning_loop_out',
-            status: 'recovery_required',
-            flow_id: flow.flow_id,
-            address: flow.deposit_address,
-            reason: err.message,
-            reference: flow.flow_id,
-          });
-        }
-        await this._persist();
-      }
+      await this._startBridge(flow);
       return;
     }
 
@@ -427,6 +400,9 @@ export class LightningCapitalFunder {
       if (swap && isFailedSwapState(swap.state)) {
         const reason = swap.failure_reason || `Loop Out failed with state ${swap.state}`;
         const described = describeFlowError(reason);
+        if (isRouteFailure(reason) && await this._startWalletFallback(flow, described)) {
+          return;
+        }
         const canRetry =
           String(reason) === 'FAILURE_REASON_OFFCHAIN'
           && flow.loop_out_attempts < this.config.maxStartAttempts
@@ -528,6 +504,121 @@ export class LightningCapitalFunder {
     return swaps.find((swap) => swap?.label === flow.loop_out_label) || null;
   }
 
+  _getWalletClient() {
+    if (!this.config.enableWalletFallback) return null;
+    return this._nodeManager.getScopedDefaultNodeOrNull('withdraw')
+      || this._nodeManager.getScopedDefaultNodeOrNull('wallet')
+      || null;
+  }
+
+  async _findTransactionByLabel(client, label) {
+    const txs = await client.getTransactions();
+    const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
+    return list.find((tx) => tx?.label === label) || null;
+  }
+
+  async _startBridge(flow) {
+    try {
+      flow.loop_out_attempts += 1;
+      const started = await this._loopClient.startLoopOut({
+        amountSats: flow.amount_sats,
+        destinationAddress: flow.deposit_address,
+        label: flow.loop_out_label,
+        confTarget: this.config.loopOutConfTarget,
+        maxSwapRoutingFeeSats: this.config.loopOutMaxRoutingFeeSats,
+        fast: this.config.fast,
+      });
+      flow.bridge_mode = 'loop_out';
+      flow.status = 'loop_out_pending';
+      flow.loop_out_started_at = nowIso();
+      flow.next_retry_at = null;
+      flow.loop_out_swap_id = started.swapId || flow.loop_out_swap_id || null;
+      flow.last_error = null;
+      flow.last_progress_at = nowIso();
+      await this._persist();
+      await this._capitalLedger.recordFundingEvent(flow.agent_id, 'loop_out_started', {
+        amount_sats: flow.amount_sats,
+        source: 'lightning_loop_out',
+        status: 'loop_out_pending',
+        flow_id: flow.flow_id,
+        address: flow.deposit_address,
+        loop_out_swap_id: flow.loop_out_swap_id,
+        reference: flow.flow_id,
+      });
+    } catch (err) {
+      flow.last_error = err.message;
+      flow.last_progress_at = nowIso();
+      if (await this._startWalletFallback(flow, err.message)) {
+        return;
+      }
+      if ((nowMs() - Date.parse(flow.invoice_paid_at || flow.created_at)) > this.config.startRetryWindowMs) {
+        flow.status = 'recovery_required';
+        await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_recovery_required', {
+          amount_sats: flow.amount_sats,
+          source: 'lightning_loop_out',
+          status: 'recovery_required',
+          flow_id: flow.flow_id,
+          address: flow.deposit_address,
+          reason: err.message,
+          reference: flow.flow_id,
+        });
+      }
+      await this._persist();
+    }
+  }
+
+  async _startWalletFallback(flow, reason = null) {
+    const walletClient = this._getWalletClient();
+    if (!walletClient) return false;
+    if (reason && !isRouteFailure(reason)) return false;
+
+    let sendResult = null;
+    let recoveredFromUnknown = false;
+    try {
+      sendResult = await walletClient.sendCoins(flow.deposit_address, flow.amount_sats, {
+        label: flow.wallet_bridge_label,
+        minConfs: 1,
+        spendUnconfirmed: false,
+        timeoutMs: 120000,
+      });
+    } catch (err) {
+      const detail = String(err?.message || '');
+      const unknownOutcome = /timed out|timeout|socket|network|reset|eai_again/i.test(detail);
+      if (unknownOutcome) {
+        try {
+          const knownTx = await this._findTransactionByLabel(walletClient, flow.wallet_bridge_label);
+          if (knownTx?.tx_hash) {
+            sendResult = { txid: knownTx.tx_hash };
+            recoveredFromUnknown = true;
+          }
+        } catch {}
+      }
+      if (!sendResult?.txid) {
+        return false;
+      }
+    }
+
+    flow.bridge_mode = 'wallet_fallback';
+    flow.status = 'onchain_pending';
+    flow.next_retry_at = null;
+    flow.wallet_bridge_txid = sendResult.txid || null;
+    flow.last_error = null;
+    flow.last_progress_at = nowIso();
+    await this._persist();
+    await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_wallet_bridge_broadcast', {
+      amount_sats: flow.amount_sats,
+      source: 'lightning_wallet_bridge',
+      status: 'onchain_pending',
+      flow_id: flow.flow_id,
+      address: flow.deposit_address,
+      txid: flow.wallet_bridge_txid,
+      reason: reason ? describeFlowError(reason) || reason : null,
+      recovered_from_unknown: recoveredFromUnknown,
+      reference: flow.wallet_bridge_txid || flow.flow_id,
+    });
+    return true;
+  }
+
   _getDepositForFlow(flow) {
     const { deposits } = this._depositTracker.getDepositStatus(flow.agent_id);
     return deposits.find((deposit) => deposit.address === flow.deposit_address) || null;
@@ -544,17 +635,18 @@ export class LightningCapitalFunder {
     const deposit = this._getDepositForFlow(flow);
     const status = this._deriveStatus(flow, deposit);
     const describedError = describeFlowError(flow.last_error);
+    const source = flow.bridge_mode === 'wallet_fallback' ? 'lightning_wallet_bridge' : 'lightning_loop_out';
     return {
       flow_id: flow.flow_id,
       agent_id: flow.agent_id,
       amount_sats: flow.amount_sats,
-      source: 'lightning_loop_out',
+      source,
       status,
       payment_request: flow.invoice_payment_request,
       expires_at: flow.expires_at,
       deposit_address: flow.deposit_address,
       loop_out_swap_id: flow.loop_out_swap_id,
-      onchain_txid: deposit?.txid || null,
+      onchain_txid: deposit?.txid || flow.wallet_bridge_txid || null,
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
       next_retry_at: flow.next_retry_at || null,
@@ -563,7 +655,9 @@ export class LightningCapitalFunder {
         ? 'Your node received the Lightning deposit, but Loop could not route its own swap payment onward.'
         : null,
       status_url: `/api/v1/capital/deposit-lightning/${encodeURIComponent(flow.flow_id)}`,
-      learn: 'Pay the Lightning invoice, then wait for Loop Out to move those sats on-chain. Capital becomes usable only after the on-chain side confirms.',
+      learn: source === 'lightning_wallet_bridge'
+        ? 'Pay the Lightning invoice, then wait for the site to broadcast the matching on-chain capital deposit. Capital becomes usable only after the on-chain side confirms.'
+        : 'Pay the Lightning invoice, then wait for Loop Out to move those sats on-chain. Capital becomes usable only after the on-chain side confirms.',
     };
   }
 }

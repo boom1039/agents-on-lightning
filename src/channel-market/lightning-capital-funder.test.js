@@ -357,3 +357,103 @@ test('load revives retryable offchain failures back into invoice_paid', async ()
   const flow = await funder.getFlow('agent-lightning', 'flow1');
   assert.equal(flow.status, 'invoice_paid');
 });
+
+test('falls back to wallet bridge after route failure and then confirms', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  let invoiceSettled = false;
+  let swapChecks = 0;
+  const loopClient = {
+    async quoteOut() {
+      return { stdout: 'quote ok', stderr: '' };
+    },
+    async startLoopOut() {
+      return { swapId: 'swap-1', stdout: 'swap started', stderr: '' };
+    },
+    async getSwapInfo() {
+      swapChecks += 1;
+      if (swapChecks === 1) {
+        return {
+          id: 'swap-1',
+          state: 'FAILED',
+          failure_reason: 'FAILURE_REASON_NO_ROUTE',
+        };
+      }
+      return null;
+    },
+    async listSwaps() {
+      return { swaps: [] };
+    },
+  };
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManager({
+      addInvoice: async (value) => ({
+        payment_request: `lnbc${value}mock`,
+        r_hash: 'hash-5',
+        add_index: '53',
+      }),
+      listInvoices: async () => ({
+        invoices: [{
+          add_index: '53',
+          settled: invoiceSettled,
+          state: invoiceSettled ? 'SETTLED' : 'OPEN',
+          value: '250000',
+        }],
+      }),
+      sendCoins: async () => ({ txid: 'wallet-bridge-tx-1' }),
+      getTransactions: async () => ({
+        transactions: [{
+          tx_hash: 'wallet-bridge-tx-1',
+          label: 'lightning-capital-wallet:flow-lookup',
+        }],
+      }),
+    }),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient,
+  });
+
+  await funder.load();
+  const created = await funder.createFlow('agent-lightning', 250_000);
+
+  invoiceSettled = true;
+  await funder._pollCycle();
+  await funder._pollCycle();
+  await funder._pollCycle();
+
+  let flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'onchain_pending');
+  assert.equal(flow.source, 'lightning_wallet_bridge');
+  assert.equal(flow.onchain_txid, 'wallet-bridge-tx-1');
+
+  const depositEntry = depositTracker._entries.get(flow.deposit_address);
+  depositEntry.status = 'pending_deposit';
+  depositEntry.amount_sats = 250_000;
+  depositEntry.txid = 'wallet-bridge-tx-1';
+  depositEntry.confirmations = 1;
+
+  await funder._pollCycle();
+  flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'onchain_pending');
+
+  depositEntry.status = 'confirmed';
+  depositEntry.confirmations = 3;
+
+  await funder._pollCycle();
+  flow = await funder.getFlow('agent-lightning', created.flow_id);
+  assert.equal(flow.status, 'confirmed');
+  assert.equal(flow.source, 'lightning_wallet_bridge');
+
+  const eventTypes = capitalLedger.fundingEvents.map((entry) => entry.type);
+  assert.deepEqual(eventTypes, [
+    'lightning_invoice_created',
+    'lightning_paid',
+    'loop_out_started',
+    'lightning_wallet_bridge_broadcast',
+    'lightning_deposit_confirmed',
+  ]);
+});

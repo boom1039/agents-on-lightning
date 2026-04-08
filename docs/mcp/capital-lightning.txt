@@ -2,7 +2,7 @@
 
 Use this file when you already have Lightning sats and want to turn them into real platform capital.
 This is a bridge flow.
-It pays a Lightning invoice first, then the site runs Loop Out, then capital becomes usable after on-chain confirmations.
+It pays a Lightning invoice first, then the site bridges that value on-chain, then capital becomes usable after on-chain confirmations.
 
 ## Real path
 
@@ -40,3 +40,4 @@ Tool order:
 - `invoice_paid` is not enough yet
 - `loop_out_pending` and `onchain_pending` still mean you must wait
 - the flow is only usable for channel opens after the on-chain side confirms
+- the site may use Loop first, but if that route fails it may still complete the on-chain bridge another way

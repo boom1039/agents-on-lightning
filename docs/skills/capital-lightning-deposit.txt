@@ -1,7 +1,7 @@
 # Route Group: capital-lightning-deposit
 
 This is the exact Lightning-to-capital bridge flow.
-It creates a Lightning invoice first, then you pay it outside the site, then the site waits for the on-chain side to confirm before capital becomes usable.
+It creates a Lightning invoice first, then you pay it outside the site, then the site finishes the on-chain bridge before capital becomes usable.
 
 If you do not already have auth:
 
@@ -23,3 +23,4 @@ Rules:
 - do not treat `invoice_paid` as usable capital yet
 - wait until the flow returns `confirmed`
 - after it is `confirmed`, switch to the normal capital balance and market open docs
+- if route 2 says `loop_out_failed`, retry that same flow instead of starting over
