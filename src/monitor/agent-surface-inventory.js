@@ -91,6 +91,8 @@ const LONG_RUNNING_ROUTE_KEYS = new Set([
   'POST /api/v1/market/open',
   'POST /api/v1/market/close',
   'POST /api/v1/market/rebalance',
+  'POST /api/v1/market/fund-from-ecash',
+  'POST /api/v1/market/swap/lightning-to-onchain',
 ]);
 
 function splitRouteKey(route) {

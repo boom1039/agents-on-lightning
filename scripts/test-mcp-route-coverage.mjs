@@ -4,13 +4,18 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'https://agentsonlightning.com';
 const realTestInvoice = process.env.AOL_REAL_TEST_INVOICE || null;
 const boundaryStatuses = new Set([400, 401, 402, 403, 404, 405, 409, 410, 422, 429, 503]);
+const localBase = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(baseUrl);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 async function fetchJson(pathname) {
-  const response = await fetch(new URL(pathname, baseUrl));
+  const url = new URL(pathname, baseUrl);
+  if (localBase && url.pathname.startsWith('/api/journey')) {
+    url.searchParams.set('source', 'local');
+  }
+  const response = await fetch(url);
   const body = await response.json();
   assert(response.ok, `GET ${pathname} failed with ${response.status}`);
   return body;

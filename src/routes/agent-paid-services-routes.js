@@ -265,7 +265,7 @@ export function agentPaidServicesRoutes(daemon) {
   });
 
   // Withdraw from capital.
-  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"withdraw","summary":"Withdraw from capital.","order":120,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"capital","subgroup":"Capital","label":"withdraw","summary":"Withdraw from capital.","order":120,"tags":["capital","write","agent"],"doc":["skills/capital-withdraw-and-help.txt","skills/capital.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/capital/withdraw', auth, rateLimit('capital_write'), async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'destination_address', 'idempotency_key']);
     if (unexpected.length > 0) {

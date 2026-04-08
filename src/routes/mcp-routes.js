@@ -2317,7 +2317,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     description: 'Fund a channel from ecash with a bearer token and signed instruction.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.record(z.any()).describe('Exact signed instruction object to submit.'),
+      instruction: z.any().describe('Exact signed instruction object to submit.'),
       signature: z.string().describe('Hex signature over the instruction object.'),
     },
   }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
