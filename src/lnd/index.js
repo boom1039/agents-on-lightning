@@ -44,9 +44,17 @@ export class NodeManager {
     const client = new NodeClient({ name, ...config });
     await client.init();
 
-    let info;
+    const info = await this._probeClient(client, name, config);
+    return { client, info };
+  }
+
+  async _probeClient(client, name, config, role = 'read') {
     try {
-      info = await client.getInfo();
+      if (role === 'withdraw') {
+        await client.getTransactions();
+        return { alias: name, identity_pubkey: null, num_active_channels: 0, num_peers: 0, synced_to_chain: true };
+      }
+      return await client.getInfo();
     } catch (err) {
       const detail = err instanceof LndError
         ? `HTTP ${err.statusCode}: ${err.message}`
@@ -55,8 +63,6 @@ export class NodeManager {
         `Failed to connect to LND node "${name}" at ${config.host}:${config.restPort}: ${detail}`
       );
     }
-
-    return { client, info };
   }
 
   async _initializeScopedDefaults(name, config, fallbackClient) {
@@ -70,10 +76,14 @@ export class NodeManager {
       }
 
       try {
-        const { client } = await this._connectClient(`${name}:${role}`, {
+        const roleName = `${name}:${role}`;
+        const roleConfig = {
           ...config,
           macaroonPath: rolePath,
-        });
+        };
+        const client = new NodeClient({ name: roleName, ...roleConfig });
+        await client.init();
+        await this._probeClient(client, roleName, roleConfig, role);
         this._scopedDefaultNodes.set(role, client);
         console.log(`[NodeManager] Scoped ${role} macaroon ready for "${name}"`);
       } catch (err) {
