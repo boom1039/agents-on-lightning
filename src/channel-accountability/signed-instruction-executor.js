@@ -105,12 +105,13 @@ const HINTS = {
  * 10-step validation pipeline before touching LND.
  */
 export class SignedInstructionExecutor {
-  constructor({ assignmentRegistry, auditLog, nodeManager, agentRegistry, dataLayer, safetySettings = {} }) {
+  constructor({ assignmentRegistry, auditLog, nodeManager, agentRegistry, dataLayer, publicLedger = null, safetySettings = {} }) {
     this._assignments = assignmentRegistry;
     this._auditLog = auditLog;
     this._nodeManager = nodeManager;
     this._agentRegistry = agentRegistry;
     this._dataLayer = dataLayer;
+    this._publicLedger = publicLedger;
     this._defaultCooldownMinutes = Number.isInteger(safetySettings.defaultCooldownMinutes)
       ? safetySettings.defaultCooldownMinutes
       : 60;
@@ -497,8 +498,9 @@ export class SignedInstructionExecutor {
       });
 
       // Execute on LND
+      let executionMeta = null;
       try {
-        await this._executeLnd(node, instruction, assignment);
+        executionMeta = await this._executeLnd(node, instruction, assignment);
       } catch (err) {
         await this._auditLog.append({
           type: 'instruction_failed',
@@ -545,6 +547,14 @@ export class SignedInstructionExecutor {
         params: instruction.params,
       });
 
+      await this._recordPublicLedgerExecution({
+        agentId,
+        assignment,
+        instruction,
+        executedAt: execNow,
+        executionMeta,
+      });
+
       // Post-verification (async, doesn't block response)
       this._postVerify(node, instruction, assignment).catch(err => {
         console.warn(`[InstructionExecutor] Post-verify failed: ${err.message}`);
@@ -560,8 +570,8 @@ export class SignedInstructionExecutor {
           executed_at: execNow,
           next_allowed_at: execNow + cooldownMs,
         },
-        learn: 'Your fee policy change has been applied to LND and recorded in the tamper-evident ' +
-          'audit chain. The monitor will verify the change took effect within ~30 seconds. ' +
+        learn: 'Your channel update has been applied to LND and recorded in the audit chain. ' +
+          'Fee changes also appear in the public ledger. The monitor will verify the change took effect within ~30 seconds. ' +
           'GET /api/v1/channels/audit/' + instruction.channel_id + ' to see the full history.',
       };
     } finally {
@@ -582,6 +592,19 @@ export class SignedInstructionExecutor {
       const feeRatePpm = params.fee_rate_ppm ?? parseInt(current.fee_per_mil, 10);
       const timeLockDelta = params.time_lock_delta ?? current.time_lock_delta ?? 40;
       await node.updateChannelPolicy(channelPoint, baseFeeMsat, feeRatePpm, timeLockDelta);
+      return {
+        ledgerType: 'channel_fee_policy_updated',
+        old_policy: {
+          base_fee_msat: parseInt(current.base_fee_msat, 10),
+          fee_rate_ppm: parseInt(current.fee_per_mil, 10),
+          time_lock_delta: current.time_lock_delta ?? 40,
+        },
+        new_policy: {
+          base_fee_msat: baseFeeMsat,
+          fee_rate_ppm: feeRatePpm,
+          time_lock_delta: timeLockDelta,
+        },
+      };
     } else if (action === 'update_htlc_limits') {
       // Read current fee state — preserve fees, only change HTLC limits
       const report = await node.feeReport();
@@ -604,6 +627,29 @@ export class SignedInstructionExecutor {
         channelPoint, baseFeeMsat, feeRatePpm, timeLockDelta,
         params.max_htlc_msat, params.min_htlc_msat,
       );
+      return null;
+    }
+    return null;
+  }
+
+  async _recordPublicLedgerExecution({ agentId, assignment, instruction, executedAt, executionMeta }) {
+    if (!this._publicLedger?.record || !executionMeta?.ledgerType) return;
+    try {
+      await this._publicLedger.record({
+        type: executionMeta.ledgerType,
+        agent_id: agentId,
+        amount_sats: 0,
+        channel_id: instruction.channel_id,
+        channel_point: assignment.channel_point,
+        action: instruction.action,
+        params: instruction.params,
+        old_policy: executionMeta.old_policy || null,
+        new_policy: executionMeta.new_policy || null,
+        source: 'channels_signed',
+        executed_at: executedAt,
+      });
+    } catch (err) {
+      console.warn(`[InstructionExecutor] Public ledger mirror failed: ${err.message}`);
     }
   }
 

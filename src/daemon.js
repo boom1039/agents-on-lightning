@@ -149,6 +149,7 @@ export class AgentDaemon {
       nodeManager: this.nodeManager,
       agentRegistry: this.agentRegistry,
       dataLayer: this.dataLayer,
+      publicLedger: this.publicLedger,
       safetySettings: getSignedChannelSafetySettings(this.config),
     });
     await this.channelExecutor.loadCooldowns();
