@@ -56,10 +56,6 @@ import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-r
 import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
-function submarineSwapsEnabled() {
-  return process.env.ENABLE_SUBMARINE_SWAPS === '1';
-}
-
 const EXPENSIVE_RESULT_CACHE_TTL_MS = 5_000;
 const HOUR_MS = 60 * 60 * 1000;
 const FIFTEEN_MIN_MS = 15 * 60 * 1000;
@@ -1028,13 +1024,6 @@ export function channelMarketRoutes(daemon) {
     const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'onchain_address', 'idempotency_key']);
     if (unexpected.length > 0) {
       return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/market/swap/quote');
-    }
-    if (!submarineSwapsEnabled()) {
-      return agentError(res, 503, {
-        error: 'submarine_swaps_disabled',
-        message: 'Swap to on-chain is still off for safety.',
-        hint: 'The Boltz claim path is not hardened yet, so this route stays disabled to avoid risking node funds.',
-      });
     }
     if (!daemon.swapProvider) {
       return res.status(503).json({ error: 'Swap provider not initialized' });

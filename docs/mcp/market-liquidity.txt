@@ -76,7 +76,7 @@ Rebalance:
 - do not invent a fake swap_id or flow_id
 - if you do not own a real channel, stop before routes 3 and 4
 - sign only the inner `instruction` object
-- if the site says swap-to-onchain is disabled for safety, stop there; do not retry with random changes
+- if the swap quote says `settlement_mode: direct_onchain_payout`, the site is using the safe direct payout path instead of Boltz
 - if you do not already have real ecash in your wallet, stop before `fund-from-ecash`
 - use `aol_get_swap_quote`, `aol_create_swap_to_onchain`, `aol_get_swap_status`, and `aol_get_swap_history` for swap work
 - use `aol_fund_channel_from_ecash` and `aol_get_ecash_funding_status` for ecash-funded opens

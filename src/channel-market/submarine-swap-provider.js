@@ -24,6 +24,19 @@ const BOLTZ_API_BASE = 'https://api.boltz.exchange/v2';
 
 const SWAP_CONFIG = {};
 
+function submarineSwapsEnabled() {
+  return process.env.ENABLE_SUBMARINE_SWAPS === '1';
+}
+
+function isInsufficientCapitalError(err) {
+  return /Insufficient available balance/i.test(String(err?.message || ''));
+}
+
+function isMissingNodeError(err) {
+  const message = String(err?.message || '');
+  return message.includes('No LND node available') || message.includes('No LND node connected');
+}
+
 /**
  * State machine:
  * created → invoice_paid → lockup_detected → claim_broadcast → claim_confirmed → deposit_credited
@@ -86,6 +99,12 @@ export class SubmarineSwapProvider {
     await this._dataLayer.writeJSON(STATE_PATH, this._state);
   }
 
+  async _findTransactionByLabel(client, label) {
+    const txs = await client.getTransactions();
+    const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
+    return list.find((tx) => tx?.label === label) || null;
+  }
+
   // ---------------------------------------------------------------------------
   // Polling
   // ---------------------------------------------------------------------------
@@ -124,6 +143,23 @@ export class SubmarineSwapProvider {
       return {
         success: false,
         error: 'Amount is outside this node’s current allowed swap range',
+      };
+    }
+
+    if (!submarineSwapsEnabled()) {
+      return {
+        success: true,
+        amount_sats: amountSats,
+        service_fee_sats: 0,
+        service_fee_percent: 0,
+        miner_fee_sats: 0,
+        total_fee_sats: 0,
+        receive_amount_sats: amountSats,
+        amount_policy: 'server_enforced',
+        settlement_mode: 'direct_onchain_payout',
+        learn: `This node is using the safe direct payout path, not Boltz. ` +
+          `If you continue, ${amountSats.toLocaleString()} sats will be debited from your available capital and ` +
+          `broadcast directly to your on-chain address.`,
       };
     }
 
@@ -201,6 +237,10 @@ export class SubmarineSwapProvider {
         error: 'Too many concurrent swaps for this agent right now',
         status: 429,
       };
+    }
+
+    if (!submarineSwapsEnabled()) {
+      return this._createDirectPayout(agentId, { amount_sats, onchain_address });
     }
 
     // Check node has sufficient outbound liquidity
@@ -324,6 +364,173 @@ export class SubmarineSwapProvider {
         '(3) We claim the HTLC using the payment preimage. (4) On-chain funds arrive at your address. ' +
         'This is trustless — Boltz cannot steal your funds because the HTLC requires the preimage that only we have.',
     };
+  }
+
+  async _createDirectPayout(agentId, { amount_sats, onchain_address }) {
+    const client = this._nodeManager.getScopedDefaultNodeOrNull('withdraw')
+      || this._nodeManager.getScopedDefaultNodeOrNull('wallet')
+      || null;
+    if (!client) {
+      return {
+        success: false,
+        status: 503,
+        error: 'service_unavailable',
+        message: 'Swap to on-chain is unavailable because no withdraw-capable wallet node is connected.',
+        hint: 'Try again later.',
+      };
+    }
+
+    const swapId = randomBytes(16).toString('hex');
+    const payoutLabel = `market-swap:${agentId}:${swapId}`;
+    const entry = {
+      swap_id: swapId,
+      agent_id: agentId,
+      status: 'creating',
+      amount_sats,
+      onchain_address,
+      created_at: Date.now(),
+      settlement_mode: 'direct_onchain_payout',
+      payout_label: payoutLabel,
+      service_fee_sats: 0,
+    };
+
+    this._state[swapId] = entry;
+    await this._persist();
+
+    let debited = false;
+    try {
+      const balanceAfter = await this._capitalLedger.withdraw(agentId, amount_sats, onchain_address);
+      debited = true;
+
+      let sendResult = null;
+      let recoveredFromUnknown = false;
+      try {
+        sendResult = await client.sendCoins(onchain_address, amount_sats, {
+          label: payoutLabel,
+          minConfs: 1,
+          spendUnconfirmed: false,
+          timeoutMs: 120000,
+        });
+      } catch (err) {
+        const detail = String(err?.message || '');
+        const unknownOutcome = /timed out|timeout|socket|network|reset|eai_again/i.test(detail);
+        if (unknownOutcome) {
+          try {
+            const knownTx = await this._findTransactionByLabel(client, payoutLabel);
+            if (knownTx?.tx_hash) {
+              sendResult = { txid: knownTx.tx_hash };
+              recoveredFromUnknown = true;
+            }
+          } catch {}
+        }
+        if (!sendResult?.txid) {
+          await this._capitalLedger.refundWithdrawal(
+            agentId,
+            amount_sats,
+            onchain_address,
+            unknownOutcome ? 'swap_unknown_outcome_refunded' : 'swap_send_failed',
+          );
+          debited = false;
+          entry.status = 'broadcast_failed';
+          entry.error = detail;
+          entry.completed_at = Date.now();
+          await this._persist();
+          return {
+            success: false,
+            status: unknownOutcome ? 502 : 400,
+            error: 'swap_failed',
+            message: summarizeLndError(detail, {
+              action: 'on-chain payout',
+              fallback: 'On-chain payout failed before broadcast.',
+            }),
+            hint: 'Your capital was returned to available balance.',
+            see: 'GET /api/v1/capital/activity',
+          };
+        }
+      }
+
+      entry.status = 'broadcast';
+      entry.txid = sendResult.txid;
+      entry.balance_after = balanceAfter;
+      entry.recovered_from_unknown = recoveredFromUnknown;
+      entry.completed_at = Date.now();
+      await this._persist();
+
+      await this._auditLog.append({
+        type: 'direct_onchain_payout_created',
+        agent_id: agentId,
+        swap_id: swapId,
+        amount_sats,
+        onchain_address,
+        txid: sendResult.txid,
+      });
+
+      return {
+        success: true,
+        swap_id: swapId,
+        status: 'broadcast',
+        settlement_mode: 'direct_onchain_payout',
+        amount_sats,
+        onchain_address,
+        txid: sendResult.txid,
+        recovered_from_unknown: recoveredFromUnknown,
+        balance_after: balanceAfter,
+        message: 'On-chain payout broadcast.',
+        learn: 'This node is using the safe direct payout path instead of Boltz. ' +
+          'The sats were debited from your available capital and broadcast directly to your on-chain address.',
+      };
+    } catch (err) {
+      if (debited) {
+        try {
+          await this._capitalLedger.refundWithdrawal(
+            agentId,
+            amount_sats,
+            onchain_address,
+            'swap_internal_error_refunded',
+          );
+        } catch {}
+      }
+      if (isInsufficientCapitalError(err)) {
+        entry.status = 'rejected';
+        entry.error = err.message;
+        entry.completed_at = Date.now();
+        await this._persist();
+        return {
+          success: false,
+          status: 400,
+          error: 'insufficient_capital',
+          message: `You do not have enough available capital to move ${amount_sats} sats on-chain.`,
+          hint: 'Check your available capital first, or wait for pending funds to settle.',
+          see: 'GET /api/v1/capital/balance',
+        };
+      }
+      if (isMissingNodeError(err)) {
+        entry.status = 'failed';
+        entry.error = err.message;
+        entry.completed_at = Date.now();
+        await this._persist();
+        return {
+          success: false,
+          status: 503,
+          error: 'service_unavailable',
+          message: 'Swap to on-chain is unavailable because no withdraw-capable wallet node is connected.',
+          hint: 'Try again later.',
+        };
+      }
+      entry.status = 'failed';
+      entry.error = err.message;
+      entry.completed_at = Date.now();
+      await this._persist();
+      return {
+        success: false,
+        status: 500,
+        error: 'swap_internal_error',
+        message: summarizeLndError(err.message, {
+          action: 'on-chain payout',
+          fallback: 'On-chain payout failed.',
+        }),
+      };
+    }
   }
 
   // ---------------------------------------------------------------------------
