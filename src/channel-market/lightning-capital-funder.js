@@ -28,6 +28,10 @@ function isTerminalStatus(status) {
   return ['confirmed', 'expired', 'loop_out_failed', 'recovery_required'].includes(status);
 }
 
+function isFailedSwapState(state) {
+  return ['FAILED', 'FAIL_OFFCHAIN_PAYMENTS', 'FAIL_TIMEOUT', 'FAIL_INSUFFICIENT_VALUE'].includes(String(state || '').toUpperCase());
+}
+
 export class LightningCapitalFunder {
   constructor({
     nodeManager,
@@ -350,6 +354,27 @@ export class LightningCapitalFunder {
     }
 
     if (flow.status === 'loop_out_pending') {
+      const swap = await this._findLoopSwap(flow);
+      if (swap?.id && !flow.loop_out_swap_id) {
+        flow.loop_out_swap_id = swap.id;
+      }
+      if (swap && isFailedSwapState(swap.state)) {
+        flow.status = 'loop_out_failed';
+        flow.last_error = swap.failure_reason || `Loop Out failed with state ${swap.state}`;
+        flow.last_progress_at = nowIso();
+        await this._persist();
+        await this._capitalLedger.recordFundingEvent(flow.agent_id, 'lightning_deposit_failed', {
+          amount_sats: flow.amount_sats,
+          source: 'lightning_loop_out',
+          status: 'loop_out_failed',
+          flow_id: flow.flow_id,
+          address: flow.deposit_address,
+          reason: flow.last_error,
+          loop_out_swap_id: flow.loop_out_swap_id,
+          reference: flow.flow_id,
+        });
+        return;
+      }
       if (deposit?.status === 'pending_deposit') {
         flow.status = 'onchain_pending';
         flow.last_progress_at = nowIso();
@@ -397,6 +422,20 @@ export class LightningCapitalFunder {
       if (flow.invoice_payment_request && invoice?.payment_request === flow.invoice_payment_request) return true;
       return false;
     }) || null;
+  }
+
+  async _findLoopSwap(flow) {
+    if (flow.loop_out_swap_id) {
+      try {
+        return await this._loopClient.getSwapInfo(flow.loop_out_swap_id);
+      } catch {
+        // Fall back to label scan.
+      }
+    }
+
+    const result = await this._loopClient.listSwaps();
+    const swaps = Array.isArray(result?.swaps) ? result.swaps : [];
+    return swaps.find((swap) => swap?.label === flow.loop_out_label) || null;
   }
 
   _getDepositForFlow(flow) {

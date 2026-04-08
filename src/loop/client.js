@@ -17,13 +17,22 @@ function buildErrorMessage(err) {
 }
 
 function extractSwapId(text) {
-  const match = /swap id[:\s]+([0-9]+)/i.exec(String(text || ''));
+  const match = /swap id[:\s]+([0-9a-f]{8,})/i.exec(String(text || ''));
   return match ? match[1] : null;
 }
 
 function extractBitcoinAddress(text) {
   const match = /\b(bc1[a-z0-9]{20,}|[13][a-km-zA-HJ-NP-Z1-9]{25,62})\b/.exec(String(text || ''));
   return match ? match[1] : null;
+}
+
+function parseJson(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 export class LoopClient {
@@ -102,5 +111,15 @@ export class LoopClient {
       swapId: extractSwapId(combined),
       depositAddress: extractBitcoinAddress(combined),
     };
+  }
+
+  async listSwaps() {
+    const result = await this._run(['listswaps']);
+    return parseJson(result.stdout) || { swaps: [] };
+  }
+
+  async getSwapInfo(swapId) {
+    const result = await this._run(['swapinfo', swapId]);
+    return parseJson(result.stdout);
   }
 }
