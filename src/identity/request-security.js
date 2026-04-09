@@ -14,14 +14,13 @@ import {
   getPublicHostRequirement,
 } from './agent-friendly-errors.js';
 import { logAuthorizationDenied, logValidationFailure } from './audit-log.js';
+import { getSocketAddress } from './request-ip.js';
+
+export { getSocketAddress } from './request-ip.js';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const HOSTNAME_RE = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/;
-
-export function getSocketAddress(req) {
-  return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
-}
 
 export function isLoopbackAddress(address) {
   return LOOPBACKS.has(address);

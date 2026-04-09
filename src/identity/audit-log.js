@@ -8,6 +8,7 @@
 
 import { getJourneyMonitorStatus, recordJourneyEvent } from '../monitor/journey-monitor.js';
 import { resolveTrackedSurface, shouldIgnoreAgentSurfacePath } from '../monitor/agent-surface-inventory.js';
+import { getSocketAddress } from './request-ip.js';
 let _traceSeq = 0;
 
 function nextTraceId() {
@@ -211,6 +212,7 @@ export function auditMiddleware(req, res, next) {
       ts: Date.now(),
     });
   };
+  const requestIp = getSocketAddress(req) || null;
 
   void recordJourneyEvent({
     event: 'request_start',
@@ -220,7 +222,7 @@ export function auditMiddleware(req, res, next) {
     endpoint: originalPath,
     agent_id: req.agentId || null,
     agent_name: req.agentProfile?.name || null,
-    ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
+    ip: requestIp,
     accept: accept || null,
     doc_kind,
     ...surfaceMeta,
@@ -236,7 +238,7 @@ export function auditMiddleware(req, res, next) {
       endpoint: originalPath,
       status: res.statusCode,
       duration_ms: Date.now() - start,
-      ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
+      ip: requestIp,
       agent_id: req.agentId || null,
       agent_name: req.agentProfile?.name || null,
       accept: accept || null,
@@ -252,7 +254,7 @@ export function auditMiddleware(req, res, next) {
       endpoint: originalPath,
       status: res.statusCode,
       duration_ms: Date.now() - start,
-      ip: req.socket?.remoteAddress || req.connection?.remoteAddress || null,
+      ip: requestIp,
       agent_id: req.agentId || null,
       agent_name: req.agentProfile?.name || null,
       accept: accept || null,
