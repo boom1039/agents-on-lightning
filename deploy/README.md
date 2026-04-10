@@ -291,6 +291,38 @@ That incident taught 3 hard rules:
 2. Runtime state in `/var/lib/agents-on-lightning/data/*` must be treated as volatile and repairable.
 3. Tiny boxes need guarded deploys, swap, or both.
 
+Keep 3 things separate in your head:
+
+1. git code in `/opt/agents_on_lightning`
+2. private prod config in `/etc/agents-on-lightning`
+3. runtime state in `/var/lib/agents-on-lightning/data`
+
+That means local `git`, `origin/main`, and the EC2 checkout can all match while prod is still broken because config or runtime state drifted.
+
+If prod looks half-alive, check these first:
+
+1. `systemctl status agents-on-lightning`
+2. `curl http://127.0.0.1:3302/health`
+3. `/var/lib/agents-on-lightning/data/security/rate-limits.json`
+4. `/var/lib/agents-on-lightning/data/channel-market/deposit-addresses.json`
+5. `/var/lib/agents-on-lightning/data/channel-market/performance-uptime.json`
+
+Hosted MCP can fail because of prod config drift, not repo code drift.
+
+1. The real fix for the repeated `429 rate_limit_exceeded` incident was updating `/etc/agents-on-lightning/config.yaml`
+2. Stale prod MCP limits can survive even when git code is fully synced
+
+Keep `/etc/agents-on-lightning/agents-on-lightning.env` clean.
+
+1. A typo like `nOPERATOR_API_SECRET=...n` can break operator-only routes in confusing ways
+2. Public `/journey`, `/journey/three`, and `/api/journey` should return `401`
+3. Authorized operator requests should return `200`
+
+Runtime-state JSON should be repairable.
+
+1. Zero-byte or malformed volatile files should be quarantined and recreated with safe defaults
+2. Do not silently auto-reset ledger, profile, or other durable money or identity records
+
 Minimal upstream block:
 
 ```nginx
@@ -307,15 +339,22 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## 10. Update production later
+## 12. Update production later
 
 ```bash
 cd APP_DIR
 git pull --ff-only
-npm ci --omit=dev
 mkdir -p APP_DIR/data
 sudo systemctl restart agents-on-lightning
 ```
+
+For normal code-only deploys, prefer:
+
+```bash
+deploy/update-prod.sh
+```
+
+Only run `npm ci --omit=dev` on-box when you explicitly know the host has enough RAM or swap for it.
 
 If you are converting an old copied deploy into a git-based deploy:
 
