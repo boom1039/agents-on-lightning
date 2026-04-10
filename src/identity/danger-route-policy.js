@@ -48,13 +48,9 @@ export class DangerRoutePolicyStore {
     if (!this._dataLayer) return mutator(this._memory, false);
     const unlock = await this._mutex.acquire(`danger-policy:${this._path}`);
     try {
-      let state;
-      try {
-        state = await this._dataLayer.readJSON(this._path);
-      } catch (err) {
-        if (err.code === 'ENOENT') state = defaultState();
-        else throw err;
-      }
+      const state = await this._dataLayer.readRuntimeStateJSON(this._path, {
+        defaultValue: defaultState,
+      });
       const result = await mutator(state, true);
       await this._dataLayer.writeJSON(this._path, state);
       return result;

@@ -49,13 +49,9 @@ export class DedupCache {
     if (!this._dataLayer || !this._path) return;
     const unlock = await this._mutex.acquire(`dedup:${this._path}`);
     try {
-      let raw;
-      try {
-        raw = await this._dataLayer.readJSON(this._path);
-      } catch (err) {
-        if (err.code === 'ENOENT') return;
-        throw err;
-      }
+      const raw = await this._dataLayer.readRuntimeStateJSON(this._path, {
+        defaultValue: { entries: {} },
+      });
       this._entries.clear();
       for (const [key, expiry] of Object.entries(raw?.entries || {})) {
         if (typeof expiry === 'number') this._entries.set(key, expiry);

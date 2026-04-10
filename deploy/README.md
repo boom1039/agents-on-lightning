@@ -65,6 +65,8 @@ Important:
 
 - Production should be a real git checkout, not a copied folder.
 - Create `APP_DIR/data` before starting systemd, or the service can fail with `status=226/NAMESPACE` because `ReadWritePaths=APP_DATA_DIR APP_DIR/data` expects that path to exist.
+- Do not run `npm ci` on a tiny prod box during normal code-only deploys. On a `t4g.micro` this can OOM the host and wedge SSH/nginx/app startup.
+- Prefer: build elsewhere, or only allow on-box dependency installs when you know the box has enough RAM or swap.
 
 ## 3. Create the service user and directories
 
@@ -244,6 +246,11 @@ curl "http://APP_HOST:APP_PORT/journey/"
 curl "http://APP_HOST:APP_PORT/journey/three"
 ```
 
+Journey is now operator-protected:
+
+- public `/journey`, `/journey/three`, and `/api/journey` should return `401`
+- authorized operator requests should return `200`
+
 ## 8. Optional dashboard basic auth
 
 ```bash
@@ -258,6 +265,31 @@ Proxy the public site to `APP_HOST:APP_PORT`.
 If you want dashboard auth, protect `/journey/` and `/journey/three` in NGINX.
 There is no separate Journey server now.
 `/journey`, `/journey/three`, `/api/journey`, `/api/journey/events`, and `/api/journey/manifest` must all proxy to the main app on `APP_HOST:APP_PORT`, not an old `3308` monitor upstream.
+
+## 10. Update an existing box safely
+
+Use `deploy/update-prod.sh` for normal code-only deploys.
+
+Important behavior:
+
+- it does `git pull --ff-only`
+- it does **not** run `npm ci` by default if `package.json` or `package-lock.json` changed
+- if dependency manifests changed, it stops and tells you to handle deps on a box with enough RAM or swap
+- you can explicitly opt in with `PROD_ALLOW_DEP_INSTALL=1`, but that should be rare on small instances
+
+## 11. What broke on Apr 9, 2026
+
+The prod `t4g.micro` OOMed during `npm ci`, then multiple runtime-state JSON files were left at zero bytes:
+
+- `data/security/rate-limits.json`
+- `data/channel-market/deposit-addresses.json`
+- `data/channel-market/performance-uptime.json`
+
+That incident taught 3 hard rules:
+
+1. Code sync is not enough; config drift in `/etc/agents-on-lightning/*` can still break prod.
+2. Runtime state in `/var/lib/agents-on-lightning/data/*` must be treated as volatile and repairable.
+3. Tiny boxes need guarded deploys, swap, or both.
 
 Minimal upstream block:
 

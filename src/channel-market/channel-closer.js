@@ -137,7 +137,7 @@ export class ChannelCloser {
 
   async load() {
     try {
-      const raw = await this._dataLayer.readJSON(STATE_PATH);
+      const raw = await this._dataLayer.readRuntimeStateJSON(STATE_PATH, { defaultValue: {} });
       this._state = raw || {};
 
       const entries = Object.values(this._state);

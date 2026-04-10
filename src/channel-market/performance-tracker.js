@@ -49,7 +49,7 @@ export class PerformanceTracker {
 
   async load() {
     try {
-      const raw = await this._dataLayer.readJSON(UPTIME_PATH);
+      const raw = await this._dataLayer.readRuntimeStateJSON(UPTIME_PATH, { defaultValue: {} });
       if (raw && raw._uptimeCounters) {
         this._uptimeCounters = raw._uptimeCounters;
       }

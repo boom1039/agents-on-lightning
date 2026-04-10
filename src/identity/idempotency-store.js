@@ -16,13 +16,10 @@ export class IdempotencyStore {
   }
 
   async _readState() {
-    try {
-      const state = await this._dataLayer.readJSON(this._path);
-      return state && typeof state === 'object' ? state : defaultState();
-    } catch (err) {
-      if (err.code === 'ENOENT') return defaultState();
-      throw err;
-    }
+    const state = await this._dataLayer.readRuntimeStateJSON(this._path, {
+      defaultValue: defaultState,
+    });
+    return state && typeof state === 'object' ? state : defaultState();
   }
 
   async _writeState(state) {

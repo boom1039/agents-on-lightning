@@ -257,7 +257,7 @@ export class ChannelOpener {
 
   async load() {
     try {
-      const raw = await this._dataLayer.readJSON(STATE_PATH);
+      const raw = await this._dataLayer.readRuntimeStateJSON(STATE_PATH, { defaultValue: {} });
       if (raw._lastPollBlockHeight != null) {
         this._lastPollBlockHeight = raw._lastPollBlockHeight;
         delete raw._lastPollBlockHeight;

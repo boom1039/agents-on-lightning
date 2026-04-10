@@ -135,13 +135,9 @@ async function withPersistentState(mutator) {
   if (!_persistentStore) return mutator(null);
   const unlock = await _persistentStore.mutex.acquire(`rate-limit:${_persistentStore.path}`);
   try {
-    let state;
-    try {
-      state = await _persistentStore.dataLayer.readJSON(_persistentStore.path);
-    } catch (err) {
-      if (err.code === 'ENOENT') state = defaultPersistentState();
-      else throw err;
-    }
+    const state = await _persistentStore.dataLayer.readRuntimeStateJSON(_persistentStore.path, {
+      defaultValue: defaultPersistentState,
+    });
     const result = await mutator(state);
     await _persistentStore.dataLayer.writeJSON(_persistentStore.path, state);
     return result;

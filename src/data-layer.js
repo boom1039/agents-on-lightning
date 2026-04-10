@@ -33,6 +33,55 @@ export class DataLayer {
     return JSON.parse(raw);
   }
 
+  _cloneDefaultJSON(defaultValue) {
+    const resolved = typeof defaultValue === 'function' ? defaultValue() : defaultValue;
+    return structuredClone(resolved);
+  }
+
+  async readRuntimeStateJSON(relPath, { defaultValue = {} } = {}) {
+    const absPath = this._resolve(relPath);
+    let raw;
+    try {
+      raw = await readFile(absPath, 'utf-8');
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        return this._cloneDefaultJSON(defaultValue);
+      }
+      throw err;
+    }
+
+    const trimmed = raw.trim();
+    try {
+      if (!trimmed) {
+        throw new SyntaxError('Runtime state file is empty');
+      }
+      return JSON.parse(trimmed);
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) {
+        throw err;
+      }
+
+      const corruptSuffix = `${Date.now()}-${randomBytes(4).toString('hex')}`;
+      const corruptPath = `${absPath}.corrupt-${corruptSuffix}`;
+      const fallback = this._cloneDefaultJSON(defaultValue);
+
+      try {
+        await rename(absPath, corruptPath);
+      } catch (renameErr) {
+        if (renameErr.code !== 'ENOENT') {
+          throw renameErr;
+        }
+      }
+
+      await this.writeJSON(relPath, fallback);
+      console.warn(
+        `[DataLayer] Repaired corrupt runtime state at ${relPath}; ` +
+        `moved original to ${corruptPath}`
+      );
+      return fallback;
+    }
+  }
+
   async writeJSON(relPath, data) {
     const absPath = this._resolve(relPath);
     const dir = dirname(absPath);

@@ -56,7 +56,7 @@ export class DepositTracker {
 
   async load() {
     try {
-      const raw = await this._dataLayer.readJSON(STATE_PATH);
+      const raw = await this._dataLayer.readRuntimeStateJSON(STATE_PATH, { defaultValue: {} });
       // Extract cursor (uses _ prefix — safe since Bitcoin addresses never start with _)
       if (raw._lastPollBlockHeight != null) {
         this._lastPollBlockHeight = raw._lastPollBlockHeight;

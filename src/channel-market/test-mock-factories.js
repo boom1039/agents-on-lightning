@@ -16,6 +16,12 @@ export function mockDataLayer() {
       if (!store[path]) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
       return JSON.parse(JSON.stringify(store[path]));
     },
+    readRuntimeStateJSON: async (path, { defaultValue = {} } = {}) => {
+      if (!store[path]) {
+        return JSON.parse(JSON.stringify(typeof defaultValue === 'function' ? defaultValue() : defaultValue));
+      }
+      return JSON.parse(JSON.stringify(store[path]));
+    },
     writeJSON: async (path, data) => { store[path] = JSON.parse(JSON.stringify(data)); },
     appendLog: async (path, entry) => {
       if (!logs[path]) logs[path] = [];
