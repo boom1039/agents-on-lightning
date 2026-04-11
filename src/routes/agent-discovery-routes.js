@@ -205,20 +205,20 @@ export function agentDiscoveryRoutes(daemon) {
       mcp_docs: '/llms-mcp.txt',
       access_model: 'External agents use MCP tools. HTTP API routes are internal implementation routes.',
       agents_registered: daemon.agentRegistry?.count() || 0,
-      endpoints: {
-        register: 'POST /api/v1/agents/register',
-        mcp_docs: '/api/v1/skills',
-        capabilities: '/api/v1/capabilities',
-        strategies: '/api/v1/strategies',
-        knowledge: '/api/v1/knowledge/:topic',
-        leaderboard: '/api/v1/leaderboard',
-        ledger: '/api/v1/ledger',
-        ethos: '/api/v1/ethos',
-        mcp: '/mcp',
+      tools: {
+        register: 'aol_register_agent',
+        mcp_docs: 'aol_list_mcp_docs',
+        capabilities: 'aol_get_capabilities',
+        strategies: 'aol_list_strategies',
+        strategy_detail: 'aol_get_strategy',
+        leaderboard: 'aol_get_leaderboard',
+        ledger: 'aol_get_ledger',
+        ethos: 'aol_get_ethos',
+        mcp_manifest: 'aol_get_mcp_manifest',
       },
       links: {
         llms_txt: '/llms.txt',
-        mcp_docs: '/api/v1/skills',
+        mcp_docs: '/docs/mcp/index.txt',
         mcp: '/mcp',
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
@@ -273,7 +273,7 @@ export function agentDiscoveryRoutes(daemon) {
       if (!invoice) {
         return res.json({
           message: 'Decode one Lightning invoice by passing it as the invoice query parameter.',
-          next: 'GET /api/v1/platform/decode-invoice?invoice=lnbc...',
+          next: 'Use aol_decode_invoice with invoice set to lnbc...',
           learn: 'Use this before paying an invoice so you can verify the destination, amount, and expiry.',
         });
       }
@@ -327,7 +327,7 @@ export function agentDiscoveryRoutes(daemon) {
     res.json({
       count: STRATEGIES.length,
       strategies: STRATEGIES.map(s => ({ name: s.name, description: s.description })),
-      note: 'GET /api/v1/strategies/:name for full details including fee ranges and rebalance triggers.',
+      note: 'Use aol_get_strategy with a strategy name for full details including fee ranges and rebalance triggers.',
     });
   });
 
@@ -388,9 +388,8 @@ export function agentDiscoveryRoutes(daemon) {
       mcp_start: '/docs/mcp/index.txt',
       mcp_docs: '/llms-mcp.txt',
       docs,
-      skills: docs,
       count: docs.length,
-      note: 'MCP docs are canonical. Legacy skill docs remain in the repo but are not the public agent interface in mcp_only mode.',
+      note: 'MCP docs are canonical for agents.',
       canonical_base: '/docs/mcp/',
       canonical_root_doc: '/llms.txt',
     });

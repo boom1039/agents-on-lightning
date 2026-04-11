@@ -26,6 +26,7 @@ test('mcp docs and prompts do not advertise removed generic request tool', async
 
 test('mcp docs do not expose internal api route maps', async () => {
   const files = [
+    'docs/llms.txt',
     'docs/llms-mcp.txt',
     ...MCP_DOCS.map((doc) => `docs/mcp/${doc.file}`),
   ];
@@ -33,6 +34,7 @@ test('mcp docs do not expose internal api route maps', async () => {
   for (const file of files) {
     const text = await readFile(resolve(ROOT, file), 'utf8');
     assert.equal(text.includes('/api/v1'), false, `${file} mentions /api/v1`);
+    assert.equal(text.includes('/docs/skills'), false, `${file} mentions /docs/skills`);
     assert.equal(/\baol_list_skills\b/.test(text), false, `${file} mentions deprecated aol_list_skills`);
   }
 });

@@ -10,7 +10,6 @@ const requiredTools = [
   'aol_get_mcp_manifest',
   'aol_get_api_root',
   'aol_list_mcp_docs',
-  'aol_list_skills',
   'aol_get_platform_status',
   'aol_get_market_config',
   'aol_register_agent',

@@ -63,10 +63,6 @@ const MCP_TOOL_SPECS = [
     description: 'List the canonical MCP docs.',
   },
   {
-    name: 'aol_list_skills',
-    description: 'Deprecated alias for aol_list_mcp_docs.',
-  },
-  {
     name: 'aol_get_platform_status',
     description: 'Read block height, sync state, and platform node info.',
   },
@@ -566,6 +562,26 @@ function summarizeBody(body) {
   return JSON.stringify(body, null, 2).slice(0, 1200);
 }
 
+function sanitizeMcpOutputString(value) {
+  return value
+    .replace(/\b(GET|POST|PUT|PATCH|DELETE)\s+\/api\/v1\/[^\s'",)]+/g, 'the matching named MCP tool')
+    .replace(/\/api\/v1(?:\/[A-Za-z0-9_./:{}?=&%-]*)?/g, 'the matching named MCP tool')
+    .replace(/\/docs\/skills\/[A-Za-z0-9_.\/-]*/g, '/docs/mcp/index.txt')
+    .replace(/\baol_list_skills\b/g, 'aol_list_mcp_docs')
+    .replace(/\blegacy skill docs?\b/gi, 'MCP docs');
+}
+
+function sanitizeMcpOutput(value) {
+  if (typeof value === 'string') return sanitizeMcpOutputString(value);
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeMcpOutput(item));
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== 'skills')
+      .map(([key, item]) => [key, sanitizeMcpOutput(item)])
+  );
+}
+
 function addSavedValue(target, key, value) {
   if (typeof value === 'string' && value.trim()) {
     target[key] = value.trim();
@@ -685,11 +701,13 @@ async function performSiteRequest({
     });
   } catch (err) {
     if (err?.name === 'AbortError') {
-      const summary = `${method} ${url.pathname}${url.search} -> 504`;
+      const publicPath = context?.toolName ? `mcp:${context.toolName}` : `${url.pathname}${url.search}`;
+      const summary = context?.toolName ? `${context.toolName} -> 504` : `${method} ${publicPath} -> 504`;
       return {
         ok: false,
         status: 504,
-        path: `${url.pathname}${url.search}`,
+        path: publicPath,
+        internalPath: `${url.pathname}${url.search}`,
         contentType: 'application/json',
         headers: {},
         body: {
@@ -705,12 +723,14 @@ async function performSiteRequest({
     if (timeout) clearTimeout(timeout);
   }
   const { contentType, body } = await readResponseBody(response);
-  const summary = `${method} ${url.pathname}${url.search} -> ${response.status}`;
+  const publicPath = context?.toolName ? `mcp:${context.toolName}` : `${url.pathname}${url.search}`;
+  const summary = context?.toolName ? `${context.toolName} -> ${response.status}` : `${method} ${publicPath} -> ${response.status}`;
 
   return {
     ok: response.ok,
     status: response.status,
-    path: `${url.pathname}${url.search}`,
+    path: publicPath,
+    internalPath: `${url.pathname}${url.search}`,
     contentType,
     headers: selectResponseHeaders(response.headers),
     body,
@@ -768,12 +788,13 @@ function toToolResult(result) {
       isError: true,
     };
   }
-  const savedValues = extractSavedValues(result.path, result.body);
+  const savedValues = extractSavedValues(result.internalPath || result.path, result.body);
+  const publicBody = sanitizeMcpOutput(result.body);
   return {
     content: [
       {
         type: 'text',
-        text: `${result.summary}\n${summarizeBody(result.body)}${savedValues ? `\nSaved values:\n${JSON.stringify(savedValues, null, 2)}` : ''}`,
+        text: `${result.summary}\n${summarizeBody(publicBody)}${savedValues ? `\nSaved values:\n${JSON.stringify(savedValues, null, 2)}` : ''}`,
       },
     ],
     structuredContent: {
@@ -782,7 +803,7 @@ function toToolResult(result) {
       path: result.path,
       content_type: result.contentType,
       headers: result.headers,
-      body: result.body,
+      body: publicBody,
       ...(savedValues ? { saved_values: savedValues } : {}),
     },
   };
@@ -1007,15 +1028,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_list_mcp_docs', {
     description: 'List the canonical MCP docs.',
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/skills',
-  })));
-
-  server.registerTool('aol_list_skills', {
-    description: 'Deprecated alias for aol_list_mcp_docs. Kept temporarily for older MCP clients.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,

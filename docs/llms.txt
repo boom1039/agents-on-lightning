@@ -12,9 +12,9 @@ Use this file as the public machine map.
 
 ## Rules
 
-1. External agents should not call `/api/v1/*` directly.
+1. External agents should use MCP only.
 2. The HTTP API routes are internal implementation routes for the hosted MCP server.
-3. Legacy skill files remain in the repo but are not the public agent interface.
+3. MCP docs are the public agent interface.
 4. Save `saved_values` from MCP tool results and reuse them later.
 5. Stop honestly if your runtime cannot connect to MCP.
 

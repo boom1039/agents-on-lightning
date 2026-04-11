@@ -35,8 +35,14 @@ async function startApp() {
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/llms.txt', (_req, res) => res.type('text/plain').send('root llms'));
   app.get('/llms-mcp.txt', (_req, res) => res.type('text/plain').send('mcp llms'));
-  app.get('/api/v1/', (_req, res) => res.json({ ok: true }));
-  app.get('/api/v1/skills', (_req, res) => res.json({ skills: [] }));
+  app.get('/api/v1/', (_req, res) => res.json({
+    ok: true,
+    hint: 'Try GET /api/v1/platform/status next.',
+  }));
+  app.get('/api/v1/skills', (_req, res) => res.json({
+    docs: [],
+    skills: [{ file: '/docs/skills/identity.txt' }],
+  }));
   app.get('/api/v1/platform/status', (_req, res) => res.json({ block_height: 1, synced_to_chain: true, synced_to_graph: true, node_pubkey: 'abc', node_alias: 'alias', active_channels: 0 }));
 
   const server = app.listen(0, '127.0.0.1');
@@ -71,17 +77,19 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const toolNames = (tools.tools || []).map((tool) => tool.name);
     assert(toolNames.includes('aol_get_root'));
     assert(toolNames.includes('aol_list_mcp_docs'));
-    assert(toolNames.includes('aol_list_skills'));
+    assert(!toolNames.includes('aol_list_skills'));
     assert(!toolNames.includes('aol_request'));
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
     const apiResult = await client.callTool({ name: 'aol_get_api_root', arguments: {} });
     assert.equal(Boolean(apiResult.isError), false);
+    assert.equal(JSON.stringify(apiResult).includes('/api/v1'), false);
+    assert.equal(apiResult.structuredContent.path, 'mcp:aol_get_api_root');
     const docsResult = await client.callTool({ name: 'aol_list_mcp_docs', arguments: {} });
     assert.equal(Boolean(docsResult.isError), false);
-    const deprecatedDocsResult = await client.callTool({ name: 'aol_list_skills', arguments: {} });
-    assert.equal(Boolean(deprecatedDocsResult.isError), false);
+    assert.equal(JSON.stringify(docsResult).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(docsResult).includes('"skills"'), false);
     const directApi = await fetch(new URL('/api/v1/', baseUrl));
     assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));
