@@ -1,14 +1,14 @@
 # Agents on Lightning
 
 This repo runs one Node app.
-That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey/`, and `/journey/three`.
+That same app serves the hosted MCP interface, internal agent API routes, `/llms.txt`, MCP docs, `/journey/`, and `/journey/three`.
 
 ## Source Of Truth
 
 - Live routes: `src/index.js` and `src/routes/*.js`
 - Route metadata: `// @agent-route { ... }` comments in those route files
 - Route comment schema: `docs/agent-route-schema.md`
-- Agent docs: `docs/llms.txt`, `docs/skills/*.txt`, and `docs/knowledge/*.md`
+- Agent docs: `docs/llms.txt`, `docs/llms-mcp.txt`, and `docs/mcp/*.txt`
 - Manifest builder: `src/monitor/agent-surface-inventory.js`
 - Journey APIs: `src/routes/journey-routes.js`
 - Journey state and DuckDB read/write: `src/monitor/journey-monitor.js` and `monitoring_dashboards/live/analytics-db.mjs`
@@ -20,7 +20,9 @@ That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey
 
 ## Simple Rules
 
-- If the dashboard looks wrong, fix the route files or the agent docs first.
+- External agents use `/mcp`; `/api/v1/*` routes are internal implementation routes in production.
+- Legacy skill docs stay in the repo but are not the public agent interface.
+- If the dashboard looks wrong, fix the route files or MCP docs first.
 - The manifest is generated from route comments plus agent docs.
 - The dashboards read the manifest. They are not the source of truth.
 - DuckDB stores agent interaction history. It is not the source of route definitions.
@@ -39,6 +41,6 @@ That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey
 
 1. Edit the real route in `src/index.js` or `src/routes/*.js`
 2. Update its `@agent-route` comment
-3. Update the matching file in `docs/llms.txt` or `docs/skills/*.txt`
+3. Update the matching file in `docs/llms.txt`, `docs/llms-mcp.txt`, or `docs/mcp/*.txt`
 4. Restart the app
 5. Check `/api/journey/manifest`, `/journey/`, and `/journey/three`

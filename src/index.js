@@ -5,6 +5,7 @@
 
 import express from 'express';
 // cors available if needed for more complex setups
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { realpathSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -12,7 +13,13 @@ import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
 import { globalRateLimit } from './identity/rate-limiter.js';
 import { auditMiddleware } from './identity/audit-log.js';
-import { handleJsonBodyError, requireJsonWriteContent } from './identity/request-security.js';
+import {
+  createMcpOnlyApiGuard,
+  createMcpOnlyDocsGuard,
+  handleJsonBodyError,
+  isMcpOnlyExternalAccessMode,
+  requireJsonWriteContent,
+} from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
 import { journeyRoutes } from './routes/journey-routes.js';
 import { mcpRoutes } from './routes/mcp-routes.js';
@@ -50,8 +57,20 @@ export function getJourneyDbPath(env = process.env) {
   return undefined;
 }
 
+export function getInternalMcpSecret(env = process.env) {
+  const explicit = typeof env.AOL_INTERNAL_MCP_SECRET === 'string'
+    ? env.AOL_INTERNAL_MCP_SECRET.trim()
+    : '';
+  if (explicit) return explicit;
+
+  const generated = randomBytes(32).toString('hex');
+  env.AOL_INTERNAL_MCP_SECRET = generated;
+  return generated;
+}
+
 export async function startServer() {
   const { host, port, role } = getListenConfig();
+  const internalMcpSecret = getInternalMcpSecret();
   const serverSlot = reserveServerSlot({ role, host, port });
   const journeyMonitor = await startJourneyMonitor({
     dbPath: getJourneyDbPath(),
@@ -91,13 +110,17 @@ export async function startServer() {
       res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Operator-Secret');
       res.header('Vary', 'Origin');
     }
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    if (req.method === 'OPTIONS') {
+      if (isMcpOnlyExternalAccessMode() && req.path.startsWith('/api/v1/')) return next();
+      return res.sendStatus(204);
+    }
     next();
   });
 
   // Rate limiting + audit
   app.use(globalRateLimit);
   app.use(auditMiddleware);
+  app.use(createMcpOnlyApiGuard({ internalMcpSecret }));
   app.use(requireJsonWriteContent);
 
   const docsDir = join(__dirname, '..', 'docs');
@@ -109,7 +132,7 @@ export async function startServer() {
       description: 'AI agent platform for the Lightning Network',
       docs: '/llms.txt',
       mcp_docs: '/llms-mcp.txt',
-      api: '/api/v1/',
+      api: 'internal-only via MCP tools',
       preferred_machine_interface: '/mcp',
       machine_start: '/mcp',
       machine_note: 'Agents with MCP support should start at /mcp. Humans can read /llms.txt.',
@@ -148,6 +171,7 @@ export async function startServer() {
   });
 
   // Serve docs statically
+  app.use('/docs', createMcpOnlyDocsGuard());
   app.use('/docs', express.static(docsDir));
 
   // Start daemon
@@ -164,7 +188,7 @@ export async function startServer() {
   const internalBaseUrl = process.env.AOL_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
   const publicBaseUrl = process.env.AOL_PUBLIC_BASE_URL || 'https://agentsonlightning.com';
 
-  app.use(mcpRoutes({ internalBaseUrl, publicBaseUrl }));
+  app.use(mcpRoutes({ internalBaseUrl, publicBaseUrl, internalMcpSecret }));
 
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));

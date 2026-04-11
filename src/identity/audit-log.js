@@ -97,6 +97,8 @@ export function logAuthFailure(ip, hadBearerToken, routePath = null, method = nu
 export function logAuthorizationDenied(route, agentId, resourceId, ip) {
   return _append({
     event: 'authz_denied',
+    path: route || null,
+    endpoint: route || null,
     route,
     agent_id: agentId || null,
     resource_id: resourceId || null,
@@ -202,6 +204,11 @@ export function auditMiddleware(req, res, next) {
   };
   const runId = getRequestRunId(req);
   req.dashboardRunId = runId;
+  const mcpMeta = {};
+  const mcpToolName = req.get?.('x-aol-mcp-tool') || null;
+  const mcpRequestId = req.get?.('x-aol-mcp-request-id') || null;
+  if (mcpToolName) mcpMeta.mcp_tool_name = String(mcpToolName).slice(0, 120);
+  if (mcpRequestId) mcpMeta.mcp_request_id = String(mcpRequestId).slice(0, 120);
   req.dashboardBindAgent = (agentId, agentName = null) => {
     if (!agentId) return;
     void recordJourneyEvent({
@@ -212,6 +219,7 @@ export function auditMiddleware(req, res, next) {
       agent_name: agentName || null,
       method: req.method,
       path: originalPath,
+      ...mcpMeta,
       ...surfaceMeta,
       ts: Date.now(),
     });
@@ -230,6 +238,7 @@ export function auditMiddleware(req, res, next) {
     ip: requestIp,
     accept: accept || null,
     doc_kind,
+    ...mcpMeta,
     ...surfaceMeta,
     ts: start,
   });
@@ -249,6 +258,7 @@ export function auditMiddleware(req, res, next) {
       agent_name: req.agentProfile?.name || null,
       accept: accept || null,
       doc_kind,
+      ...mcpMeta,
       ...req.dashboardResultMeta,
       ...surfaceMeta,
       ts: Date.now(),
@@ -266,6 +276,7 @@ export function auditMiddleware(req, res, next) {
       agent_name: req.agentProfile?.name || null,
       accept: accept || null,
       doc_kind,
+      ...mcpMeta,
       ...surfaceMeta,
     });
   });

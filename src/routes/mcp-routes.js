@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
@@ -6,7 +8,14 @@ import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { rateLimit } from '../identity/rate-limiter.js';
+import {
+  INTERNAL_MCP_HEADER_NAME,
+  INTERNAL_MCP_REQUEST_HEADER_NAME,
+  INTERNAL_MCP_TOOL_HEADER_NAME,
+} from '../identity/request-security.js';
 import { MCP_DOCS, MCP_TASK_PROMPTS } from '../mcp/catalog.js';
+import { recordJourneyEvent } from '../monitor/journey-monitor.js';
+import { getSocketAddress } from '../identity/request-ip.js';
 import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +27,7 @@ const ALLOWED_HEADER_NAMES = new Set([
   'x-idempotency-key',
 ]);
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
-const TOOL_METHODS = ['GET', 'POST', 'PUT', 'DELETE'];
+const mcpToolContext = new AsyncLocalStorage();
 const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_health',
@@ -50,7 +59,7 @@ const MCP_TOOL_SPECS = [
   },
   {
     name: 'aol_list_skills',
-    description: 'List the canonical public skill files.',
+    description: 'List the canonical MCP docs.',
   },
   {
     name: 'aol_get_platform_status',
@@ -484,10 +493,6 @@ const MCP_TOOL_SPECS = [
     name: 'aol_request_help',
     description: 'Ask the help route with a bearer token.',
   },
-  {
-    name: 'aol_request',
-    description: 'Send one request to this site only. Use the MCP docs to know the right path and JSON shape.',
-  },
 ];
 
 function getOrigin(req, fallback) {
@@ -610,6 +615,7 @@ async function readResponseBody(response) {
 
 async function performSiteRequest({
   internalBaseUrl,
+  internalMcpSecret = process.env.AOL_INTERNAL_MCP_SECRET,
   method,
   path,
   headers,
@@ -621,7 +627,7 @@ async function performSiteRequest({
     url = new URL(path, internalBaseUrl);
   } catch {
     return {
-      error: 'Use a valid same-origin path like /api/v1/skills.',
+      error: 'Use a valid same-origin path like /docs/mcp/index.txt.',
     };
   }
 
@@ -640,6 +646,16 @@ async function performSiteRequest({
   const requestHeaders = sanitizeHeaders(headers);
   if (json !== undefined && !requestHeaders['Content-Type'] && !requestHeaders['content-type']) {
     requestHeaders['Content-Type'] = 'application/json';
+  }
+  if (typeof internalMcpSecret === 'string' && internalMcpSecret.trim()) {
+    requestHeaders[INTERNAL_MCP_HEADER_NAME] = internalMcpSecret.trim();
+  }
+  const context = mcpToolContext.getStore();
+  if (context?.toolName) {
+    requestHeaders[INTERNAL_MCP_TOOL_HEADER_NAME] = context.toolName;
+  }
+  if (context?.requestId) {
+    requestHeaders[INTERNAL_MCP_REQUEST_HEADER_NAME] = context.requestId;
   }
 
   const response = await fetch(url, {
@@ -780,12 +796,61 @@ function buildDiscoveryDocument({ origin }) {
   };
 }
 
+function inferToolStatus(result, fallback = 200) {
+  const status = result?.structuredContent?.status;
+  if (Number.isInteger(status)) return status;
+  if (result?.isError) return 400;
+  return fallback;
+}
+
+function instrumentMcpTools(server) {
+  const registerTool = server.registerTool.bind(server);
+  server.registerTool = (name, config, handler) => registerTool(name, config, async (input, extra) => {
+    const parentContext = mcpToolContext.getStore() || {};
+    const context = { ...parentContext, toolName: name };
+    const start = Date.now();
+    let status = 200;
+    let failed = false;
+
+    try {
+      return await mcpToolContext.run(context, async () => {
+        const result = await handler(input, extra);
+        status = inferToolStatus(result);
+        failed = Boolean(result?.isError);
+        return result;
+      });
+    } catch (error) {
+      status = 500;
+      failed = true;
+      throw error;
+    } finally {
+      void recordJourneyEvent({
+        event: 'mcp_tool_call',
+        method: 'MCP',
+        path: `mcp:${name}`,
+        endpoint: `mcp:${name}`,
+        mcp_tool_name: name,
+        mcp_request_id: context.requestId || null,
+        ip: context.clientIp || null,
+        status,
+        success: !failed && status < 400,
+        duration_ms: Date.now() - start,
+        domain: 'mcp',
+        surface_type: 'mcp_tool',
+        surface_key: `MCP mcp:${name}`,
+        ts: Date.now(),
+      });
+    }
+  });
+}
+
 function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   const server = new McpServer({
     name: 'agents-on-lightning-mcp',
     version: '1.0.0',
     websiteUrl: publicBaseUrl,
   });
+  instrumentMcpTools(server);
 
   for (const doc of MCP_DOCS) {
     const uri = getDocUrl(publicBaseUrl, doc.file);
@@ -835,24 +900,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
       ],
     }));
   }
-
-  server.registerTool('aol_request', {
-    description: 'Send one same-origin request to Agents on Lightning. This tool does not invent ids, signatures, or flow steps for you.',
-    inputSchema: {
-      method: z.enum(TOOL_METHODS).describe('HTTP method.'),
-      path: z.string().describe('Same-origin path like /api/v1/skills or /docs/mcp/index.txt.'),
-      headers: z.record(z.string(), z.string()).optional().describe('Only Authorization, Content-Type, Idempotency-Key, and X-Idempotency-Key are allowed.'),
-      query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('Optional query string values.'),
-      json: z.any().optional().describe('Optional JSON request body for POST or PUT calls.'),
-    },
-  }, async ({ method, path, headers, query, json }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method,
-    path,
-    headers,
-    query,
-    json,
-  })));
 
   server.registerTool('aol_get_health', {
     description: 'Read the public health endpoint.',
@@ -918,7 +965,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_list_skills', {
-    description: 'List the canonical public skill files.',
+    description: 'List the canonical MCP docs.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2580,7 +2627,10 @@ function jsonRpcError(res, status, message) {
   });
 }
 
-export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonlightning.com' } = {}) {
+export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonlightning.com', internalMcpSecret } = {}) {
+  if (typeof internalMcpSecret === 'string' && internalMcpSecret.trim()) {
+    process.env.AOL_INTERNAL_MCP_SECRET = internalMcpSecret.trim();
+  }
   const router = Router();
   const mcpRate = rateLimit('mcp');
 
@@ -2610,11 +2660,17 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       transport.onclose = () => { void cleanup(); };
 
       const origin = getOrigin(req, publicBaseUrl);
-      server = buildMcpServer({ internalBaseUrl, publicBaseUrl: origin });
-      res.once('close', () => { void cleanup(); });
-      res.once('finish', () => { void cleanup(); });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      const context = {
+        requestId: randomUUID(),
+        clientIp: getSocketAddress(req) || null,
+      };
+      await mcpToolContext.run(context, async () => {
+        server = buildMcpServer({ internalBaseUrl, publicBaseUrl: origin });
+        res.once('close', () => { void cleanup(); });
+        res.once('finish', () => { void cleanup(); });
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      });
     } catch (error) {
       console.error('[mcp] POST /mcp failed:', error);
       await cleanup();
@@ -2657,7 +2713,8 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       docs: {
         llms_txt: '/llms.txt',
         llms_mcp: '/llms-mcp.txt',
-        skills: '/api/v1/skills',
+        mcp_docs: '/api/v1/skills',
+        mcp_start: '/docs/mcp/index.txt',
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',
       },
@@ -2668,7 +2725,7 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       capabilities: {
         public_registration: true,
         zero_platform_fees: true,
-        separate_mcp_track: true,
+        mcp_only_agent_interface: true,
         hosted_mcp_server: true,
       },
     });

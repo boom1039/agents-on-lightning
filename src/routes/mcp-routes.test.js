@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { configureRateLimiterPolicy } from '../identity/rate-limiter.js';
+import { createMcpOnlyApiGuard } from '../identity/request-security.js';
 import { mcpRoutes } from './mcp-routes.js';
 
 async function startApp() {
@@ -25,6 +26,11 @@ async function startApp() {
 
   const app = express();
   app.use(express.json());
+  const internalMcpSecret = 'test-internal-mcp-secret';
+  app.use(createMcpOnlyApiGuard({
+    mode: 'mcp_only',
+    internalMcpSecret,
+  }));
   app.get('/', (_req, res) => res.json({ ok: true }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/llms.txt', (_req, res) => res.type('text/plain').send('root llms'));
@@ -38,7 +44,7 @@ async function startApp() {
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  app.use(mcpRoutes({ internalBaseUrl: baseUrl, publicBaseUrl: baseUrl }));
+  app.use(mcpRoutes({ internalBaseUrl: baseUrl, publicBaseUrl: baseUrl, internalMcpSecret }));
   return { server, baseUrl };
 }
 
@@ -64,9 +70,14 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const tools = await client.listTools();
     const toolNames = (tools.tools || []).map((tool) => tool.name);
     assert(toolNames.includes('aol_get_root'));
+    assert(!toolNames.includes('aol_request'));
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
+    const apiResult = await client.callTool({ name: 'aol_get_api_root', arguments: {} });
+    assert.equal(Boolean(apiResult.isError), false);
+    const directApi = await fetch(new URL('/api/v1/', baseUrl));
+    assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));
 
     const closeResponse = await fetch(new URL('/mcp', baseUrl), { method: 'DELETE' });

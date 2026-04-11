@@ -124,7 +124,9 @@ async function unitProof() {
     'src/lnd/client.test.js',
     'src/monitor/journey-monitor.test.js',
     'src/routes/mcp-routes.test.js',
+    'src/identity/request-security.test.js',
     'src/identity/request-run.test.js',
+    'src/mcp/catalog.test.js',
   ];
   const result = await runCommand(process.execPath, ['--test', ...files], { timeoutMs: 240_000 });
   return {
@@ -327,8 +329,8 @@ async function localLoadProof() {
 async function runProdProofs() {
   const prodChecks = [
     ['prod_smoke', 'bash', ['deploy/prod-check.sh'], {}, 180_000],
-    ['prod_mcp', process.execPath, ['scripts/test-hosted-mcp.mjs'], { AOL_MCP_BASE_URL: 'https://agentsonlightning.com' }, 240_000],
-    ['prod_surface', process.execPath, ['scripts/audit-public-surface.mjs'], { AOL_AUDIT_BASE_URL: 'https://agentsonlightning.com' }, 240_000],
+    ['prod_mcp', process.execPath, ['scripts/test-hosted-mcp.mjs'], { AOL_MCP_BASE_URL: 'https://agentsonlightning.com', AOL_EXPECT_MCP_ONLY: '1' }, 240_000],
+    ['prod_surface', process.execPath, ['scripts/audit-public-surface.mjs'], { AOL_AUDIT_BASE_URL: 'https://agentsonlightning.com', AOL_EXPECT_MCP_ONLY: '1' }, 240_000],
   ];
   for (const [name, command, commandArgs, env, timeoutMs] of prodChecks) {
     await runSettlement(name, async () => {

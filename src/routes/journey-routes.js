@@ -318,6 +318,23 @@ export function journeyRoutes() {
     getJourneyMonitor().agentJourney(req.params.id)
   ));
 
+  router.get('/api/analytics/schema', analyticsHandler(() =>
+    getJourneyMonitor().eventSchema()
+  ));
+
+  router.get('/api/analytics/events', analyticsHandler(req =>
+    getJourneyMonitor().latestEvents({
+      limit: intParam(req.query.limit) || 100,
+    })
+  ));
+
+  router.get('/api/analytics/mcp-activity', analyticsHandler(req =>
+    getJourneyMonitor().mcpActivity({
+      limit: intParam(req.query.limit) || 100,
+      since: intParam(req.query.since),
+    })
+  ));
+
   router.post('/api/analytics/query', async (req, res) => {
     const rejection = rejectUnauthorizedOperatorRoute(req, res);
     if (rejection) return rejection;

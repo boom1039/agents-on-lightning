@@ -25,7 +25,6 @@ Use the named MCP read tools first when they fit.
 - `aol_get_platform_status`
 - `aol_get_node_analysis`
 - `aol_suggest_peers`
-- use `aol_request` only if a named tool is truly missing
 
 ## Rules
 

@@ -21,6 +21,9 @@ export { getSocketAddress } from './request-ip.js';
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const HOSTNAME_RE = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/;
+export const INTERNAL_MCP_HEADER_NAME = 'x-aol-internal-mcp';
+export const INTERNAL_MCP_TOOL_HEADER_NAME = 'x-aol-mcp-tool';
+export const INTERNAL_MCP_REQUEST_HEADER_NAME = 'x-aol-mcp-request-id';
 
 export function isLoopbackAddress(address) {
   return LOOPBACKS.has(address);
@@ -36,6 +39,10 @@ export function areTestRoutesEnabled() {
 
 export function areOperatorRoutesEnabled() {
   return process.env.ENABLE_OPERATOR_ROUTES === '1';
+}
+
+export function isMcpOnlyExternalAccessMode(env = process.env) {
+  return String(env.AOL_EXTERNAL_ACCESS_MODE || '').trim().toLowerCase() === 'mcp_only';
 }
 
 export function hasConfiguredOperatorSecret() {
@@ -62,6 +69,16 @@ function getBasicAuthPassword(req) {
   }
 }
 
+function getOriginalPath(req) {
+  return ((req.originalUrl || req.url || req.path || '').split('?')[0]) || req.path || '';
+}
+
+function hasValidInternalMcpSecret(req, internalMcpSecret) {
+  if (typeof internalMcpSecret !== 'string' || !internalMcpSecret.trim()) return false;
+  const candidate = req.get(INTERNAL_MCP_HEADER_NAME);
+  return typeof candidate === 'string' && safeSecretEqual(candidate, internalMcpSecret.trim());
+}
+
 export function hasValidOperatorSecret(req) {
   if (!hasConfiguredOperatorSecret()) return false;
   const expected = process.env.OPERATOR_API_SECRET.trim();
@@ -77,6 +94,53 @@ export function requireJsonWriteContent(req, res, next) {
 
   logValidationFailure(req.path, 'content-type', req.headers['content-type'] || 'missing');
   return err415JsonRequired(res);
+}
+
+export function rejectExternalAgentApiRoute(req, res, {
+  mode = process.env.AOL_EXTERNAL_ACCESS_MODE,
+  internalMcpSecret = process.env.AOL_INTERNAL_MCP_SECRET,
+} = {}) {
+  if (!isMcpOnlyExternalAccessMode({ AOL_EXTERNAL_ACCESS_MODE: mode })) return null;
+
+  const path = getOriginalPath(req);
+  if (!path.startsWith('/api/v1/')) return null;
+
+  if (isLoopbackRequest(req) && hasValidInternalMcpSecret(req, internalMcpSecret)) {
+    return null;
+  }
+
+  logAuthorizationDenied(path, req.agentId || null, null, getSocketAddress(req) || null);
+  return err404HiddenRoute(res);
+}
+
+export function createMcpOnlyApiGuard(options = {}) {
+  return function mcpOnlyApiGuard(req, res, next) {
+    const rejection = rejectExternalAgentApiRoute(req, res, options);
+    if (rejection) return rejection;
+    return next();
+  };
+}
+
+export function rejectExternalDocRoute(req, res, {
+  mode = process.env.AOL_EXTERNAL_ACCESS_MODE,
+} = {}) {
+  if (!isMcpOnlyExternalAccessMode({ AOL_EXTERNAL_ACCESS_MODE: mode })) return null;
+
+  const path = getOriginalPath(req);
+  if (!path.startsWith('/docs/')) return null;
+  if (path.startsWith('/docs/mcp/')) return null;
+  if (isLoopbackRequest(req)) return null;
+
+  logAuthorizationDenied(path, req.agentId || null, null, getSocketAddress(req) || null);
+  return err404HiddenRoute(res);
+}
+
+export function createMcpOnlyDocsGuard(options = {}) {
+  return function mcpOnlyDocsGuard(req, res, next) {
+    const rejection = rejectExternalDocRoute(req, res, options);
+    if (rejection) return rejection;
+    return next();
+  };
 }
 
 export function handleJsonBodyError(err, req, res, next) {

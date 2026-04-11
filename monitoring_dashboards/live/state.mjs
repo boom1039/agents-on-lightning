@@ -534,7 +534,7 @@ export class LiveJourneyState {
       return normalized;
     }
 
-    if (event.event === 'request_finish' || event.event === 'api_request') {
+    if (event.event === 'request_finish' || event.event === 'api_request' || event.event === 'mcp_tool_call') {
       const surface = describeJourneySurface(event);
       if (surface.surfaceType === 'other') return null;
       const route = this._ensureRoute(surface);
@@ -577,7 +577,7 @@ export class LiveJourneyState {
       const failureReason = trimText(event.failure_reason || event.error || event.message);
 
       const normalized = {
-        event: 'request_finish',
+        event: event.event === 'mcp_tool_call' ? 'mcp_tool_call' : 'request_finish',
         ts,
         trace_id: event.trace_id || null,
         agent_id: agentId,

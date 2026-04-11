@@ -5,11 +5,12 @@ import {
   resolveTrackedSurface,
 } from '../../src/monitor/agent-surface-inventory.js';
 
-export const JOURNEY_DOMAIN_ORDER = [...DOMAIN_ORDER, 'other'];
+export const JOURNEY_DOMAIN_ORDER = ['mcp', ...DOMAIN_ORDER, 'other'];
 const ROUTE_BY_KEY = new Map(ROUTE_CATALOG.map((route) => [route.key, route]));
 const DOC_BY_KEY = new Map(DOC_CATALOG.map((doc) => [doc.key, doc]));
 
 function classifyFallbackDomain(path = '') {
+  if (path.startsWith('mcp:')) return 'mcp';
   if (path === '/' || path === '/llms.txt' || path === '/health' || path.startsWith('/docs/')) return 'app-level';
   if (
     path === '/api/v1/'
@@ -38,11 +39,40 @@ function classifyFallbackDomain(path = '') {
 }
 
 function classifyFallbackGroup(path = '') {
+  if (path.startsWith('mcp:')) return 'tools';
   if (path === '/' || path === '/llms.txt' || path === '/health') return 'app';
   if (path.startsWith('/docs/')) return 'docs';
   if (!path.startsWith('/api/v1/')) return 'other';
   const parts = path.split('/').filter(Boolean);
   return parts[2] || 'root';
+}
+
+function toMcpSurface(toolName, rawPath = '') {
+  const normalizedName = toolName || rawPath.replace(/^mcp:/, '') || '[unknown-tool]';
+  const path = `mcp:${normalizedName}`;
+  return {
+    routeKey: `MCP ${path}`,
+    routeLabel: normalizedName,
+    routePath: path,
+    rawPath: rawPath || path,
+    method: 'MCP',
+    domain: 'mcp',
+    group: 'tools',
+    surfaceType: 'mcp_tool',
+    canonical: true,
+    summary: 'Hosted MCP named tool call.',
+    auth: null,
+    security: null,
+    sourceFile: null,
+    sourceLine: null,
+    tags: ['mcp', 'tool'],
+    docId: null,
+    docTitle: null,
+    docKind: null,
+    docIds: [],
+    linkedRouteKeys: [],
+    linkedDocIds: [],
+  };
 }
 
 function toSurface({ kind, entry, rawPath }) {
@@ -75,6 +105,9 @@ function toSurface({ kind, entry, rawPath }) {
 export function describeJourneySurface(event) {
   const method = String(event?.method || 'GET').toUpperCase();
   const path = String(event?.path || event?.rawPath || '');
+  if (event?.mcp_tool_name || path.startsWith('mcp:')) {
+    return toMcpSurface(event?.mcp_tool_name || null, path);
+  }
   const surfaceKey = typeof event?.surface_key === 'string' ? event.surface_key : null;
   const exactDoc = surfaceKey ? DOC_BY_KEY.get(surfaceKey) : null;
   if (exactDoc) {

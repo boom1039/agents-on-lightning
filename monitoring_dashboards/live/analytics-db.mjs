@@ -402,6 +402,49 @@ export class AnalyticsDB {
     `, agentId));
   }
 
+  async eventSchema() {
+    const columns = deBigInt(await this.db.all(`PRAGMA table_info('events')`));
+    return {
+      table: 'events',
+      columns: columns.map((column) => ({
+        name: column.name,
+        type: column.type,
+        nullable: column.notnull === 0,
+        default: column.dflt_value ?? null,
+        primary_key: column.pk === 1,
+      })),
+    };
+  }
+
+  async latestEvents({ limit = 100 } = {}) {
+    return this.listEvents({
+      limit: Math.min(Math.max(Number(limit) || 100, 1), 500),
+      order: 'DESC',
+    });
+  }
+
+  async mcpActivity({ limit = 100, since } = {}) {
+    const where = [
+      `(event = 'mcp_tool_call' OR CAST(extra AS VARCHAR) LIKE '%"mcp_tool_name"%')`,
+    ];
+    const params = [];
+    if (since) {
+      where.push('ts >= ?');
+      params.push(since);
+    }
+    params.push(Math.min(Math.max(Number(limit) || 100, 1), 500));
+
+    const rows = await this.db.all(`
+      SELECT ts, event, method, path, status, duration_ms, agent_id, ip, domain, doc_kind, extra
+      FROM events
+      WHERE ${where.join(' AND ')}
+      ORDER BY ts DESC
+      LIMIT ?
+    `, ...params);
+
+    return rows.map(decodeEventRow);
+  }
+
   /** Raw stored events for rebuilding live state or custom audit views. */
   async listEvents({
     since,

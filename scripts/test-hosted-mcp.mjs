@@ -61,6 +61,14 @@ async function fetchJson(pathname) {
   return body;
 }
 
+async function fetchStatus(pathname) {
+  const response = await fetch(new URL(pathname, baseUrl), {
+    headers: { 'user-agent': 'aol-mcp-smoke' },
+  });
+  await response.arrayBuffer();
+  return response.status;
+}
+
 function getStructuredBody(result) {
   return result?.structuredContent?.body || null;
 }
@@ -148,6 +156,7 @@ try {
   const toolNames = getToolNames(tools);
   const promptNames = getPromptNames(prompts);
   const resourceUris = getResourceUris(resources);
+  assert(!toolNames.includes('aol_request'), 'Removed generic MCP request tool is still exposed');
 
   for (const toolName of requiredTools) {
     assert(toolNames.includes(toolName), `Missing MCP tool ${toolName}`);
@@ -156,6 +165,12 @@ try {
     assert(promptNames.includes(promptName), `Missing MCP prompt ${promptName}`);
   }
   assert(resourceUris.some((uri) => uri.endsWith('/docs/mcp/index.txt')), 'Missing MCP index resource');
+
+  if (process.env.AOL_EXPECT_MCP_ONLY === '1') {
+    assert(await fetchStatus('/api/v1/') === 404, 'MCP-only mode did not hide /api/v1/');
+    assert(await fetchStatus('/docs/skills/discovery.txt') === 404, 'MCP-only mode did not hide legacy skill docs');
+    assert(await fetchStatus('/docs/mcp/index.txt') === 200, 'MCP-only mode did not keep MCP docs public');
+  }
 
   const startPrompt = await client.getPrompt({
     name: 'start_here',

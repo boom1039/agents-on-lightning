@@ -17,6 +17,7 @@ That command owns the full deploy shape:
 
 Do not use `git pull`, manual `scp`, or direct lower-level scripts as the normal prod deploy path.
 Do not commit real env files, config files, certs, macaroons, keys, or live data.
+Production external agent access is MCP-only: public clients use `/mcp`; `/api/v1/*` is an internal route layer.
 
 ## Canonical Deploy
 
@@ -94,12 +95,15 @@ AOL_SERVER_ROLE=prod
 AOL_CONFIG_PATH=/etc/agents-on-lightning/config.yaml
 AOL_DATA_DIR=/var/lib/agents-on-lightning
 AOL_JOURNEY_DB_PATH=/var/lib/agents-on-lightning/data/journey-analytics.duckdb
+AOL_EXTERNAL_ACCESS_MODE=mcp_only
+AOL_INTERNAL_BASE_URL=http://127.0.0.1:3302
 HOST=127.0.0.1
 PORT=3302
 TRUST_PROXY=1
 PYTHON3=/usr/bin/python3
 ANTHROPIC_API_KEY_FILE=/etc/agents-on-lightning/anthropic_api_key
 OPERATOR_API_SECRET=PRIVATE_VALUE
+# ENABLE_OPERATOR_ROUTES stays unset or 0 unless doing a temporary local operator SQL investigation.
 ```
 
 Private config file on EC2:
@@ -175,6 +179,7 @@ Default artifact includes:
 11. `package-lock.json`
 
 It excludes `.git`, `plans`, `output`, tests, scratch scripts, and other non-runtime files.
+`docs/skills/` remains packaged for local/internal compatibility, but public prod access hides it in MCP-only mode.
 Leave `AOL_RUNTIME_INCLUDE_NODE_MODULES` unset for macOS-to-Linux prod deploys.
 
 ## Laptop LND Tunnel

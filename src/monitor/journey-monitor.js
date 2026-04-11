@@ -11,6 +11,7 @@ const LIVE_STATE_EVENT_TYPES = new Set([
   'agent_bound',
   'request_start',
   'request_finish',
+  'mcp_tool_call',
   'auth_failure',
   'authz_denied',
   'validation_failure',
@@ -564,6 +565,18 @@ class JourneyMonitor {
 
   async agentJourney(agentId) {
     return this.analyticsDb.agentJourney(agentId);
+  }
+
+  async eventSchema() {
+    return this.analyticsDb.eventSchema();
+  }
+
+  async latestEvents(options = {}) {
+    return this.analyticsDb.latestEvents(options);
+  }
+
+  async mcpActivity(options = {}) {
+    return this.analyticsDb.mcpActivity(options);
   }
 
   async query(sql, params = []) {

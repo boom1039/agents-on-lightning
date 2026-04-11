@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { getAgentSurfaceManifest } from '../src/monitor/agent-surface-inventory.js';
 
 const baseUrl = process.env.AOL_AUDIT_BASE_URL || 'https://agentsonlightning.com';
+const expectMcpOnly = process.env.AOL_EXPECT_MCP_ONLY === '1';
 const outDir = resolve(process.cwd(), 'output');
 const now = new Date();
 const stamp = now.toISOString().replace(/[:.]/g, '-');
@@ -117,6 +118,8 @@ async function buildSamples() {
     invoice: 'lnbc2500u1p5av7stpp5guczk6964hq3e83c8wmlywcwrxzg9ghq2krmyjr42r5m0rezdthqdqqcqzzsxqrrs0fppqgfmutk00c0wzmwcm6hcwljx9u4zchjaasp5ey5lmp0vuwkd30gz0vpu2p83wpa4jmtm7f6sjy208ra782z8pf5s9qxpqysgqtu6vukaa4twsqxh5wj2afjh0eyamrjzml42j0elwtxgkm4zepyj3q7xxc0kjwxnk95vpmrz0c83s4j0yhw7xfaqgzdk58v2s9y25npsphzlya6',
   };
 
+  if (expectMcpOnly) return samples;
+
   const [platform, channels, leaderboard, tournaments] = await Promise.all([
     fetchJson('/api/v1/platform/status'),
     fetchJson('/api/v1/market/channels?limit=5'),
@@ -200,6 +203,7 @@ const report = {
   public_routes: 0,
   agent_routes: 0,
   skipped_routes: [],
+  mcp_only_hidden_routes: [],
   unexpected_public_agent_routes: [],
   public_payload_risks: [],
   public_ok: [],
@@ -216,6 +220,20 @@ for (const route of manifest.routes) {
   const req = buildRequest(route, samples);
   try {
     const result = await fetchJson(req.path, req);
+
+    if (expectMcpOnly && route.path.startsWith('/api/v1/')) {
+      if (result.status === 404) {
+        report.mcp_only_hidden_routes.push({ key: route.key, status: result.status, url: result.url });
+      } else {
+        report.unexpected_public_agent_routes.push({
+          key: route.key,
+          status: result.status,
+          url: result.url,
+          sample: shortJson(result.body || result.text),
+        });
+      }
+      continue;
+    }
 
     if (route.auth === 'public') {
       report.public_routes += 1;
@@ -272,6 +290,7 @@ console.log(`audit_file=${outPath}`);
 console.log(`manifest_routes=${report.manifest_routes}`);
 console.log(`public_routes_checked=${report.public_routes}`);
 console.log(`agent_routes_checked=${report.agent_routes}`);
+console.log(`mcp_only_hidden_routes=${report.mcp_only_hidden_routes.length}`);
 console.log(`unexpected_public_agent_routes=${report.unexpected_public_agent_routes.length}`);
 console.log(`public_payload_risks=${report.public_payload_risks.length}`);
 console.log(`probe_failures=${report.probe_failures.length}`);
@@ -280,3 +299,11 @@ console.log('');
 printSection('unexpected_public_agent_routes', report.unexpected_public_agent_routes);
 printSection('public_payload_risks', report.public_payload_risks);
 printSection('probe_failures', report.probe_failures);
+
+if (
+  report.unexpected_public_agent_routes.length > 0
+  || report.public_payload_risks.length > 0
+  || report.probe_failures.length > 0
+) {
+  process.exitCode = 1;
+}

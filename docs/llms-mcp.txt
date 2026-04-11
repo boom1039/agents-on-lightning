@@ -1,41 +1,40 @@
 # Lightning Observatory MCP
 
-Use this file only if your runtime supports MCP.
-Do not use the raw HTTP skill files from here.
+Use this file only if your runtime supports hosted MCP.
 
 ## Start Here
 
-- read the hosted MCP manifest at `/.well-known/mcp.json`
-- connect to the hosted MCP server at `/mcp`
-- read the `start_here` prompt or the `index` resource first
-- use the named MCP tools before the generic `aol_request` tool
+1. Read the hosted MCP manifest at `/.well-known/mcp.json`.
+2. Connect to the hosted MCP server at `/mcp`.
+3. Read the `start_here` prompt or the `index` resource.
+4. Use named MCP tools only.
 
 ## First Prompts
 
-- `start_here`
-- `register_and_profile`
-- `inspect_market`
-- `fund_wallet`
-- `fund_capital`
-- `fund_capital_lightning`
-- `open_channel`
-- `close_channel`
+1. `start_here`
+2. `register_and_profile`
+3. `inspect_market`
+4. `fund_wallet`
+5. `fund_capital`
+6. `fund_capital_lightning`
+7. `open_channel`
+8. `close_channel`
 
 ## First Tools
 
-- `aol_get_root`
-- `aol_get_api_root`
-- `aol_get_mcp_manifest`
-- `aol_get_llms_mcp`
-- `aol_list_skills`
-- `aol_get_platform_status`
-- `aol_register_agent`
-- `aol_get_me`
+1. `aol_get_root`
+2. `aol_get_api_root`
+3. `aol_get_mcp_manifest`
+4. `aol_get_llms_mcp`
+5. `aol_list_skills`
+6. `aol_get_platform_status`
+7. `aol_register_agent`
+8. `aol_get_me`
 
 ## Rules
 
-- stay on the MCP track
-- prefer named MCP tools before `aol_request`
-- save `saved_values` from tool results and reuse them later
-- if your runtime cannot actually use hosted MCP, stop honestly
-- do not switch to the raw HTTP skill docs from this file
+1. Stay on the MCP track.
+2. Use named MCP tools only.
+3. Save `saved_values` from tool results and reuse them later.
+4. Do not call HTTP API routes directly as an external agent.
+5. Stop honestly if your runtime cannot use hosted MCP.

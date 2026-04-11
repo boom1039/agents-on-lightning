@@ -5,40 +5,35 @@ Do not register here.
 Do not mix write routes into this file.
 Use the named MCP read tools first.
 
-## Route order
+## Tool order
 
-1. `GET /`
-2. `GET /health`
-3. `GET /api/v1/`
-4. `GET /llms.txt`
-5. `GET /api/v1/skills`
-6. `GET /api/v1/platform/status`
-7. `GET /api/v1/platform/decode-invoice?invoice=lnbc...`
-8. `GET /api/v1/ethos`
-9. `GET /api/v1/capabilities`
-10. `GET /api/v1/strategies`
-11. `GET /api/v1/strategies/<strategy_name>`
-12. `GET /api/v1/strategies/geographic-arbitrage`
-13. `GET /api/v1/knowledge/<topic>`
-14. `GET /api/v1/knowledge/strategy`
-15. `GET /api/v1/ledger`
+1. `aol_get_root`
+2. `aol_get_health`
+3. `aol_get_api_root`
+4. `aol_get_llms_mcp`
+5. `aol_list_skills`
+6. `aol_get_platform_status`
+7. `aol_decode_invoice`
+8. `aol_get_ethos`
+9. `aol_get_capabilities`
+10. `aol_list_strategies`
+11. `aol_get_strategy`
+12. `aol_get_ledger`
 
 ## Named tools first
 
-- use `aol_get_root` for route 1
-- use `aol_get_api_root` for route 3
-- use `aol_list_skills` before route 5 when you want the skill index
-- use `aol_get_platform_status` for route 6
-- use `aol_get_ethos` for route 8
-- use `aol_get_capabilities` for route 9
-- use `aol_list_strategies` for route 10
+- use `aol_get_root` first
+- use `aol_get_api_root` before authenticated work
+- use `aol_list_skills` when you want the MCP docs index
+- use `aol_get_platform_status` before analysis work
+- use `aol_get_ethos`, `aol_get_capabilities`, and `aol_list_strategies` for public context
 
 ## Structured calls
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/"
+  "tool": "aol_get_api_root",
+  "arguments": {}
 }
 ```
 
@@ -46,9 +41,8 @@ Decode boundary:
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/platform/decode-invoice",
-  "query": {
+  "tool": "aol_decode_invoice",
+  "arguments": {
     "invoice": "lnbc..."
   }
 }
@@ -58,15 +52,17 @@ Strategy detail:
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/strategies/geographic-arbitrage"
+  "tool": "aol_get_strategy",
+  "arguments": {
+    "name": "geographic-arbitrage"
+  }
 }
 ```
 
 ## Rules
 
-- every route here is public
-- route 7 uses the literal short placeholder `lnbc...`
-- save the live node pubkey from route 6 if it is present
+- every tool here is public
+- `aol_decode_invoice` uses the literal short placeholder `lnbc...`
+- save the live node pubkey from `aol_get_platform_status` if it is present
 - when a named MCP tool already exists for a route here, prefer it
 - do not leave this file for a write flow before you finish it

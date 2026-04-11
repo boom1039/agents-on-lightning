@@ -10,6 +10,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { err503Service, err400MissingField, err400Validation, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
+import { MCP_DOCS } from '../mcp/catalog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -19,19 +20,6 @@ const KNOWLEDGE_TOPICS = {
   'protocol': 'bolts_MEMORY_CONDENSED.md',
   'rebalancing': 'balanceofsatoshis_MEMORY_CONDENSED.md',
   'onboarding': 'agent_onboarding_guide.md',
-};
-
-// Canonical public skill files
-const CANONICAL_SKILL_TOPICS = {
-  'discovery': 'discovery.txt',
-  'identity': 'identity.txt',
-  'wallet': 'wallet.txt',
-  'analysis': 'analysis.txt',
-  'social': 'social.txt',
-  'channels': 'channels.txt',
-  'market': 'market.txt',
-  'capital': 'capital.txt',
-  'analytics': 'analytics.txt',
 };
 
 // Strategy archetypes
@@ -204,7 +192,7 @@ export function agentDiscoveryRoutes(daemon) {
   const discoveryRate = rateLimit('discovery');
 
   // Return the agent API entrypoint map.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the agent API entrypoint map.","order":100,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the internal agent API entrypoint map for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":"mcp/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
@@ -215,10 +203,11 @@ export function agentDiscoveryRoutes(daemon) {
       machine_start: '/mcp',
       machine_note: 'Agents with MCP support should use /mcp first.',
       mcp_docs: '/llms-mcp.txt',
+      access_model: 'External agents use MCP tools. HTTP API routes are internal implementation routes.',
       agents_registered: daemon.agentRegistry?.count() || 0,
       endpoints: {
         register: 'POST /api/v1/agents/register',
-        skills: '/api/v1/skills',
+        mcp_docs: '/api/v1/skills',
         capabilities: '/api/v1/capabilities',
         strategies: '/api/v1/strategies',
         knowledge: '/api/v1/knowledge/:topic',
@@ -229,7 +218,7 @@ export function agentDiscoveryRoutes(daemon) {
       },
       links: {
         llms_txt: '/llms.txt',
-        skills: '/api/v1/skills',
+        mcp_docs: '/api/v1/skills',
         mcp: '/mcp',
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
@@ -381,24 +370,28 @@ export function agentDiscoveryRoutes(daemon) {
     }
   });
 
-  // --- Skill files: progressive API documentation ---
+  // --- MCP files: canonical machine documentation ---
 
-  // List the skill documents agents can open.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Skills","label":"skills","summary":"List the skill documents agents can open.","order":600,"tags":["discovery","read","docs","public"],"doc":["skills-index","skills/discovery.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // List the MCP documents agents can open through the hosted MCP server.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["mcp/index.txt","mcp/discovery.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
+    const docs = MCP_DOCS.map((doc) => ({
+      name: doc.name,
+      title: doc.title,
+      description: doc.description,
+      url: `/docs/mcp/${doc.file}`,
+      file: `/docs/mcp/${doc.file}`,
+    }));
     res.json({
       preferred_machine_interface: '/mcp',
       mcp_manifest: '/.well-known/mcp.json',
       mcp_start: '/docs/mcp/index.txt',
       mcp_docs: '/llms-mcp.txt',
-      skills: Object.keys(CANONICAL_SKILL_TOPICS).map(name => ({
-        name,
-        url: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
-        file: `/docs/skills/${CANONICAL_SKILL_TOPICS[name]}`,
-      })),
-      count: Object.keys(CANONICAL_SKILL_TOPICS).length,
-      note: 'Each skill file has one canonical URL. Open the file URL directly.',
-      canonical_base: '/docs/skills/',
+      docs,
+      skills: docs,
+      count: docs.length,
+      note: 'MCP docs are canonical. Legacy skill docs remain in the repo but are not the public agent interface in mcp_only mode.',
+      canonical_base: '/docs/mcp/',
       canonical_root_doc: '/llms.txt',
     });
   });

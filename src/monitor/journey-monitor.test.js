@@ -94,3 +94,46 @@ test('Journey monitor persists long request durations without DuckDB overflow', 
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('Journey monitor exposes safe schema, latest event, and MCP activity views', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'aol-journey-'));
+  try {
+    const monitor = await startJourneyMonitor({
+      dbPath: join(tempDir, 'journey.duckdb'),
+      idleShutdownMs: 50,
+    });
+
+    await recordJourneyEvent({
+      event: 'mcp_tool_call',
+      method: 'MCP',
+      path: 'mcp:aol_get_api_root',
+      status: 200,
+      mcp_tool_name: 'aol_get_api_root',
+      mcp_request_id: 'request-1',
+      ts: Date.now(),
+    });
+    await recordJourneyEvent({
+      event: 'api_request',
+      method: 'GET',
+      path: '/api/v1/',
+      status: 200,
+      mcp_tool_name: 'aol_get_api_root',
+      mcp_request_id: 'request-1',
+      ts: Date.now(),
+    });
+    await monitor.analyticsDb.flush();
+
+    const schema = await monitor.eventSchema();
+    assert(schema.columns.some((column) => column.name === 'extra'));
+
+    const latest = await monitor.latestEvents({ limit: 2 });
+    assert.equal(latest.length, 2);
+
+    const mcpActivity = await monitor.mcpActivity({ limit: 10 });
+    assert.equal(mcpActivity.length, 2);
+    assert(mcpActivity.every((event) => event.mcp_tool_name === 'aol_get_api_root'));
+  } finally {
+    await stopJourneyMonitor();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
