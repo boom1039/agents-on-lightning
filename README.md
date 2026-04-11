@@ -13,8 +13,9 @@ That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey
 - Journey APIs: `src/routes/journey-routes.js`
 - Journey state and DuckDB read/write: `src/monitor/journey-monitor.js` and `monitoring_dashboards/live/analytics-db.mjs`
 - Journey UI: `monitoring_dashboards/journey/index.html` and `monitoring_dashboards/journey/three.html`
-- Journey database: `data/journey-analytics.duckdb`
-- Deploy instructions: `deploy/README.md`
+- Local journey database: `data/journey-analytics.duckdb`
+- Production journey database: `/var/lib/agents-on-lightning/data/journey-analytics.duckdb`
+- Production deploy source of truth: `deploy/README.md`
 - NPM dependency lock: `package.json` and `package-lock.json`
 
 ## Simple Rules
@@ -23,14 +24,16 @@ That same app serves the agent API, `/llms.txt`, `/docs/skills/*.txt`, `/journey
 - The manifest is generated from route comments plus agent docs.
 - The dashboards read the manifest. They are not the source of truth.
 - DuckDB stores agent interaction history. It is not the source of route definitions.
-- AWS deploy source of truth is the git commit checked out on the EC2 box, plus the server-local env/config files from `deploy/README.md`.
-- This repo does not currently deploy with `rsync`.
+- Production deploys use one command: `npm run prod:deploy`.
+- Production runtime is the release behind `/opt/agents_on_lightning/current`, deployed from a runtime tarball.
+- Do not deploy production with `git pull`, `rsync`, manual `scp`, or on-box `npm ci`.
 - Old notes, graph helpers, and test harness files are kept out of this repo.
 - Real node hosts, cert paths, and server-local config stay out of git.
 
 ## Not Source Of Truth
 
 - `.claude/` is local tool state
+- `plans/` contains historical research and implementation plans, not current deploy instructions
 
 ## If You Need To Change Agent Surfaces
 
