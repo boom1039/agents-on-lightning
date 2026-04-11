@@ -226,7 +226,7 @@ export function agentDiscoveryRoutes(daemon) {
       mcp_start: {
         endpoint: '/mcp',
         manifest: '/.well-known/mcp.json',
-        first_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status'],
+        first_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_mcp_docs', 'aol_get_platform_status'],
         first_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
       },
     });

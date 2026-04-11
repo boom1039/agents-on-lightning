@@ -28,6 +28,7 @@ const ALLOWED_HEADER_NAMES = new Set([
 ]);
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const mcpToolContext = new AsyncLocalStorage();
+const DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS = 8_000;
 const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_health',
@@ -58,8 +59,12 @@ const MCP_TOOL_SPECS = [
     description: 'Read the public API root JSON entrypoint.',
   },
   {
-    name: 'aol_list_skills',
+    name: 'aol_list_mcp_docs',
     description: 'List the canonical MCP docs.',
+  },
+  {
+    name: 'aol_list_skills',
+    description: 'Deprecated alias for aol_list_mcp_docs.',
   },
   {
     name: 'aol_get_platform_status',
@@ -495,6 +500,12 @@ const MCP_TOOL_SPECS = [
   },
 ];
 
+function getInternalRequestTimeoutMs(value = process.env.AOL_MCP_INTERNAL_REQUEST_TIMEOUT_MS) {
+  const parsed = Number(value || DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS;
+  return Math.min(parsed, 30_000);
+}
+
 function getOrigin(req, fallback) {
   const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
   const host = req.get('x-forwarded-host') || req.get('host');
@@ -621,6 +632,7 @@ async function performSiteRequest({
   headers,
   query,
   json,
+  timeoutMs = getInternalRequestTimeoutMs(),
 }) {
   let url;
   try {
@@ -658,11 +670,40 @@ async function performSiteRequest({
     requestHeaders[INTERNAL_MCP_REQUEST_HEADER_NAME] = context.requestId;
   }
 
-  const response = await fetch(url, {
-    method,
-    headers: requestHeaders,
-    body: json !== undefined ? JSON.stringify(json) : undefined,
-  });
+  const requestTimeoutMs = getInternalRequestTimeoutMs(timeoutMs);
+  const controller = new AbortController();
+  const timeout = Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+    ? setTimeout(() => controller.abort(), requestTimeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: requestHeaders,
+      body: json !== undefined ? JSON.stringify(json) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const summary = `${method} ${url.pathname}${url.search} -> 504`;
+      return {
+        ok: false,
+        status: 504,
+        path: `${url.pathname}${url.search}`,
+        contentType: 'application/json',
+        headers: {},
+        body: {
+          error: 'internal_request_timeout',
+          message: `MCP internal request exceeded ${requestTimeoutMs} ms.`,
+          retryable: true,
+        },
+        summary,
+      };
+    }
+    throw err;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   const { contentType, body } = await readResponseBody(response);
   const summary = `${method} ${url.pathname}${url.search} -> ${response.status}`;
 
@@ -787,7 +828,7 @@ function buildDiscoveryDocument({ origin }) {
     recommended_tools: [
       'aol_get_root',
       'aol_get_api_root',
-      'aol_list_skills',
+      'aol_list_mcp_docs',
       'aol_get_platform_status',
       'aol_register_agent',
       'aol_get_me',
@@ -964,8 +1005,17 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/',
   })));
 
-  server.registerTool('aol_list_skills', {
+  server.registerTool('aol_list_mcp_docs', {
     description: 'List the canonical MCP docs.',
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/skills',
+  })));
+
+  server.registerTool('aol_list_skills', {
+    description: 'Deprecated alias for aol_list_mcp_docs. Kept temporarily for older MCP clients.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2713,14 +2763,14 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       docs: {
         llms_txt: '/llms.txt',
         llms_mcp: '/llms-mcp.txt',
-        mcp_docs: '/api/v1/skills',
+        mcp_docs: '/docs/mcp/index.txt',
         mcp_start: '/docs/mcp/index.txt',
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',
       },
       mcp_hints: {
         preferred_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
-        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_skills', 'aol_get_platform_status', 'aol_register_agent', 'aol_get_me'],
+        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_mcp_docs', 'aol_get_platform_status', 'aol_register_agent', 'aol_get_me'],
       },
       capabilities: {
         public_registration: true,

@@ -1,72 +1,41 @@
 # MCP Market Close
 
-Use this file for a real channel close with hosted MCP named tools.
-Do not start until you already own one real channel.
-This is a write file. Read your owned channels first.
+Use this file to build, sign, and submit channel-close instructions.
+Use named MCP tools only.
 
-Named tools first:
-
-- use `aol_get_me` if you need to confirm your active identity
-- use `aol_get_market_close_help` for the `GET /api/v1/market/close` help route
-- use `aol_build_close_channel_instruction` before signing
-- use `aol_close_channel` for route 1
-- use `aol_get_market_closes` for route 2
-
-## Real prerequisites
-
-1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`
-2. read `GET /docs/mcp/signing-secp256k1.txt`
-3. upload a real secp256k1 pubkey
-4. `GET /api/v1/channels/mine`
-5. save one real `channel_point`
-6. save the matching real `chan_id`
-
-If `channels/mine` is empty, stop and open a channel first.
-
-## Tool order
+## Tool Order
 
 1. `aol_register_agent`
-2. read `signing-secp256k1`
-3. `aol_get_channels_mine`
-4. save `channel_point` and `chan_id`
-5. `aol_build_close_channel_instruction`
-6. sign locally
-7. `aol_close_channel`
-8. `aol_get_market_closes`
-9. `aol_get_market_revenue`
-10. `aol_get_market_revenue_channel`
-11. `aol_update_revenue_config`
-12. `aol_get_market_performance`
-13. `aol_get_market_performance_channel`
+2. `aol_get_channels_mine`
+3. `aol_build_close_channel_instruction`
+4. `aol_close_channel`
+5. `aol_get_market_closes`
+6. `aol_get_market_revenue`
+7. `aol_get_market_revenue_channel`
+8. `aol_update_revenue_config`
+9. `aol_get_market_performance`
+10. `aol_get_market_performance_channel`
 
-## Route order
-
-1. `POST /api/v1/market/close`
-2. `GET /api/v1/market/closes`
-3. `GET /api/v1/market/revenue`
-4. `GET /api/v1/market/revenue/<real chan_id>`
-5. `PUT /api/v1/market/revenue-config`
-6. `GET /api/v1/market/performance`
-7. `GET /api/v1/market/performance/<real chan_id>`
-
-Close:
+## Build
 
 ```json
 {
-  "tool": "aol_close_channel",
-  "api_key": "<api_key>",
-  "instruction": "<exact instruction from aol_build_close_channel_instruction>",
-  "signature": "<hex signature over instruction>"
+  "tool": "aol_build_close_channel_instruction",
+  "arguments": {
+    "api_key": "<api_key>",
+    "channel_point": "<channel_point>"
+  }
 }
 ```
 
-Follow-up reads:
+## Execute
+
+Use `aol_close_channel` with the signed instruction.
+Then inspect closes, revenue, and performance.
 
 ## Rules
 
-- use a real `channel_point` for close
-- use a real `chan_id` for revenue and performance reads
-- do not invent placeholder channel ids here
-- keep the private signing key local and upload only the public key
-- save the built `instruction` and `signing_payload` exactly as returned
-- if the close call times out, check closes and balance before retrying
+1. Close only channels assigned to your agent.
+2. Use the real `channel_point` from `aol_get_channels_mine`.
+3. Do not retry a close blindly.
+4. Use fresh signatures for every signed write.

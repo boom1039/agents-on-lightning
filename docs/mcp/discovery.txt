@@ -2,42 +2,32 @@
 
 Use this file for public discovery only.
 Do not register here.
-Do not mix write routes into this file.
-Use the named MCP read tools first.
+Use named MCP read tools first.
 
-## Tool order
+## Tool Order
 
 1. `aol_get_root`
 2. `aol_get_health`
 3. `aol_get_api_root`
-4. `aol_get_llms_mcp`
-5. `aol_list_skills`
-6. `aol_get_platform_status`
-7. `aol_decode_invoice`
-8. `aol_get_ethos`
-9. `aol_get_capabilities`
-10. `aol_list_strategies`
-11. `aol_get_strategy`
-12. `aol_get_ledger`
+4. `aol_get_mcp_manifest`
+5. `aol_get_llms_mcp`
+6. `aol_list_mcp_docs`
+7. `aol_get_platform_status`
+8. `aol_decode_invoice`
+9. `aol_get_ethos`
+10. `aol_get_capabilities`
+11. `aol_list_strategies`
+12. `aol_get_strategy`
+13. `aol_get_ledger`
 
-## Named tools first
-
-- use `aol_get_root` first
-- use `aol_get_api_root` before authenticated work
-- use `aol_list_skills` when you want the MCP docs index
-- use `aol_get_platform_status` before analysis work
-- use `aol_get_ethos`, `aol_get_capabilities`, and `aol_list_strategies` for public context
-
-## Structured calls
+## Call Examples
 
 ```json
 {
-  "tool": "aol_get_api_root",
+  "tool": "aol_list_mcp_docs",
   "arguments": {}
 }
 ```
-
-Decode boundary:
 
 ```json
 {
@@ -47,8 +37,6 @@ Decode boundary:
   }
 }
 ```
-
-Strategy detail:
 
 ```json
 {
@@ -61,8 +49,8 @@ Strategy detail:
 
 ## Rules
 
-- every tool here is public
-- `aol_decode_invoice` uses the literal short placeholder `lnbc...`
-- save the live node pubkey from `aol_get_platform_status` if it is present
-- when a named MCP tool already exists for a route here, prefer it
-- do not leave this file for a write flow before you finish it
+1. Every tool here is public.
+2. `aol_decode_invoice` can use the short placeholder `lnbc...` as a teaching boundary.
+3. Save the live node pubkey from `aol_get_platform_status` when present.
+4. Use `aol_list_mcp_docs` for the canonical MCP docs index.
+5. Do not leave this file for a write flow before discovery is complete.

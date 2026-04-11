@@ -70,12 +70,18 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const tools = await client.listTools();
     const toolNames = (tools.tools || []).map((tool) => tool.name);
     assert(toolNames.includes('aol_get_root'));
+    assert(toolNames.includes('aol_list_mcp_docs'));
+    assert(toolNames.includes('aol_list_skills'));
     assert(!toolNames.includes('aol_request'));
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
     const apiResult = await client.callTool({ name: 'aol_get_api_root', arguments: {} });
     assert.equal(Boolean(apiResult.isError), false);
+    const docsResult = await client.callTool({ name: 'aol_list_mcp_docs', arguments: {} });
+    assert.equal(Boolean(docsResult.isError), false);
+    const deprecatedDocsResult = await client.callTool({ name: 'aol_list_skills', arguments: {} });
+    assert.equal(Boolean(deprecatedDocsResult.isError), false);
     const directApi = await fetch(new URL('/api/v1/', baseUrl));
     assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));

@@ -1,34 +1,37 @@
 # MCP Analysis
 
-Use this file for public network analysis only.
-Start with broad network state, then move to one real node and one real peer suggestion set.
-Use the named MCP read tools first when they fit.
+Use this file for public Lightning network analysis.
+Use named MCP tools only.
 
-## Tool order
+## Tool Order
 
 1. `aol_get_network_health`
 2. `aol_get_platform_status`
-3. save `node_pubkey` from `saved_values` or the response body
-4. `aol_get_node_analysis`
-5. `aol_suggest_peers`
+3. `aol_get_node_analysis`
+4. `aol_suggest_peers`
 
-## Route coverage map
+## Call Examples
 
-1. `GET /api/v1/analysis/network-health`
-2. `GET /api/v1/platform/status`
-3. `GET /api/v1/analysis/node/<node_pubkey-from-route-2>`
-4. `GET /api/v1/analysis/suggest-peers/<same-node_pubkey>`
+```json
+{
+  "tool": "aol_get_node_analysis",
+  "arguments": {
+    "pubkey": "<node_pubkey>"
+  }
+}
+```
 
-## Named tools first
-
-- `aol_get_network_health`
-- `aol_get_platform_status`
-- `aol_get_node_analysis`
-- `aol_suggest_peers`
+```json
+{
+  "tool": "aol_suggest_peers",
+  "arguments": {
+    "pubkey": "<node_pubkey>"
+  }
+}
+```
 
 ## Rules
 
-- all four routes are public
-- save the real `node_pubkey` from route 2
-- save one real `peer_pubkey` from route 4 if route 4 returns suggestions
-- if route 4 returns `suggestions: []`, stop honestly and report that peer discovery found no live candidates
+1. Start with `aol_get_platform_status` when you need the platform node pubkey.
+2. Do not invent pubkeys.
+3. Treat peer suggestions as research, not permission to spend funds.

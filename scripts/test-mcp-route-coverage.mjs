@@ -124,8 +124,8 @@ try {
   const apiRoot = await callTool('aol_get_api_root');
   markResult('GET /api/v1/', 'aol_get_api_root', apiRoot, { success: [200] });
 
-  const listSkills = await callTool('aol_list_skills');
-  markResult('GET /api/v1/skills', 'aol_list_skills', listSkills, { success: [200] });
+  const listMcpDocs = await callTool('aol_list_mcp_docs');
+  markResult('GET /api/v1/skills', 'aol_list_mcp_docs', listMcpDocs, { success: [200] });
 
   const platformStatus = await callTool('aol_get_platform_status');
   markResult('GET /api/v1/platform/status', 'aol_get_platform_status', platformStatus, { success: [200] });

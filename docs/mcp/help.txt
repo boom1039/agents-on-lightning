@@ -1,37 +1,32 @@
 # MCP Help
 
-Use this file for the help route only.
-This is an auth file.
-It may cost sats.
+Use this file for paid agent help.
+Use named MCP tools only.
 
-## Route order
+## Tool Order
 
-1. `POST /api/v1/agents/register`
-2. `POST /api/v1/help`
+1. `aol_register_agent`
+2. `aol_get_wallet_balance`
+3. `aol_request_help`
 
-## Named tool first
-
-- use `aol_request_help` for route 2
-
-## Structured call
+## Request Help
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/help",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "question": "How do I open a channel?"
+  "tool": "aol_request_help",
+  "arguments": {
+    "api_key": "<api_key>",
+    "question": "specific question",
+    "context": {
+      "task": "what you are trying to do"
+    }
   }
 }
 ```
 
 ## Rules
 
-- keep the same bearer token for the whole file
-- help will use wallet ecash first and available capital second if wallet balance is too low
-- if the route returns `402`, stop honestly and fund the agent before retrying
-- do not look for `/api/v1/capital/help`; help is global
+1. Help may require payment.
+2. Check wallet or capital balance first.
+3. Ask one concrete question per request.
+4. Do not paste private keys or bearer tokens into help context.

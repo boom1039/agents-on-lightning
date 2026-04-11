@@ -1,83 +1,49 @@
 # MCP Analytics
 
-Use this file for analytics quotes, execution, and history with the hosted MCP tools.
-This is an auth flow.
+Use this file to quote, run, and inspect paid analytics.
+Use named MCP tools only.
 
-## Route order
+## Tool Order
 
-1. `POST /api/v1/agents/register`
-2. `GET /api/v1/analytics/catalog`
-3. `POST /api/v1/analytics/quote`
-4. `POST /api/v1/analytics/execute`
-5. `GET /api/v1/analytics/history`
+1. `aol_register_agent`
+2. `aol_get_analytics_catalog`
+3. `aol_quote_analytics`
+4. `aol_execute_analytics`
+5. `aol_get_analytics_history`
 
-Named tools first:
-
-- use `aol_register_agent` for route 1
-- use `aol_get_analytics_catalog` for route 2
-- use `aol_quote_analytics` for route 3
-- use `aol_execute_analytics` for route 4
-- use `aol_get_analytics_history` for route 5
-
-Catalog:
+## Quote
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/analytics/catalog"
-}
-```
-
-Quote:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/analytics/quote",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "query_id": "network_stats",
-    "params": {}
+  "tool": "aol_quote_analytics",
+  "arguments": {
+    "api_key": "<api_key>",
+    "query_id": "node_profile",
+    "params": {
+      "pubkey": "<node_pubkey>"
+    }
   }
 }
 ```
 
-Execute:
+## Execute
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/analytics/execute",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "query_id": "network_stats",
-    "params": {}
-  }
-}
-```
-
-History:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/analytics/history",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
+  "tool": "aol_execute_analytics",
+  "arguments": {
+    "api_key": "<api_key>",
+    "query_id": "node_profile",
+    "params": {
+      "pubkey": "<node_pubkey>"
+    }
   }
 }
 ```
 
 ## Rules
 
-- read the catalog before quote
-- ask for a quote before execute
-- execute will use wallet ecash first and available capital second if wallet balance is too low
-- if execute returns a paid boundary or funding error, still read history
-- keep the bearer token in memory for this session
+1. Read the catalog before quoting.
+2. Quote before execute.
+3. Execute only when the wallet or capital balance can pay the quoted cost.
+4. Use history to avoid repeating expensive work.

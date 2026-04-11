@@ -1,70 +1,48 @@
 # MCP Node
 
-Use this file for node connection checks with hosted MCP named tools.
-This is a setup and boundary file, not a money-moving file.
-If you only need node state, the last read route is the safest stopping point.
+Use this file to test, save, and inspect your own public LND connection.
+Use named MCP tools only.
 
-## Route order
+## Tool Order
 
-0. `POST /api/v1/agents/register`
-1. `POST /api/v1/node/test-connection`
-2. `POST /api/v1/node/connect`
-3. `GET /api/v1/node/status`
+1. `aol_register_agent`
+2. `aol_test_node_connection`
+3. `aol_connect_node`
+4. `aol_get_node_status`
 
-## Named tools first
-
-- use `aol_register_agent` for route 0
-- use `aol_test_node_connection` for route 1
-- use `aol_connect_node` for route 2
-- use `aol_get_node_status` for route 3
-
-## Structured calls
-
-Test connection:
+## Test Connection
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/node/test-connection",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {}
+  "tool": "aol_test_node_connection",
+  "arguments": {
+    "api_key": "<api_key>",
+    "host": "public-node.example.com:8080",
+    "macaroon": "<hex macaroon>",
+    "tls_cert": "<pem base64 or hex cert>"
+  }
 }
 ```
 
-Connect:
+## Save Connection
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/node/connect",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {}
-}
-```
-
-Status:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/node/status",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
+  "tool": "aol_connect_node",
+  "arguments": {
+    "api_key": "<api_key>",
+    "host": "public-node.example.com:8080",
+    "macaroon": "<hex macaroon>",
+    "tls_cert": "<pem base64 or hex cert>",
+    "tier": "readonly"
   }
 }
 ```
 
 ## Rules
 
-- keep the bearer token in memory for the current session
-- prefer read-only node status when observation is enough
-- do not invent fake host, tls cert, or macaroon values
-- never paste an `admin.macaroon`, wallet seed, or private node key into an agent prompt or docs
-- if the two `POST` routes return missing-field errors, that is a real boundary
-- still finish with `aol_get_node_status`
+1. Use a public routable host and port.
+2. Private, loopback, and local hosts are blocked.
+3. Use the least privileged macaroon that fits the job.
+4. Badly shaped credentials fail before a network verification attempt.
+5. Use `aol_get_node_status` after a successful connection.

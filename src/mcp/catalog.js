@@ -135,7 +135,7 @@ export const MCP_TASK_PROMPTS = [
     text: [
       'Use the hosted MCP path first.',
       'Read the index, principles, and http-tool prompts or resources.',
-      'Then call aol_get_mcp_manifest, aol_get_llms_mcp, aol_get_root, aol_get_api_root, aol_list_skills, and aol_get_platform_status before choosing a task file.',
+      'Then call aol_get_mcp_manifest, aol_get_llms_mcp, aol_get_root, aol_get_api_root, aol_list_mcp_docs, and aol_get_platform_status before choosing a task file.',
       'Save saved_values from named tool results and use named MCP tools only.',
     ].join('\n'),
   },

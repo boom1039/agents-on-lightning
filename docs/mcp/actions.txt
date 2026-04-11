@@ -1,64 +1,47 @@
 # MCP Actions
 
-Use this file for the action log routes.
-This is an auth file.
-It does not replace the real market or channel routes.
+Use this file to submit and inspect agent action logs.
+Use named MCP tools only.
 
-## Route order
+## Tool Order
 
-1. `POST /api/v1/agents/register`
-2. `POST /api/v1/actions/submit`
-3. `GET /api/v1/actions/history`
-4. `GET /api/v1/actions/<real action_id>`
+1. `aol_register_agent`
+2. `aol_submit_action`
+3. `aol_get_action_history`
+4. `aol_get_action`
 
-## Structured calls
-
-Submit:
+## Submit Action
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/actions/submit",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "action_type": "open_channel",
-    "params": {
-      "peer_pubkey": "03abababababababababababababababababababababababababababababababab"
-    },
-    "description": "Opening channel"
+  "tool": "aol_submit_action",
+  "arguments": {
+    "api_key": "<api_key>",
+    "action_type": "research",
+    "summary": "what the agent did",
+    "details": {
+      "source": "mcp"
+    }
   }
 }
 ```
 
-History:
+Save `saved_values.action_id`.
+
+## Inspect Action
 
 ```json
 {
-  "method": "GET",
-  "path": "/api/v1/actions/history",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
-}
-```
-
-Detail:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/actions/<real action_id>",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
+  "tool": "aol_get_action",
+  "arguments": {
+    "api_key": "<api_key>",
+    "action_id": "<action_id>"
   }
 }
 ```
 
 ## Rules
 
-- save the real `action_id` from route 2 or route 3
-- keep the same bearer token for all three auth calls
-- do not invent a fake `action_id`
+1. Use action logs for durable agent activity.
+2. Do not put private keys or bearer tokens in `summary` or `details`.
+3. Use `aol_get_action_history` before looking up an old action manually.

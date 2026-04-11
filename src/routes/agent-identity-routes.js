@@ -17,6 +17,59 @@ import { getSocketAddress, resolvePublicNodeHost } from '../identity/request-sec
 import { findUnexpectedKeys } from '../identity/danger-route-policy.js';
 
 const SAFE_SELF_SERVE_NODE_TIERS = new Set(['observatory', 'readonly', 'wallet', 'invoice']);
+const DEFAULT_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS = 5_000;
+const MIN_MACAROON_HEX_CHARS = 32;
+const MIN_TLS_CERT_CHARS = 64;
+
+function getNodeCredentialVerifyTimeoutMs() {
+  const parsed = Number(process.env.AOL_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS || DEFAULT_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS;
+  return Math.min(parsed, 30_000);
+}
+
+async function withTimeout(promise, ms) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          const err = new Error(`Node credential verification timed out after ${ms} ms.`);
+          err.code = 'NODE_VERIFY_TIMEOUT';
+          reject(err);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export function validateNodeCredentialsShape(macaroon, tlsCert) {
+  if (typeof macaroon !== 'string') {
+    return 'macaroon must be a hex string';
+  }
+  if (typeof tlsCert !== 'string') {
+    return 'tls_cert must be PEM, base64, or hex';
+  }
+  if (macaroon.length > 5000) {
+    return 'macaroon too long (max 5000 chars)';
+  }
+  if (tlsCert.length > 10000) {
+    return 'tls_cert too long (max 10000 chars)';
+  }
+  if (!/^[0-9a-fA-F]+$/.test(macaroon) || macaroon.length % 2 !== 0 || macaroon.length < MIN_MACAROON_HEX_CHARS) {
+    return `macaroon must be a hex string with at least ${MIN_MACAROON_HEX_CHARS} chars`;
+  }
+  const trimmedCert = tlsCert.trim();
+  const looksLikePem = trimmedCert.startsWith('-----BEGIN CERTIFICATE-----');
+  const looksLikeHex = /^[0-9a-fA-F]+$/.test(trimmedCert) && trimmedCert.length % 2 === 0;
+  const looksLikeBase64 = /^[A-Za-z0-9+/=\r\n]+$/.test(trimmedCert);
+  if (trimmedCert.length < MIN_TLS_CERT_CHARS || (!looksLikePem && !looksLikeHex && !looksLikeBase64)) {
+    return `tls_cert must be PEM, base64, or hex with at least ${MIN_TLS_CERT_CHARS} chars`;
+  }
+  return null;
+}
 
 function sendUnexpectedKeys(res, unexpected, see) {
   return err400Validation(res, `Unexpected field(s): ${unexpected.join(', ')}`, {
@@ -52,22 +105,39 @@ async function verifyExternalNodeConnection(daemon, agentId, hostCheck, macaroon
   }
 
   const tempName = `agent-connect-${agentId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const verifyTimeoutMs = getNodeCredentialVerifyTimeoutMs();
+  let timedOut = false;
+  let addPromise;
   try {
-    const { info } = await daemon.nodeManager.addNodeFromCredentials(tempName, {
+    addPromise = daemon.nodeManager.addNodeFromCredentials(tempName, {
       host: hostCheck.hostname,
       restPort: hostCheck.port,
       macaroonHex: macaroon,
       tlsCertBase64OrPem: tlsCert,
     });
+    addPromise.finally(() => {
+      if (timedOut && daemon.nodeManager?.removeNode) {
+        daemon.nodeManager.removeNode(tempName);
+      }
+    }).catch(() => {});
+    const { info } = await withTimeout(addPromise, verifyTimeoutMs);
     return { ok: true, info };
   } catch (err) {
+    if (err?.code === 'NODE_VERIFY_TIMEOUT') {
+      timedOut = true;
+      return {
+        ok: false,
+        status: 408,
+        message: err.message,
+      };
+    }
     return {
       ok: false,
       status: 400,
       message: 'Node connection failed verification.',
     };
   } finally {
-    if (daemon.nodeManager?.removeNode) {
+    if (!timedOut && daemon.nodeManager?.removeNode) {
       daemon.nodeManager.removeNode(tempName);
     }
   }
@@ -212,8 +282,8 @@ export function agentIdentityRoutes(daemon) {
         }
         return err400Validation(res, 'host must be a public routable host:port');
       }
-      if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
-      if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
+      const credentialShapeError = validateNodeCredentialsShape(macaroon, tls_cert);
+      if (credentialShapeError) return err400Validation(res, credentialShapeError);
 
       const effectiveTier = tier || 'readonly';
       const tierCheck = validateTier(effectiveTier);
@@ -290,8 +360,8 @@ export function agentIdentityRoutes(daemon) {
         }
         return err400Validation(res, 'host must be a public routable host:port');
       }
-      if (typeof macaroon !== 'string' || macaroon.length > 5000) return err400Validation(res, 'macaroon too long (max 5000 chars)');
-      if (typeof tls_cert !== 'string' || tls_cert.length > 10000) return err400Validation(res, 'tls_cert too long (max 10000 chars)');
+      const credentialShapeError = validateNodeCredentialsShape(macaroon, tls_cert);
+      if (credentialShapeError) return err400Validation(res, credentialShapeError);
       const verified = await verifyExternalNodeConnection(daemon, req.agentId, hostCheck, macaroon, tls_cert);
       if (!verified.ok) {
         if (verified.status >= 500) {

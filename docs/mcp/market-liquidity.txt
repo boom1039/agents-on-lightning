@@ -1,83 +1,42 @@
 # MCP Market Liquidity
 
-Use this file for swaps, ecash-funded opens, rebalances, and the remaining liquidity reads.
-This is a write file.
-Do the read, capital, market-state, and signing work first.
+Use this file for swaps, ecash funding, and rebalances.
+Use named MCP tools only.
 
-## Real prerequisites
+## Tool Order
 
-1. `POST /api/v1/agents/register` and save `agent_id` and `api_key`
-2. upload a real secp256k1 pubkey
-3. keep a local signing key
-4. for rebalance, already own one real channel
-5. for ecash funding, already have real ecash in your wallet
-6. for swap create, already have enough Lightning sats to satisfy the swap minimum
+1. `aol_register_agent`
+2. `aol_get_swap_quote`
+3. `aol_create_swap_to_onchain`
+4. `aol_get_swap_status`
+5. `aol_get_swap_history`
+6. `aol_fund_channel_from_ecash`
+7. `aol_get_ecash_funding_status`
+8. `aol_estimate_rebalance`
+9. `aol_build_rebalance_instruction`
+10. `aol_rebalance_channel`
+11. `aol_get_market_rebalances`
 
-## Route order
-
-1. `GET /api/v1/market/swap/quote?amount_sats=100000`
-2. `POST /api/v1/market/swap/lightning-to-onchain`
-3. `GET /api/v1/market/swap/status/<real swap_id>`
-4. `GET /api/v1/market/swap/history`
-5. `POST /api/v1/market/fund-from-ecash`
-6. `GET /api/v1/market/fund-from-ecash/<real flow_id>`
-7. `POST /api/v1/market/rebalance/estimate`
-8. `POST /api/v1/market/rebalance`
-9. `GET /api/v1/market/rebalances`
-
-## Structured calls
-
-Rebalance estimate:
+## Rebalance
 
 ```json
 {
-  "method": "POST",
-  "path": "/api/v1/market/rebalance/estimate",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "outbound_chan_id": "<real owned chan_id>",
-    "amount_sats": 10000
+  "tool": "aol_build_rebalance_instruction",
+  "arguments": {
+    "api_key": "<api_key>",
+    "outbound_chan_id": "<chan_id>",
+    "amount_sats": 50000,
+    "max_fee_sats": 50
   }
 }
 ```
 
-Rebalance:
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/market/rebalance",
-  "headers": {
-    "Authorization": "Bearer <api_key>",
-    "Content-Type": "application/json"
-  },
-  "json": {
-    "instruction": {
-      "action": "rebalance",
-      "agent_id": "<agent_id>",
-      "params": {
-        "amount_sats": 10000,
-        "max_fee_sats": 10,
-        "outbound_chan_id": "<real owned chan_id>"
-      },
-      "timestamp": "<fresh unix time>"
-    },
-    "signature": "<hex signature over instruction>"
-  }
-}
-```
+Use `aol_estimate_rebalance` before executing.
+Use `aol_rebalance_channel` only with a signed instruction.
 
 ## Rules
 
-- do not invent a fake chan_id
-- do not invent a fake swap_id or flow_id
-- if you do not own a real channel, stop before routes 3 and 4
-- sign only the inner `instruction` object
-- if the swap quote says `settlement_mode: direct_onchain_payout`, the site is using the safe direct payout path instead of Boltz
-- if you do not already have real ecash in your wallet, stop before `fund-from-ecash`
-- use `aol_get_swap_quote`, `aol_create_swap_to_onchain`, `aol_get_swap_status`, and `aol_get_swap_history` for swap work
-- use `aol_fund_channel_from_ecash` and `aol_get_ecash_funding_status` for ecash-funded opens
-- use `aol_estimate_rebalance`, `aol_build_rebalance_instruction`, `aol_rebalance_channel`, and `aol_get_market_rebalances` for rebalance work
+1. Use real outbound channel ids from `aol_get_channels_mine`.
+2. Quote swaps before creating swaps.
+3. Check status before retrying or declaring failure.
+4. Do not spend wallet or capital balance without confirming available funds.

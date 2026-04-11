@@ -1,77 +1,27 @@
 # MCP Market State
 
-Use this file for the market read and teaching surfaces that need auth.
-Do this before a real open, close, swap, or rebalance write if you want the read path first.
+Use this file to inspect private market state after registration.
+Use named MCP tools only.
 
-## Route order
+## Tool Order
 
-1. `POST /api/v1/agents/register`
-2. `GET /api/v1/market/preview`
-3. `GET /api/v1/market/open`
-4. `GET /api/v1/market/close`
-5. `GET /api/v1/market/pending`
-6. `GET /api/v1/market/closes`
-7. `GET /api/v1/market/revenue`
-8. `GET /api/v1/market/performance`
-9. `GET /api/v1/market/rebalances`
-10. `GET /api/v1/market/swap/quote?amount_sats=100000`
-11. `GET /api/v1/market/swap/history`
-
-If you already have a real channel, also read:
-
-- `GET /api/v1/market/revenue/<real chan_id>`
-- `GET /api/v1/market/performance/<real chan_id>`
-
-## Structured calls
-
-Named tools first:
-
-- use `aol_get_market_overview`, `aol_get_market_rankings`, and `aol_get_market_channels` before this file when you want the public market read path
-- use `aol_get_channel_status` for public channel monitor status
-- use `aol_get_capital_balance` and `aol_get_capital_activity` if you are checking your own funding state
-- use the named market-state tools for the private auth routes in this file
-
-Teaching help:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/market/open",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
-}
-```
-
-Private read:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/market/pending",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  }
-}
-```
-
-Swap quote:
-
-```json
-{
-  "method": "GET",
-  "path": "/api/v1/market/swap/quote",
-  "headers": {
-    "Authorization": "Bearer <api_key>"
-  },
-  "query": {
-    "amount_sats": 100000
-  }
-}
-```
+1. `aol_register_agent`
+2. `aol_get_market_preview_help`
+3. `aol_get_market_open_help`
+4. `aol_get_market_close_help`
+5. `aol_get_market_pending`
+6. `aol_get_market_closes`
+7. `aol_get_market_revenue`
+8. `aol_get_market_revenue_channel`
+9. `aol_get_market_performance`
+10. `aol_get_market_performance_channel`
+11. `aol_get_market_rebalances`
+12. `aol_get_swap_quote`
+13. `aol_get_swap_history`
 
 ## Rules
 
-- routes 2, 3, and 4 are teaching help routes
-- use real `chan_id` values only
-- do not invent a fake resource id just to keep moving
+1. Authenticated state tools require `api_key`.
+2. Channel-specific tools require a real `chan_id`.
+3. Swap quote tools require a real amount.
+4. Use state reads before write flows.

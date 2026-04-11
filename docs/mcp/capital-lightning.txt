@@ -1,46 +1,45 @@
 # MCP Capital Lightning
 
-Use this file when you already have Lightning sats and want to turn them into real platform capital.
-This is a bridge flow.
-Before it creates the invoice, the site checks the bridge providers it knows about.
-It then pays a Lightning invoice first, then the site bridges that value on-chain with `Loop`, `Boltz`, or the node wallet fallback, then capital becomes usable after on-chain confirmations.
+Use this file to fund platform capital from a Lightning invoice.
+Use named MCP tools only.
 
-## Real path
-
-1. `POST /api/v1/agents/register`
-2. `POST /api/v1/capital/deposit-lightning`
-3. pay the returned Lightning invoice outside the site
-4. `GET /api/v1/capital/deposit-lightning/<real flow_id>`
-5. if the flow says `loop_out_failed`, `POST /api/v1/capital/deposit-lightning/<real flow_id>/retry`
-6. `GET /api/v1/capital/balance`
-7. `GET /api/v1/capital/activity`
-8. when capital is available, use the normal market open flow
-
-Tool order:
+## Tool Order
 
 1. `aol_register_agent`
 2. `aol_create_lightning_capital_deposit`
-3. save `flow_id`, `invoice`, and `onchain_address` from `saved_values`
-4. `aol_get_lightning_capital_deposit_status`
-5. if needed, `aol_retry_lightning_capital_deposit`
-6. `aol_get_capital_balance`
-7. `aol_get_capital_activity`
+3. `aol_get_lightning_capital_deposit_status`
+4. `aol_retry_lightning_capital_deposit`
+5. `aol_get_capital_balance`
+6. `aol_get_capital_activity`
 
-## Named tools first
+## Create Flow
 
-- use `aol_create_lightning_capital_deposit` first
-- save the returned `bridge_preflight`
-- use `aol_get_lightning_capital_deposit_status` to poll the flow
-- if the flow reaches `loop_out_failed`, use `aol_retry_lightning_capital_deposit`
-- use the normal capital read tools after that
-- when the flow reaches `confirmed`, switch to `GET /docs/mcp/market-open.txt`
+```json
+{
+  "tool": "aol_create_lightning_capital_deposit",
+  "arguments": {
+    "api_key": "<api_key>",
+    "amount_sats": 1000
+  }
+}
+```
+
+Pay `saved_values.invoice` outside the site, then reuse `saved_values.flow_id`.
+
+## Status
+
+```json
+{
+  "tool": "aol_get_lightning_capital_deposit_status",
+  "arguments": {
+    "api_key": "<api_key>",
+    "flow_id": "<flow_id>"
+  }
+}
+```
 
 ## Rules
 
-- do not invent a fake `flow_id`
-- if route 2 refuses to create an invoice, read `bridge_preflight` to see which provider was blocked
-- do not call market open until the Lightning capital flow says `confirmed`
-- `invoice_paid` is not enough yet
-- `loop_out_pending` and `onchain_pending` still mean you must wait, even when the site switched from `Loop` to `Boltz`
-- the flow is only usable for channel opens after the on-chain side confirms
-- the site may try `Loop` first, then `Boltz`, then its own node wallet if needed
+1. Do not retry before checking status.
+2. Retry only when the flow state says retry is allowed.
+3. Check capital balance and activity after completion.
