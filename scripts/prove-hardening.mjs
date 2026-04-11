@@ -342,6 +342,43 @@ async function runProdProofs() {
       };
     });
   }
+
+  await runSettlement('prod_state_path', prodStatePathProof);
+}
+
+async function prodStatePathProof() {
+  const target = process.env.PROD_SSH_TARGET;
+  const appDir = process.env.PROD_APP_DIR;
+  if (!target) throw new Error('PROD_SSH_TARGET is required for prod state path proof');
+  if (!appDir) throw new Error('PROD_APP_DIR is required for prod state path proof');
+
+  const expectedJourneyDb = process.env.PROD_JOURNEY_DB_PATH || '/var/lib/agents-on-lightning/data/journey-analytics.duckdb';
+  const sshArgs = [];
+  if (process.env.PROD_SSH_KEY) sshArgs.push('-i', process.env.PROD_SSH_KEY);
+  sshArgs.push(target, [
+    'set -euo pipefail',
+    `APP_DIR=${shellQuote(appDir)}`,
+    `EXPECTED_DB=${shellQuote(expectedJourneyDb)}`,
+    'CURRENT="$(readlink -f "$APP_DIR/current")"',
+    'test ! -e "$CURRENT/data/journey-analytics.duckdb"',
+    'test ! -e "$CURRENT/data/journey-analytics.duckdb.wal"',
+    'test -f "$EXPECTED_DB"',
+    'echo "current=$CURRENT"',
+    'echo "expected_journey_db=$EXPECTED_DB"',
+  ].join('; '));
+
+  const result = await runCommand('ssh', sshArgs, { timeoutMs: 120_000 });
+  return {
+    evidence: {
+      command: `ssh ${target} <prod-state-path-check>`,
+      stdout_tail: tail(result.stdout, 20),
+      expected_journey_db: expectedJourneyDb,
+    },
+  };
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 async function runLoad(baseUrl, apiKey, totalRequests, concurrency, rps, sampleMemory) {

@@ -7,7 +7,7 @@ import express from 'express';
 // cors available if needed for more complex setups
 import { createServer } from 'node:http';
 import { realpathSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
 import { globalRateLimit } from './identity/rate-limiter.js';
@@ -36,11 +36,25 @@ export function getListenConfig(env = process.env) {
   return { host, port, role };
 }
 
+export function getJourneyDbPath(env = process.env) {
+  const explicit = typeof env.AOL_JOURNEY_DB_PATH === 'string'
+    ? env.AOL_JOURNEY_DB_PATH.trim()
+    : '';
+  if (explicit) return explicit;
+
+  const dataDir = typeof env.AOL_DATA_DIR === 'string'
+    ? env.AOL_DATA_DIR.trim()
+    : '';
+  if (dataDir) return resolve(dataDir, 'data', 'journey-analytics.duckdb');
+
+  return undefined;
+}
+
 export async function startServer() {
   const { host, port, role } = getListenConfig();
   const serverSlot = reserveServerSlot({ role, host, port });
   const journeyMonitor = await startJourneyMonitor({
-    dbPath: process.env.AOL_JOURNEY_DB_PATH || undefined,
+    dbPath: getJourneyDbPath(),
   });
   const app = express();
   app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);

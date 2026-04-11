@@ -103,6 +103,7 @@ NODE_ENV=production
 AOL_SERVER_ROLE=prod
 AOL_CONFIG_PATH=APP_CONFIG_DIR/config.yaml
 AOL_DATA_DIR=APP_DATA_DIR
+AOL_JOURNEY_DB_PATH=APP_DATA_DIR/data/journey-analytics.duckdb
 HOST=APP_HOST
 PORT=APP_PORT
 TRUST_PROXY=1
@@ -294,6 +295,7 @@ Important behavior:
 - it reuses the current Linux `node_modules` tree only when the new runtime `dependencies` are fully covered
 - it does **not** run `npm ci` unless you explicitly set `PROD_ALLOW_DEP_INSTALL=1`
 - it removes the stale `agents-on-lightning-monitor.service` if that old unit still exists on the host
+- `deploy/check-prod.sh` fails if the active release writes journey analytics into `APP_DIR/current/data`
 
 ## 10b. Build a runtime-only artifact off-box
 
