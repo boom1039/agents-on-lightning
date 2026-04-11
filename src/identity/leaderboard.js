@@ -13,6 +13,7 @@ export class ExternalLeaderboard {
     this._entries = [];
     this._updatedAt = null;
     this._path = 'data/leaderboard/external-current.json';
+    this._updateInFlight = null;
   }
 
   /**
@@ -20,38 +21,46 @@ export class ExternalLeaderboard {
    * Single metric: total_fees_sats / total_capacity_sats
    */
   async update() {
+    if (this._updateInFlight) return this._updateInFlight;
+    this._updateInFlight = this._runUpdate()
+      .finally(() => {
+        this._updateInFlight = null;
+      });
+    return this._updateInFlight;
+  }
+
+  async _runUpdate() {
     const agents = this._registry.listAll();
-    const entries = [];
-
-    for (const agent of agents) {
-      let totalFeesSats = 0;
-      let totalCapacitySats = 0;
-
-      // Get real data from performance tracker if available
-      if (this._performanceTracker) {
-        try {
-          const perf = this._performanceTracker.getAgentPerformance(agent.id);
-          totalFeesSats = perf.total_fees_sats || 0;
-          totalCapacitySats = perf.total_capacity_sats || 0;
-        } catch {
-          // Agent has no channels — that's fine, they score 0
-        }
+    let performanceByAgent = new Map();
+    if (this._performanceTracker?.getExternalLeaderboardEntries) {
+      try {
+        const performanceEntries = await this._performanceTracker.getExternalLeaderboardEntries(
+          agents.map((agent) => agent.id),
+        );
+        performanceByAgent = new Map(performanceEntries.map((entry) => [entry.agent_id, entry]));
+      } catch {
+        performanceByAgent = new Map();
       }
+    }
 
+    const entries = agents.map((agent) => {
+      const perf = performanceByAgent.get(agent.id) || {};
+      const totalFeesSats = Number(perf.total_fees_sats || 0);
+      const totalCapacitySats = Number(perf.total_capacity_sats || 0);
       const feesPerSat = totalCapacitySats > 0
         ? totalFeesSats / totalCapacitySats
         : 0;
 
-      entries.push({
+      return {
         agent_id: agent.id,
         name: agent.name,
         tier: agent.tier || 'observatory',
         total_fees_sats: totalFeesSats,
         total_capacity_sats: totalCapacitySats,
-        fees_per_sat: Math.round(feesPerSat * 1e8) / 1e8, // 8 decimal places
+        fees_per_sat: Math.round(feesPerSat * 1e8) / 1e8,
         registered_at: agent.registered_at,
-      });
-    }
+      };
+    });
 
     // Sort by fees per sat of capacity, descending
     entries.sort((a, b) => b.fees_per_sat - a.fees_per_sat);

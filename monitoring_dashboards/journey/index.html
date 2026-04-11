@@ -344,6 +344,11 @@
     const GRID_TOP = 52;
     const MIN_DOMAIN_HEADER_H = 14;
     const MAX_DOMAIN_HEADER_H = 18;
+    const ROUTE_TILE_MIN_W = 60;
+    const ROUTE_TILE_MIN_H = 34;
+    const ROUTE_TILE_HEADER_H = 14;
+    const AGENT_DOT_RADIUS = 3.25;
+    const AGENT_DOT_CELL = 8.5;
 
     function routeEntryFromManifest(route) {
       return {
@@ -609,8 +614,14 @@
     function domainWeight(domain, groupedRoutes) {
       const routes = Array.from(groupedRoutes.values()).filter((route) => route.domain === domain);
       if (routes.length === 0) return 1;
-      // Keep domain rows stable based on route structure, not live traffic volume.
-      return 1 + Math.sqrt(routes.length);
+      const totalAgents = routes.reduce((sum, route) => sum + route.agents.length, 0);
+      const inFlight = routes.reduce((sum, route) => sum + Number(route.inFlight || 0), 0);
+      const activeRoutes = routes.reduce((sum, route) => sum + ((route.agents.length > 0 || Number(route.inFlight || 0) > 0) ? 1 : 0), 0);
+      return 0.9
+        + (0.5 * Math.sqrt(routes.length))
+        + (1.0 * Math.sqrt(totalAgents))
+        + (0.3 * Math.sqrt(activeRoutes))
+        + (0.35 * Math.sqrt(inFlight));
     }
 
     function computeMoveDuration(routeChanged, distance, queueDepth = 0) {
@@ -840,6 +851,128 @@
       return String(a.method || 'GET').localeCompare(String(b.method || 'GET'));
     }
 
+    function routeTileWeight(route) {
+      const agents = Array.isArray(route.agents) ? route.agents.length : 0;
+      const inFlight = Number(route.inFlight || 0);
+      const warnings = routeWarningTotal(route);
+      return 1
+        + (1.4 * Math.sqrt(agents))
+        + (0.75 * Math.sqrt(inFlight))
+        + Math.min(0.9, warnings * 0.06);
+    }
+
+    function setTreemapTile(route, rect, tiles) {
+      tiles.set(route.routeKey, snapRect({
+        x: rect.x + 2,
+        y: rect.y + 2,
+        w: rect.w - 4,
+        h: rect.h - 4,
+      }));
+    }
+
+    function layoutRouteGrid(items, rect, tiles) {
+      if (items.length === 0 || rect.w <= 4 || rect.h <= 4) return;
+      let cols = Math.max(1, Math.min(items.length, Math.floor(rect.w / ROUTE_TILE_MIN_W)));
+      let rows = Math.max(1, Math.ceil(items.length / cols));
+      if ((rect.h / rows) < ROUTE_TILE_MIN_H) {
+        rows = Math.max(1, Math.floor(rect.h / ROUTE_TILE_MIN_H));
+        cols = Math.max(1, Math.ceil(items.length / rows));
+      }
+      const tileW = rect.w / cols;
+      const tileH = rect.h / rows;
+      for (let idx = 0; idx < items.length; idx++) {
+        const col = idx % cols;
+        const gridRow = Math.floor(idx / cols);
+        setTreemapTile(items[idx].route, {
+          x: rect.x + col * tileW,
+          y: rect.y + gridRow * tileH,
+          w: tileW,
+          h: tileH,
+        }, tiles);
+      }
+    }
+
+    function splitTreemapItems(items) {
+      if (items.length <= 1) return [items, []];
+      const total = items.reduce((sum, item) => sum + item.weight, 0) || 1;
+      const target = total / 2;
+      let running = 0;
+      let splitIndex = 1;
+      for (let i = 0; i < items.length - 1; i++) {
+        const next = running + items[i].weight;
+        if (i > 0 && Math.abs(target - next) > Math.abs(target - running)) break;
+        running = next;
+        splitIndex = i + 1;
+      }
+      return [items.slice(0, splitIndex), items.slice(splitIndex)];
+    }
+
+    function layoutRouteTreemap(items, rect, tiles) {
+      if (items.length === 0 || rect.w <= 4 || rect.h <= 4) return;
+      if (items.length === 1) {
+        setTreemapTile(items[0].route, rect, tiles);
+        return;
+      }
+      if (rect.w < (ROUTE_TILE_MIN_W * 2) || rect.h < (ROUTE_TILE_MIN_H * 2)) {
+        layoutRouteGrid(items, rect, tiles);
+        return;
+      }
+
+      const [first, second] = splitTreemapItems(items);
+      const firstWeight = first.reduce((sum, item) => sum + item.weight, 0) || 1;
+      const secondWeight = second.reduce((sum, item) => sum + item.weight, 0) || 1;
+      const totalWeight = firstWeight + secondWeight;
+
+      if (rect.w >= rect.h) {
+        const splitW = rect.w * (firstWeight / totalWeight);
+        const firstRect = {
+          x: rect.x,
+          y: rect.y,
+          w: splitW,
+          h: rect.h,
+        };
+        const secondRect = {
+          x: rect.x + splitW,
+          y: rect.y,
+          w: rect.w - splitW,
+          h: rect.h,
+        };
+        if (
+          firstRect.w < ROUTE_TILE_MIN_W || firstRect.h < ROUTE_TILE_MIN_H
+          || secondRect.w < ROUTE_TILE_MIN_W || secondRect.h < ROUTE_TILE_MIN_H
+        ) {
+          layoutRouteGrid(items, rect, tiles);
+          return;
+        }
+        layoutRouteTreemap(first, firstRect, tiles);
+        layoutRouteTreemap(second, secondRect, tiles);
+        return;
+      }
+
+      const splitH = rect.h * (firstWeight / totalWeight);
+      const firstRect = {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: splitH,
+      };
+      const secondRect = {
+        x: rect.x,
+        y: rect.y + splitH,
+        w: rect.w,
+        h: rect.h - splitH,
+      };
+      if (
+        firstRect.w < ROUTE_TILE_MIN_W || firstRect.h < ROUTE_TILE_MIN_H
+        || secondRect.w < ROUTE_TILE_MIN_W || secondRect.h < ROUTE_TILE_MIN_H
+      ) {
+        layoutRouteGrid(items, rect, tiles);
+        return;
+      }
+      layoutRouteTreemap(first, firstRect, tiles);
+      layoutRouteTreemap(second, secondRect, tiles);
+    }
+
     function routeLayoutStamp(route) {
       return [
         route.routeKey,
@@ -847,6 +980,9 @@
         route.group || 'other',
         route.method || 'GET',
         route.routePath || route.routeLabel || '',
+        Array.isArray(route.agents) ? route.agents.length : 0,
+        Number(route.inFlight || 0),
+        routeWarningTotal(route),
       ].join('|');
     }
 
@@ -906,23 +1042,13 @@
             h: row.h - headerH - 4,
           });
           if (routes.length === 0 || inner.w <= 4 || inner.h <= 4) continue;
-
-          const cols = Math.max(1, Math.ceil(Math.sqrt(routes.length * (inner.w / Math.max(inner.h, 1)))));
-          const rows = Math.max(1, Math.ceil(routes.length / cols));
-          const tileW = inner.w / cols;
-          const tileH = inner.h / rows;
-
-          for (let idx = 0; idx < routes.length; idx++) {
-            const route = routes[idx];
-            const col = idx % cols;
-            const gridRow = Math.floor(idx / cols);
-            tiles.set(route.routeKey, snapRect({
-              x: inner.x + col * tileW + 2,
-              y: inner.y + gridRow * tileH + 2,
-              w: tileW - 4,
-              h: tileH - 4,
-            }));
-          }
+          const treemapItems = routes
+            .map((route) => ({ route, weight: routeTileWeight(route) }))
+            .sort((a, b) => {
+              if (b.weight !== a.weight) return b.weight - a.weight;
+              return sortRoutes(a.route, b.route);
+            });
+          layoutRouteTreemap(treemapItems, inner, tiles);
         }
       }
 
@@ -1298,6 +1424,7 @@
 
     function drawRouteTile(route, tile, now, seenAgents, dotDraws) {
       const border = hovered?.type === 'tile' && hovered.routeKey === route.routeKey ? '#58a6ff' : '#21262d';
+      const headerH = Math.min(ROUTE_TILE_HEADER_H, Math.max(12, tile.h - 8));
       ctx.fillStyle = 'rgba(13,17,23,0.88)';
       ctx.fillRect(tile.x, tile.y, tile.w, tile.h);
       ctx.strokeStyle = border;
@@ -1305,10 +1432,10 @@
 
       ctx.fillStyle = DOMAIN_COLORS[route.domain] || '#8b949e';
       ctx.globalAlpha = 0.18;
-      ctx.fillRect(tile.x, tile.y, tile.w, 14);
+      ctx.fillRect(tile.x, tile.y, tile.w, headerH);
       ctx.globalAlpha = 1;
 
-      if (tile.h > 18 && tile.w > 42) {
+      if (tile.h > (headerH + 4) && tile.w > 42) {
         const compact = compactPath(route.routePath || route.routeLabel);
         const label = isRouteHovered(route.routeKey) ? compact : shortRouteLabel(route.routePath || route.routeLabel);
         const badgeX = tile.x + 4;
@@ -1352,17 +1479,17 @@
 
       const inner = {
         x: tile.x + 4,
-        y: tile.y + 18,
+        y: tile.y + headerH + 4,
         w: tile.w - 8,
-        h: tile.h - 22,
+        h: tile.h - headerH - 8,
       };
       interactions.tiles.push({ ...tile, type: 'tile', routeKey: route.routeKey, route });
 
       const slotEntries = Array.isArray(route.slotEntries) ? route.slotEntries : route.agents;
       if (inner.w <= 4 || inner.h <= 4 || slotEntries.length === 0) return;
 
-      const dotRadius = Math.max(1.5, Math.min(4.5, Math.min(inner.w, inner.h) / 10));
-      const cell = dotRadius * 2 + 1.5;
+      const dotRadius = AGENT_DOT_RADIUS;
+      const cell = AGENT_DOT_CELL;
       const cols = Math.max(1, Math.floor(inner.w / cell));
       const visible = Math.min(slotEntries.length, cols * Math.max(1, Math.floor(inner.h / cell)));
 

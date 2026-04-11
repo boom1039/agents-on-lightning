@@ -129,6 +129,10 @@ function parseRebalanceAmount(body) {
   return body?.instruction?.params?.amount_sats;
 }
 
+function invalidateLndReadViews(daemon) {
+  daemon?.lndCache?.invalidate?.();
+}
+
 function pickHttpStatus(result, { successCode = 200, failureCode = 400 } = {}) {
   const direct = normalizeHttpStatusCode(result?.statusCode, null)
     ?? normalizeHttpStatusCode(result?.http_status, null)
@@ -754,6 +758,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
+        if (result?.success) invalidateLndReadViews(daemon);
         const openBody = result?.success && Number.isInteger(amountSats) && amountSats > 0
           ? { ...result, cost_summary: { action: 'channel_open', amount_sats: amountSats, fee_sats: 0, total_sats: amountSats, unit: 'sat' } }
           : result;
@@ -939,6 +944,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
+        if (result?.success || result?.status === 'close_submitted_unknown') invalidateLndReadViews(daemon);
         const closeBody = result?.success
           ? { ...result, cost_summary: { action: 'channel_close', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' } }
           : result;
@@ -974,7 +980,6 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Channel closer not initialized' });
     }
     try {
-      await daemon.channelCloser.refreshNow?.();
       const closes = daemon.channelCloser.getClosesForAgent(req.agentId).map(formatCloseEntry);
       res.json({
         agent_id: req.agentId,
@@ -1180,6 +1185,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
+        if (result?.success) invalidateLndReadViews(daemon);
         return { statusCode: pickHttpStatus(result), body: result };
       },
       onError: (err) => {
@@ -1319,6 +1325,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
+        if (result?.success) invalidateLndReadViews(daemon);
         return { statusCode: pickHttpStatus(result), body: result };
       },
       onError: (err) => {
@@ -1366,7 +1373,6 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
     }
     try {
-      await daemon.channelCloser?.refreshNow?.();
       const result = await daemon.performanceTracker.getAgentPerformance(req.agentId);
       res.json(result);
     } catch (err) {
@@ -1382,7 +1388,6 @@ export function channelMarketRoutes(daemon) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
     }
     try {
-      await daemon.channelCloser?.refreshNow?.();
       const result = await daemon.performanceTracker.getChannelPerformance(req.params.chanId, req.agentId);
       if (result.success === false) {
         return res.status(pickHttpStatus(result)).json(result);
@@ -1501,6 +1506,7 @@ export function channelMarketRoutes(daemon) {
             agentId: '__shared__',
           });
         }
+        if (result?.success) invalidateLndReadViews(daemon);
         return { statusCode: pickHttpStatus(result), body: result };
       },
       onError: (err) => {

@@ -10,7 +10,6 @@
  * Read-only: cannot modify any platform state.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,6 +100,8 @@ export class HelpEndpoint {
     this._walletOps = walletOps;
     this._systemPrompt = null;
     this._anthropic = null;
+    this._anthropicApiKey = null;
+    this._initializePromise = null;
     this._upstreamFailureTimestamps = [];
     this._circuitOpenUntil = 0;
     this._config = { ...config };
@@ -113,22 +114,44 @@ export class HelpEndpoint {
   }
 
   /**
-   * Load the system prompt from disk and initialize the Anthropic client.
-   * Call once at startup.
+   * Load the system prompt and cache provider config on first use.
    */
   async initialize() {
-    // Load system prompt
-    const promptPath = resolve(__dirname, 'help-system-prompt.txt');
-    this._systemPrompt = await readFile(promptPath, 'utf-8');
-
-    // Initialize Anthropic client
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      console.warn('[HelpEndpoint] ANTHROPIC_API_KEY not set — help endpoint will return errors');
+    if (this._systemPrompt) return;
+    if (this._initializePromise) {
+      await this._initializePromise;
+      return;
     }
-    this._anthropic = new Anthropic({ apiKey: apiKey || 'missing' });
+    this._initializePromise = (async () => {
+    // Load system prompt
+      const promptPath = resolve(__dirname, 'help-system-prompt.txt');
+      this._systemPrompt = await readFile(promptPath, 'utf-8');
 
-    console.log('[HelpEndpoint] Initialized');
+      // Initialize Anthropic client config lazily; the client itself is created on first use.
+      this._anthropicApiKey = process.env.ANTHROPIC_API_KEY || null;
+      if (!this._anthropicApiKey) {
+        console.warn('[HelpEndpoint] ANTHROPIC_API_KEY not set — help endpoint will return errors');
+      }
+
+      console.log('[HelpEndpoint] Initialized');
+    })();
+    try {
+      await this._initializePromise;
+    } finally {
+      this._initializePromise = null;
+    }
+  }
+
+  _getAnthropicClient() {
+    if (this._anthropic) return Promise.resolve(this._anthropic);
+    if (!this._anthropicApiKey) {
+      throw Object.assign(new Error('Help service not configured (missing API key)'), { status: 503 });
+    }
+    return import('@anthropic-ai/sdk')
+      .then(({ default: Anthropic }) => {
+        this._anthropic = new Anthropic({ apiKey: this._anthropicApiKey });
+        return this._anthropic;
+      });
   }
 
   /**
@@ -410,6 +433,7 @@ export class HelpEndpoint {
 
   async _callAnthropicWithGuards(userMessage) {
     this._ensureCircuitClosed();
+    const anthropic = await this._getAnthropicClient();
 
     let timeoutHandle;
     const timeout = new Promise((_, reject) => {
@@ -423,7 +447,7 @@ export class HelpEndpoint {
 
     try {
       const response = await Promise.race([
-        this._anthropic.messages.create({
+        anthropic.messages.create({
           model: HAIKU_MODEL,
           max_tokens: MAX_RESPONSE_TOKENS,
           system: this._systemPrompt,
@@ -565,7 +589,8 @@ export class HelpEndpoint {
    */
   async ask(agentId, question, context = {}) {
     // --- Initialization guard ---
-    if (!this._systemPrompt || !this._anthropic) {
+    await this.initialize();
+    if (!this._systemPrompt) {
       throw Object.assign(
         new Error('Help service not initialized. Refer to /llms-full.txt'),
         { status: 503 },
@@ -646,7 +671,7 @@ export class HelpEndpoint {
 
     // --- Call Claude Haiku ---
     try {
-      if (!process.env.ANTHROPIC_API_KEY) {
+      if (!this._anthropicApiKey) {
         throw new Error('Help service not configured (missing API key)');
       }
 

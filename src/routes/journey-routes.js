@@ -28,11 +28,19 @@ function requireJourneyAccess(req, res, next) {
 function analyticsHandler(fn, errorStatus = 500) {
   return async (req, res) => {
     try {
+      getJourneyMonitor()?.noteJourneyAccess?.();
       res.json(await fn(req));
     } catch (err) {
       res.status(errorStatus).json({ error: err.message || 'analytics error' });
     }
   };
+}
+
+async function getJourneyMonitorForLiveView() {
+  const monitor = getJourneyMonitor();
+  if (!monitor) return null;
+  await monitor.ensureLiveRuntime?.();
+  return monitor;
 }
 
 function rejectSyntheticRoute(req, res) {
@@ -171,7 +179,7 @@ export function journeyRoutes() {
   });
 
   router.get('/api/journey', async (_req, res) => {
-    const monitor = getJourneyMonitor();
+    const monitor = await getJourneyMonitorForLiveView();
     const catalog = getAgentSurfaceSummary();
     res.json(monitor ? await monitor.buildSnapshot() : {
       builtAt: Date.now(),
@@ -198,11 +206,12 @@ export function journeyRoutes() {
   });
 
   router.get('/api/journey/manifest', (_req, res) => {
+    getJourneyMonitor()?.noteJourneyAccess?.();
     res.json(getAgentSurfaceManifest());
   });
 
   router.get('/api/journey/events', async (req, res) => {
-    const monitor = getJourneyMonitor();
+    const monitor = await getJourneyMonitorForLiveView();
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -228,6 +237,7 @@ export function journeyRoutes() {
     const rejection = rejectSyntheticRoute(req, res);
     if (rejection) return rejection;
     const monitor = getJourneyMonitor();
+    monitor?.noteJourneyAccess?.();
     res.json(monitor ? monitor.getSyntheticStatus() : {
       ok: true,
       running: false,
@@ -239,14 +249,15 @@ export function journeyRoutes() {
     });
   });
 
-  router.post('/api/demo/synthetic/start', (req, res) => {
+  router.post('/api/demo/synthetic/start', async (req, res) => {
     const rejection = rejectSyntheticRoute(req, res);
     if (rejection) return rejection;
     const monitor = getJourneyMonitor();
     if (!monitor) {
       return res.status(503).json({ ok: false, error: 'journey monitor unavailable' });
     }
-    return res.json(monitor.startSyntheticTraffic());
+    await monitor.ensureLiveRuntime?.();
+    return res.json(await monitor.startSyntheticTraffic());
   });
 
   router.post('/api/demo/synthetic/stop', async (req, res) => {
@@ -256,6 +267,7 @@ export function journeyRoutes() {
     if (!monitor) {
       return res.status(503).json({ ok: false, error: 'journey monitor unavailable' });
     }
+    await monitor.ensureLiveRuntime?.();
     return res.json(await monitor.stopSyntheticTraffic());
   });
 

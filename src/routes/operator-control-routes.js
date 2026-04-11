@@ -27,11 +27,8 @@ export function operatorControlRoutes(daemon) {
       const profile = daemon.agentRegistry.getById(agent_id);
       if (!profile) return res.status(404).json({ error: 'Agent not found' });
 
-      const node = daemon.nodeManager.getScopedDefaultNodeOrNull('read');
-      if (!node) return res.status(503).json({ error: 'LND node not available' });
-
-      const channelsResp = await node.listChannels();
-      const channels = channelsResp.channels || [];
+      const channels = await daemon.lndCache?.getChannelsLive?.();
+      if (!channels) return res.status(503).json({ error: 'LND node not available' });
 
       let match;
       if (channel_point) {

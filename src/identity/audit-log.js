@@ -9,6 +9,7 @@
 import { getJourneyMonitorStatus, recordJourneyEvent } from '../monitor/journey-monitor.js';
 import { resolveTrackedSurface, shouldIgnoreAgentSurfacePath } from '../monitor/agent-surface-inventory.js';
 import { getSocketAddress } from './request-ip.js';
+import { getRequestRunId } from './request-run.js';
 let _traceSeq = 0;
 
 function nextTraceId() {
@@ -199,11 +200,14 @@ export function auditMiddleware(req, res, next) {
   req.dashboardSetResultMeta = (meta = {}) => {
     Object.assign(req.dashboardResultMeta, sanitizeDashboardResultMeta(meta));
   };
+  const runId = getRequestRunId(req);
+  req.dashboardRunId = runId;
   req.dashboardBindAgent = (agentId, agentName = null) => {
     if (!agentId) return;
     void recordJourneyEvent({
       event: 'agent_bound',
       trace_id: traceId,
+      run_id: runId,
       agent_id: agentId,
       agent_name: agentName || null,
       method: req.method,
@@ -217,6 +221,7 @@ export function auditMiddleware(req, res, next) {
   void recordJourneyEvent({
     event: 'request_start',
     trace_id: traceId,
+    run_id: runId,
     method: req.method,
     path: originalPath,
     endpoint: originalPath,
@@ -233,6 +238,7 @@ export function auditMiddleware(req, res, next) {
     void recordJourneyEvent({
       event: 'request_finish',
       trace_id: traceId,
+      run_id: runId,
       method: req.method,
       path: originalPath,
       endpoint: originalPath,
@@ -249,6 +255,7 @@ export function auditMiddleware(req, res, next) {
     });
     void _append({
       event: 'api_request',
+      run_id: runId,
       method: req.method,
       path: originalPath,
       endpoint: originalPath,

@@ -528,7 +528,7 @@ try {
 
   await transport.close().catch(() => {});
   transportClosed = true;
-  markTransport('DELETE /mcp', 'Hosted MCP transport closed');
+  markTransport('DELETE /mcp', 'Hosted MCP transport closed client-side (stateless servers may not receive DELETE)');
 
   const uncovered = rows.filter((row) => row.kind === 'unseen');
   const failed = rows.filter((row) => row.kind === 'fail');

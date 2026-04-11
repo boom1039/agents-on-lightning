@@ -6,6 +6,7 @@
 import express from 'express';
 // cors available if needed for more complex setups
 import { createServer } from 'node:http';
+import { realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
@@ -38,7 +39,9 @@ export function getListenConfig(env = process.env) {
 export async function startServer() {
   const { host, port, role } = getListenConfig();
   const serverSlot = reserveServerSlot({ role, host, port });
-  const journeyMonitor = await startJourneyMonitor();
+  const journeyMonitor = await startJourneyMonitor({
+    dbPath: process.env.AOL_JOURNEY_DB_PATH || undefined,
+  });
   const app = express();
   app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
   app.use(express.json({ limit: '16kb' }));
@@ -206,7 +209,17 @@ export async function startServer() {
   return { app, server, daemon, journeyMonitor };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+export function isDirectExecution(moduleUrl = import.meta.url, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  const modulePath = fileURLToPath(moduleUrl);
+  try {
+    return realpathSync(modulePath) === realpathSync(argv1);
+  } catch {
+    return modulePath === argv1;
+  }
+}
+
+if (isDirectExecution(import.meta.url, process.argv[1])) {
   startServer().catch(err => {
     console.error('[server] Fatal:', err);
     process.exit(1);

@@ -350,7 +350,7 @@ try {
     name: 'aol_test_node_connection',
     arguments: {
       api_key: apiKey,
-      host: 'example.com:9735',
+      host: 'bad_host',
       macaroon: '00',
       tls_cert: '00',
     },
@@ -361,7 +361,7 @@ try {
     name: 'aol_connect_node',
     arguments: {
       api_key: apiKey,
-      host: 'example.com:9735',
+      host: 'bad_host',
       macaroon: '00',
       tls_cert: '00',
       tier: 'readonly',

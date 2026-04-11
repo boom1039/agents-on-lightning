@@ -298,6 +298,56 @@ export class PerformanceTracker {
     };
   }
 
+  async getExternalLeaderboardEntries(agentIds = null) {
+    const requestedAgentIds = Array.isArray(agentIds) && agentIds.length > 0
+      ? new Set(agentIds)
+      : null;
+    const channels = await this._lndCache.getChannels();
+    const lndByPoint = new Map();
+    for (const channel of channels) {
+      if (channel.channel_point) lndByPoint.set(channel.channel_point, channel);
+    }
+
+    const allAssignments = this._assignmentRegistry.getAllAssignments();
+    const assignmentsByAgent = new Map();
+    for (const assignment of allAssignments) {
+      if (!assignmentsByAgent.has(assignment.agent_id)) {
+        assignmentsByAgent.set(assignment.agent_id, []);
+      }
+      assignmentsByAgent.get(assignment.agent_id).push(assignment);
+    }
+
+    const allAgentRevenue = this._revenueTracker.getAllAgentRevenue();
+    const discoveredAgentIds = requestedAgentIds || new Set([
+      ...Object.keys(allAgentRevenue),
+      ...allAssignments.map((assignment) => assignment.agent_id),
+    ]);
+
+    const entries = [];
+    for (const agentId of discoveredAgentIds) {
+      const profile = this._agentRegistry.getById(agentId);
+      const assignments = assignmentsByAgent.get(agentId) || [];
+      const revenue = allAgentRevenue[agentId] || { total_fees_msat: 0 };
+
+      let totalCapacitySats = 0;
+      for (const assignment of assignments) {
+        const liveChannel = lndByPoint.get(assignment.channel_point);
+        totalCapacitySats += assignment.capacity || parseInt(liveChannel?.capacity || '0', 10) || 0;
+      }
+
+      entries.push({
+        agent_id: agentId,
+        name: profile?.name || 'Unknown',
+        tier: profile?.tier || 'observatory',
+        total_fees_sats: Math.floor((revenue.total_fees_msat || 0) / 1000),
+        total_capacity_sats: totalCapacitySats,
+        registered_at: profile?.registered_at || null,
+      });
+    }
+
+    return entries;
+  }
+
   // ---------------------------------------------------------------------------
   // Leaderboard
   // ---------------------------------------------------------------------------

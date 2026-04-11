@@ -63,7 +63,7 @@ const SCHEMA_SQL = `
     method      VARCHAR,
     path        VARCHAR,
     status      SMALLINT,
-    duration_ms SMALLINT,
+    duration_ms INTEGER,
     agent_id    VARCHAR,
     ip          VARCHAR,
     domain      VARCHAR,
@@ -71,6 +71,13 @@ const SCHEMA_SQL = `
     extra       JSON
   );
 
+  CREATE INDEX IF NOT EXISTS idx_events_ts       ON events (ts);
+  CREATE INDEX IF NOT EXISTS idx_events_agent    ON events (agent_id);
+  CREATE INDEX IF NOT EXISTS idx_events_domain   ON events (domain);
+  CREATE INDEX IF NOT EXISTS idx_events_event    ON events (event);
+`;
+
+const EVENT_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_events_ts       ON events (ts);
   CREATE INDEX IF NOT EXISTS idx_events_agent    ON events (agent_id);
   CREATE INDEX IF NOT EXISTS idx_events_domain   ON events (domain);
@@ -127,8 +134,9 @@ export class AnalyticsDB {
     this._insertStmt = null;
     this._batch = [];
     this._flushTimer = null;
+    this._flushPromise = null;
     this._flushMs = 500;
-    this._maxBatch = 200;
+    this._maxBatch = 1000;
   }
 
   async open() {
@@ -138,7 +146,43 @@ export class AnalyticsDB {
 
     this.db = await Database.create(this.dbPath);
     await this.db.exec(SCHEMA_SQL);
+    await this._runMigrations();
     return this;
+  }
+
+  async _runMigrations() {
+    if (!this.db) return;
+    try {
+      const rows = await this.db.all(`PRAGMA table_info('events')`);
+      const durationRow = Array.isArray(rows)
+        ? rows.find((row) => `${row?.name || ''}`.toLowerCase() === 'duration_ms')
+        : null;
+      const durationType = `${durationRow?.type || ''}`.toUpperCase();
+      if (durationRow && durationType === 'SMALLINT') {
+        await this.db.exec('DROP TABLE IF EXISTS events__duration_migration');
+        await this.db.exec(`
+          CREATE TABLE events__duration_migration AS
+          SELECT
+            ts,
+            event,
+            method,
+            path,
+            status,
+            CAST(duration_ms AS INTEGER) AS duration_ms,
+            agent_id,
+            ip,
+            domain,
+            doc_kind,
+            extra
+          FROM events
+        `);
+        await this.db.exec('DROP TABLE events');
+        await this.db.exec('ALTER TABLE events__duration_migration RENAME TO events');
+        await this.db.exec(EVENT_INDEX_SQL);
+      }
+    } catch (error) {
+      console.warn(`[AnalyticsDB] Schema migration skipped: ${error.message}`);
+    }
   }
 
   async close() {
@@ -156,21 +200,43 @@ export class AnalyticsDB {
     if (!this.db) return;
     this._batch.push(normalizeEvent(rawEvent));
     if (this._batch.length >= this._maxBatch) {
-      this._flushBatch();
+      void this._flushBatch().catch((error) => {
+        console.warn(`[AnalyticsDB] Batch flush failed: ${error.message}`);
+      });
     } else if (!this._flushTimer) {
       this._flushTimer = setTimeout(() => {
         this._flushTimer = null;
-        this._flushBatch();
+        void this._flushBatch().catch((error) => {
+          console.warn(`[AnalyticsDB] Timed flush failed: ${error.message}`);
+        });
       }, this._flushMs);
       this._flushTimer.unref?.();
     }
   }
 
   async _flushBatch() {
+    if (this._flushPromise) return this._flushPromise;
     if (!this.db || this._batch.length === 0) return;
     const rows = this._batch.splice(0);
     if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }
-    await this._insertRows(rows);
+    this._flushPromise = (async () => {
+      try {
+        let pending = rows;
+        while (this.db && pending.length > 0) {
+          const chunk = pending.splice(0, this._maxBatch);
+          await this._insertRows(chunk);
+          if (pending.length === 0 && this._batch.length > 0) {
+            pending = this._batch.splice(0);
+          }
+        }
+      } finally {
+        this._flushPromise = null;
+        if (this.db && this._batch.length > 0) {
+          await this._flushBatch();
+        }
+      }
+    })();
+    return this._flushPromise;
   }
 
   _flushSync() {

@@ -1,6 +1,12 @@
 # EC2 Deploy Runbook
 
-This repo deploys by git on the server.
+This repo supports one production deploy shape:
+
+1. Build a runtime-only artifact off-box.
+2. Deploy it to `APP_DIR/releases/<stamp>`.
+3. Point `APP_DIR/current` at that release.
+
+Do not use `git pull` as the production deploy path.
 Do not commit server-local env files, config files, certs, macaroons, or data.
 
 ## Keep these in git
@@ -53,7 +59,7 @@ node -v
 
 Use Node `>=20`.
 
-## 2. Clone and install
+## 2. Initial clone and install
 
 ```bash
 git clone YOUR_REPO_URL APP_DIR
@@ -63,10 +69,21 @@ npm ci --omit=dev
 
 Important:
 
-- Production should be a real git checkout, not a copied folder.
+- Preferred production layout is `APP_DIR/releases/<stamp>` plus `APP_DIR/current`.
+- The initial clone exists to seed the host with a compatible Linux `node_modules` tree and a home for `releases/` and `current/`.
 - Create `APP_DIR/data` before starting systemd, or the service can fail with `status=226/NAMESPACE` because `ReadWritePaths=APP_DATA_DIR APP_DIR/data` expects that path to exist.
-- Do not run `npm ci` on a tiny prod box during normal code-only deploys. On a `t4g.micro` this can OOM the host and wedge SSH/nginx/app startup.
-- Prefer: build elsewhere, or only allow on-box dependency installs when you know the box has enough RAM or swap.
+- Do not run `npm ci` on a small prod box during normal code deploys.
+- For later deploys, build elsewhere and ship a runtime artifact.
+
+## 2b. Preferred runtime artifact build
+
+```bash
+./deploy/build-runtime-artifact.sh
+```
+
+This writes a tarball under `output/runtime-artifacts/` containing runtime files only by default.
+It does **not** bundle `node_modules` unless you explicitly set `AOL_RUNTIME_INCLUDE_NODE_MODULES=1`.
+On macOS, the build uses a portable tar format and disables macOS copyfile metadata so Linux untar stays quiet.
 
 ## 3. Create the service user and directories
 
@@ -208,9 +225,9 @@ Wants=network-online.target
 Type=simple
 User=APP_USER
 Group=APP_USER
-WorkingDirectory=APP_DIR
+WorkingDirectory=APP_DIR/current
 EnvironmentFile=APP_CONFIG_DIR/agents-on-lightning.env
-ExecStart=/usr/bin/node APP_DIR/src/index.js
+ExecStart=/usr/bin/node APP_DIR/current/src/index.js
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -218,7 +235,7 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=APP_DATA_DIR APP_DIR/data
+ReadWritePaths=APP_DATA_DIR APP_DIR/data APP_DIR/releases APP_DIR/current
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictRealtime=true
 LockPersonality=true
@@ -268,14 +285,49 @@ There is no separate Journey server now.
 
 ## 10. Update an existing box safely
 
-Use `deploy/update-prod.sh` for normal code-only deploys.
+Use `deploy/update-prod.sh` for every normal production deploy.
 
 Important behavior:
 
-- it does `git pull --ff-only`
-- it does **not** run `npm ci` by default if `package.json` or `package-lock.json` changed
-- if dependency manifests changed, it stops and tells you to handle deps on a box with enough RAM or swap
-- you can explicitly opt in with `PROD_ALLOW_DEP_INSTALL=1`, but that should be rare on small instances
+- it requires `PROD_RUNTIME_ARTIFACT`
+- it unpacks the artifact to `APP_DIR/releases/<stamp>` and flips `APP_DIR/current`
+- it reuses the current Linux `node_modules` tree only when the new runtime `dependencies` are fully covered
+- it does **not** run `npm ci` unless you explicitly set `PROD_ALLOW_DEP_INSTALL=1`
+- it removes the stale `agents-on-lightning-monitor.service` if that old unit still exists on the host
+
+## 10b. Build a runtime-only artifact off-box
+
+```bash
+./deploy/build-runtime-artifact.sh
+```
+
+That artifact includes only:
+
+- `src/`
+- `config/default.yaml`
+- `docs/llms.txt`
+- `docs/llms-mcp.txt`
+- `docs/mcp/`
+- `docs/skills/`
+- `docs/knowledge/`
+- `monitoring_dashboards/journey/`
+- `monitoring_dashboards/live/`
+- `package.json`
+- `package-lock.json`
+
+It excludes repo history, tests, plans, output, and other non-runtime files.
+If you intentionally build with `AOL_RUNTIME_INCLUDE_NODE_MODULES=1`, only deploy that artifact to a matching build platform.
+
+## 10c. Managed reverse tunnel for laptop-backed services
+
+The preferred replacement for an ad hoc manual SSH port-forward is a supervised reverse tunnel from the laptop to EC2.
+
+Use:
+
+- `deploy/systemd/agents-on-lightning-reverse-tunnel.service.template`
+- `deploy/config/managed-reverse-tunnel.env.example`
+
+Bind all forwarded ports to `127.0.0.1` on EC2, then point the app config at those loopback ports.
 
 ## 11. What broke on Apr 9, 2026
 
@@ -341,20 +393,13 @@ sudo systemctl reload nginx
 
 ## 12. Update production later
 
-```bash
-cd APP_DIR
-git pull --ff-only
-mkdir -p APP_DIR/data
-sudo systemctl restart agents-on-lightning
-```
-
-For normal code-only deploys, prefer:
+For normal deploys, use:
 
 ```bash
 deploy/update-prod.sh
 ```
 
-Only run `npm ci --omit=dev` on-box when you explicitly know the host has enough RAM or swap for it.
+Only run `npm ci --omit=dev` on-box when you explicitly know the host has enough RAM or swap for it and the artifact cannot reuse the current Linux dependency tree.
 
 If you are converting an old copied deploy into a git-based deploy:
 

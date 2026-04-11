@@ -1,7 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
 import { AnalyticsDB } from '../../monitoring_dashboards/live/analytics-db.mjs';
-import { LiveJourneyState } from '../../monitoring_dashboards/live/state.mjs';
-import { createSyntheticJourneySprayController } from '../../monitoring_dashboards/live/synthetic-spray.mjs';
 import {
   getAgentSurfaceSummary,
   getCanonicalJourneyRouteCatalog,
@@ -18,11 +16,24 @@ const LIVE_STATE_EVENT_TYPES = new Set([
   'validation_failure',
   'rate_limit_hit',
 ]);
+const DEFAULT_JOURNEY_IDLE_SHUTDOWN_MS = 10 * 60 * 1000;
+let LiveJourneyStateClass = null;
+let createSyntheticJourneySprayControllerFn = null;
+
+async function loadJourneyLiveModules() {
+  if (!LiveJourneyStateClass) {
+    ({ LiveJourneyState: LiveJourneyStateClass } = await import('../../monitoring_dashboards/live/state.mjs'));
+  }
+  if (!createSyntheticJourneySprayControllerFn) {
+    ({ createSyntheticJourneySprayController: createSyntheticJourneySprayControllerFn } = await import('../../monitoring_dashboards/live/synthetic-spray.mjs'));
+  }
+}
 
 class JourneyMonitor {
   constructor(options = {}) {
     this.analyticsDb = new AnalyticsDB(options.dbPath);
-    this.journeyState = new LiveJourneyState();
+    // DuckDB ingest stays always-on; the in-memory journey state and SSE fan-out stay lazy.
+    this.journeyState = null;
     this.daemon = options.daemon || null;
     this.clients = new Set();
     this.totalEvents = 0;
@@ -34,20 +45,30 @@ class JourneyMonitor {
     this.syntheticTimer = null;
     this.fundingCache = new Map();
     this.fundingTtlMs = Number.isFinite(options.fundingTtlMs) ? options.fundingTtlMs : 15_000;
+    this.idleShutdownMs = Number.isFinite(options.idleShutdownMs)
+      ? options.idleShutdownMs
+      : DEFAULT_JOURNEY_IDLE_SHUTDOWN_MS;
+    this.liveRuntimeReady = false;
+    this.lastJourneyAccessAt = 0;
+    this._idleTimer = null;
   }
 
   setDaemon(daemon) {
     this.daemon = daemon || null;
   }
 
-  async open() {
+  async open({ liveRuntime = false } = {}) {
     await this.analyticsDb.open();
-    await this._hydrateFromDb();
+    await this._refreshHistorySummary();
+    if (liveRuntime) {
+      await this.ensureLiveRuntime();
+    }
     this.ready = true;
     return this;
   }
 
   async close() {
+    this._stopIdleTimer();
     this._stopSyntheticTimer();
     for (const res of this.clients) {
       try {
@@ -58,13 +79,26 @@ class JourneyMonitor {
     await this.analyticsDb.flush();
     await this.analyticsDb.close();
     this.ready = false;
+    this.liveRuntimeReady = false;
+  }
+
+  async _refreshHistorySummary() {
+    const summary = await this.analyticsDb.summary().catch(() => null);
+    if (!summary) {
+      this.totalEvents = 0;
+      this.historicalAgentCount = 0;
+      return;
+    }
+    this.totalEvents = Number(summary.total_events || 0);
+    this.historicalAgentCount = Number(summary.unique_agents || 0);
   }
 
   async _hydrateFromDb() {
+    const journeyState = await this._ensureJourneyState();
     this.totalEvents = 0;
     this.agentIds.clear();
     this.historicalAgentCount = 0;
-    this.journeyState.reset();
+    journeyState.reset();
 
     const events = await this.analyticsDb.listEvents({
       eventTypes: [...LIVE_STATE_EVENT_TYPES],
@@ -74,7 +108,7 @@ class JourneyMonitor {
     for (const event of events) {
       if (shouldIgnoreAgentSurfacePath(`${event?.path || ''}`)) continue;
       this._trackHistorical(event);
-      this.journeyState.applyEvent(event);
+      journeyState.applyEvent(event);
     }
 
     const summary = await this.analyticsDb.summary().catch(() => null);
@@ -85,6 +119,68 @@ class JourneyMonitor {
       this.historicalAgentCount = this.agentIds.size;
     }
     this.hydratedAt = Date.now();
+  }
+
+  async ensureLiveRuntime() {
+    this.noteJourneyAccess();
+    if (this.liveRuntimeReady) return this;
+    await this._ensureJourneyState();
+    await this._hydrateFromDb();
+    this.liveRuntimeReady = true;
+    this._scheduleIdleShutdown();
+    return this;
+  }
+
+  async _ensureJourneyState() {
+    if (this.journeyState) return this.journeyState;
+    await loadJourneyLiveModules();
+    this.journeyState = new LiveJourneyStateClass();
+    return this.journeyState;
+  }
+
+  async disableLiveRuntime() {
+    if (!this.liveRuntimeReady) return this;
+    this._stopSyntheticTimer();
+    this.syntheticController = null;
+    this.fundingCache.clear();
+    this.journeyState?.reset?.();
+    this.liveRuntimeReady = false;
+    this.hydratedAt = 0;
+    return this;
+  }
+
+  _stopIdleTimer() {
+    if (this._idleTimer) clearTimeout(this._idleTimer);
+    this._idleTimer = null;
+  }
+
+  noteJourneyAccess() {
+    this.lastJourneyAccessAt = Date.now();
+    this._scheduleIdleShutdown();
+  }
+
+  _scheduleIdleShutdown() {
+    this._stopIdleTimer();
+    if (!this.liveRuntimeReady || this.idleShutdownMs <= 0) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      void this._handleIdleShutdown();
+    }, this.idleShutdownMs);
+    this._idleTimer.unref?.();
+  }
+
+  async _handleIdleShutdown() {
+    if (!this.liveRuntimeReady) return;
+    if (this.clients.size > 0) {
+      this._scheduleIdleShutdown();
+      return;
+    }
+    const idleForMs = Date.now() - this.lastJourneyAccessAt;
+    if (idleForMs < this.idleShutdownMs) {
+      this._scheduleIdleShutdown();
+      return;
+    }
+    await this.disableLiveRuntime();
   }
 
   _trackHistorical(event) {
@@ -248,8 +344,10 @@ class JourneyMonitor {
   }
 
   async buildSnapshot() {
+    await this.ensureLiveRuntime();
+    const journeyState = await this._ensureJourneyState();
     const catalog = getAgentSurfaceSummary();
-    const rawSnapshot = this.journeyState.buildSnapshot({
+    const rawSnapshot = journeyState.buildSnapshot({
       log: this.getStatus(),
     });
     const agents = await Promise.all((rawSnapshot.agents || []).map((agent) => this._enrichAgent(agent)));
@@ -328,11 +426,13 @@ class JourneyMonitor {
   }
 
   addClient(res) {
+    this.noteJourneyAccess();
     this.clients.add(res);
   }
 
   removeClient(res) {
     this.clients.delete(res);
+    this.noteJourneyAccess();
   }
 
   _broadcast(event) {
@@ -347,6 +447,7 @@ class JourneyMonitor {
   }
 
   async broadcastSnapshot() {
+    if (!this.liveRuntimeReady) return;
     this._broadcast({
       type: 'snapshot',
       snapshot: await this.buildSnapshot(),
@@ -354,7 +455,7 @@ class JourneyMonitor {
   }
 
   _ingestLiveBatch(events) {
-    const applied = this.journeyState.ingestBatch(events);
+    const applied = this.journeyState?.ingestBatch?.(events) || [];
     for (const event of applied) this._broadcast(event);
     return applied;
   }
@@ -382,9 +483,11 @@ class JourneyMonitor {
     };
   }
 
-  startSyntheticTraffic() {
+  async startSyntheticTraffic() {
+    this.noteJourneyAccess();
     if (this.syntheticController) return this.getSyntheticStatus();
-    this.syntheticController = createSyntheticJourneySprayController();
+    await loadJourneyLiveModules();
+    this.syntheticController = createSyntheticJourneySprayControllerFn();
     const tick = () => {
       if (!this.syntheticController) return;
       const events = this.syntheticController.drain(Date.now());
@@ -397,12 +500,17 @@ class JourneyMonitor {
   }
 
   async stopSyntheticTraffic() {
+    this.noteJourneyAccess();
     if (!this.syntheticController) return this.getSyntheticStatus();
     this._stopSyntheticTimer();
     this.syntheticController = null;
     await this.analyticsDb.flush();
-    await this._hydrateFromDb();
-    await this.broadcastSnapshot();
+    if (this.liveRuntimeReady) {
+      await this._hydrateFromDb();
+      await this.broadcastSnapshot();
+    } else {
+      await this._refreshHistorySummary();
+    }
     return this.getSyntheticStatus();
   }
 
@@ -417,8 +525,8 @@ class JourneyMonitor {
     this._trackHistorical(storedEvent);
     this.analyticsDb.ingest(storedEvent);
 
-    if (!LIVE_STATE_EVENT_TYPES.has(storedEvent.event)) return null;
-    const applied = this.journeyState.applyEvent(storedEvent);
+    if (!this.liveRuntimeReady || !LIVE_STATE_EVENT_TYPES.has(storedEvent.event)) return null;
+    const applied = this.journeyState?.applyEvent?.(storedEvent) || null;
     if (applied?.agent) {
       applied.agent = await this._enrichAgent(applied.agent);
     }
@@ -467,15 +575,18 @@ let singleton = null;
 let openPromise = null;
 
 export async function startJourneyMonitor(options = {}) {
-  if (singleton?.ready) return singleton;
+  if (singleton?.ready && (!options.liveRuntime || singleton.liveRuntimeReady)) return singleton;
   if (!singleton) singleton = new JourneyMonitor(options);
   if (!openPromise) {
-    openPromise = singleton.open()
+    openPromise = singleton.open({ liveRuntime: options.liveRuntime === true })
       .finally(() => {
         openPromise = null;
       });
   }
   await openPromise;
+  if (options.liveRuntime === true) {
+    await singleton.ensureLiveRuntime();
+  }
   return singleton;
 }
 

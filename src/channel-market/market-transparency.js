@@ -194,9 +194,13 @@ export class MarketTransparency {
 
     // Get peer info from LND
     let peerAlias = null;
-    const info = await this._lndCache.getNodeInfo(pubkey);
-    if (info) {
-      peerAlias = info?.node?.alias || null;
+    try {
+      const info = await this._lndCache.getNodeInfo(pubkey);
+      if (info) {
+        peerAlias = info?.node?.alias || null;
+      }
+    } catch {
+      peerAlias = null;
     }
 
     return {

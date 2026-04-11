@@ -1,9 +1,14 @@
 import https from 'node:https';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_KEEP_ALIVE_MS = 10_000;
+const DEFAULT_MAX_SOCKETS = 64;
+const DEFAULT_MAX_FREE_SOCKETS = 8;
+const SHARED_HTTPS_AGENTS = new Map();
 
 // Error codes that warrant a retry
 const TRANSIENT_CODES = new Set([
@@ -23,6 +28,40 @@ function isTransientError(err) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parsePositiveInt(raw, fallback) {
+  const value = Number.parseInt(`${raw ?? ''}`, 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getSharedAgentKey(host, port, certBuf) {
+  const hash = createHash('sha256').update(certBuf).digest('hex');
+  return [
+    host,
+    port,
+    hash,
+    parsePositiveInt(process.env.AOL_LND_KEEP_ALIVE_MS, DEFAULT_KEEP_ALIVE_MS),
+    parsePositiveInt(process.env.AOL_LND_MAX_SOCKETS, DEFAULT_MAX_SOCKETS),
+    parsePositiveInt(process.env.AOL_LND_MAX_FREE_SOCKETS, DEFAULT_MAX_FREE_SOCKETS),
+  ].join(':');
+}
+
+function getSharedHttpsAgent({ host, port, certBuf }) {
+  const key = getSharedAgentKey(host, port, certBuf);
+  let agent = SHARED_HTTPS_AGENTS.get(key);
+  if (!agent) {
+    agent = new https.Agent({
+      ca: certBuf,
+      rejectUnauthorized: true,
+      keepAlive: true,
+      keepAliveMsecs: parsePositiveInt(process.env.AOL_LND_KEEP_ALIVE_MS, DEFAULT_KEEP_ALIVE_MS),
+      maxSockets: parsePositiveInt(process.env.AOL_LND_MAX_SOCKETS, DEFAULT_MAX_SOCKETS),
+      maxFreeSockets: parsePositiveInt(process.env.AOL_LND_MAX_FREE_SOCKETS, DEFAULT_MAX_FREE_SOCKETS),
+    });
+    SHARED_HTTPS_AGENTS.set(key, agent);
+  }
+  return agent;
 }
 
 function normalizeLndMessage(value, fallback = 'Unknown LND error') {
@@ -80,6 +119,7 @@ export class NodeClient {
     this._macaroonHex = null;
     this._agent = null;
     this._initialized = false;
+    this._inflightReads = new Map();
   }
 
   // ---------------------------------------------------------------------------
@@ -99,11 +139,10 @@ export class NodeClient {
 
     this._macaroonHex = macaroonBuf.toString('hex');
 
-    this._agent = new https.Agent({
-      ca: certBuf,               // Trust LND's self-signed certificate
-      rejectUnauthorized: true,  // Still verify — just against the loaded CA
-      keepAlive: true,
-      keepAliveMsecs: 30_000,
+    this._agent = getSharedHttpsAgent({
+      host: this.host,
+      port: this.restPort,
+      certBuf,
     });
 
     this._initialized = true;
@@ -128,11 +167,10 @@ export class NodeClient {
       certBuf = Buffer.from(tlsCertBase64OrPem, 'base64');
     }
 
-    this._agent = new https.Agent({
-      ca: certBuf,
-      rejectUnauthorized: true,
-      keepAlive: true,
-      keepAliveMsecs: 30_000,
+    this._agent = getSharedHttpsAgent({
+      host: this.host,
+      port: this.restPort,
+      certBuf,
     });
 
     this._initialized = true;
@@ -158,6 +196,14 @@ export class NodeClient {
 
     const qs = query ? '?' + new URLSearchParams(query).toString() : '';
     const url = `${path}${qs}`;
+    const normalizedMethod = String(method || 'GET').toUpperCase();
+    if (normalizedMethod === 'GET' && body == null && !requestOptions?.disableSingleflight) {
+      return this._getInflightRead(url, () => this._requestSingle(normalizedMethod, url, body, requestOptions));
+    }
+    return this._requestSingle(normalizedMethod, url, body, requestOptions);
+  }
+
+  async _requestSingle(method, url, body = null, requestOptions = {}) {
     const jsonBody = body != null ? JSON.stringify(body) : null;
 
     let lastError = null;
@@ -199,6 +245,21 @@ export class NodeClient {
     }
 
     throw lastError;
+  }
+
+  _getInflightRead(key, execute) {
+    const existing = this._inflightReads.get(key);
+    if (existing) return existing;
+
+    const promise = Promise.resolve()
+      .then(execute)
+      .finally(() => {
+        if (this._inflightReads.get(key) === promise) {
+          this._inflightReads.delete(key);
+        }
+      });
+    this._inflightReads.set(key, promise);
+    return promise;
   }
 
   /**

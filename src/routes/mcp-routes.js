@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +5,6 @@ import { Router } from 'express';
 import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { MCP_DOCS, MCP_TASK_PROMPTS } from '../mcp/catalog.js';
 import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
@@ -2585,79 +2583,50 @@ function jsonRpcError(res, status, message) {
 export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonlightning.com' } = {}) {
   const router = Router();
   const mcpRate = rateLimit('mcp');
-  const transports = new Map();
 
-  function getSessionTransport(sessionId) {
-    return typeof sessionId === 'string' && sessionId ? transports.get(sessionId) || null : null;
-  }
-
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-root","summary":"Read the MCP discovery document or continue an MCP session stream.","order":610,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-root","summary":"Read the MCP discovery document.","order":610,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/mcp', mcpRate, async (req, res) => {
-    const sessionId = req.get('mcp-session-id');
-    const transport = getSessionTransport(sessionId);
-    if (transport) {
-      await transport.handleRequest(req, res);
-      return;
-    }
     res.json(buildDiscoveryDocument({ origin: getOrigin(req, publicBaseUrl) }));
   });
 
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-transport","summary":"Use the hosted MCP transport.","order":611,"tags":["discovery","write","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.post('/mcp', mcpRate, async (req, res) => {
+    let transport = null;
+    let server = null;
+    let cleanedUp = false;
+    const cleanup = async () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      await Promise.allSettled([
+        transport?.close?.(),
+        server?.close?.(),
+      ]);
+    };
     try {
-      const sessionId = req.get('mcp-session-id');
-      const existingTransport = getSessionTransport(sessionId);
-      if (existingTransport) {
-        await existingTransport.handleRequest(req, res, req.body);
-        return;
-      }
-      if (!isInitializeRequest(req.body)) {
-        jsonRpcError(res, 400, 'No valid MCP session was found. Start with an initialize request.');
-        return;
-      }
-
-      let transport;
       transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
+        sessionIdGenerator: undefined,
         enableJsonResponse: true,
-        onsessioninitialized: (newSessionId) => {
-          transports.set(newSessionId, transport);
-        },
       });
-      transport.onclose = () => {
-        if (transport.sessionId) {
-          transports.delete(transport.sessionId);
-        }
-      };
+      transport.onclose = () => { void cleanup(); };
 
       const origin = getOrigin(req, publicBaseUrl);
-      const server = buildMcpServer({ internalBaseUrl, publicBaseUrl: origin });
+      server = buildMcpServer({ internalBaseUrl, publicBaseUrl: origin });
+      res.once('close', () => { void cleanup(); });
+      res.once('finish', () => { void cleanup(); });
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
       console.error('[mcp] POST /mcp failed:', error);
+      await cleanup();
       if (!res.headersSent) {
         jsonRpcError(res, 500, 'Internal MCP server error.');
       }
     }
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-session-close","summary":"Close an MCP session.","order":612,"tags":["discovery","write","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-session-close","summary":"Compatibility no-op for stateless MCP clients.","order":612,"tags":["discovery","write","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.delete('/mcp', mcpRate, async (req, res) => {
-    try {
-      const sessionId = req.get('mcp-session-id');
-      const transport = getSessionTransport(sessionId);
-      if (!transport) {
-        jsonRpcError(res, 400, 'No valid MCP session was found.');
-        return;
-      }
-      await transport.handleRequest(req, res);
-    } catch (error) {
-      console.error('[mcp] DELETE /mcp failed:', error);
-      if (!res.headersSent) {
-        jsonRpcError(res, 500, 'Internal MCP server error.');
-      }
-    }
+    res.status(204).end();
   });
 
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-manifest","summary":"Read the MCP manifest document.","order":613,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}

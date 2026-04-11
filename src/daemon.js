@@ -321,7 +321,6 @@ export class AgentDaemon {
         dataLayer: this.dataLayer,
         config: getHelpServiceSettings(this.config),
       });
-      await this.helpEndpoint.initialize();
     } catch (err) {
       console.warn(`[AgentDaemon] Help endpoint init failed: ${err.message}`);
       this._startupWarnings.push(`Help endpoint unavailable: ${err.message}`);

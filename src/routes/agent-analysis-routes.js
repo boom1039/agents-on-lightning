@@ -106,7 +106,7 @@ export function agentAnalysisRoutes(daemon) {
       }
 
       const [info, networkInfo] = await Promise.all([
-        client.getInfo().catch(() => null),
+        (daemon.lndCache?.getInfoLive?.() || client.getInfo()).catch(() => null),
         client.getNetworkInfo().catch(() => null),
       ]);
 
@@ -125,10 +125,11 @@ export function agentAnalysisRoutes(daemon) {
     if (!check.valid) return err400Validation(res, check.reason, { see: 'GET /api/v1/analysis/network-health' });
 
     try {
+      const lnd = daemon.lndCache;
       const client = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
-      if (!client) return res.json({ error: 'No LND node connected' });
+      if (!client || !lnd) return res.json({ error: 'No LND node connected' });
 
-      const nodeInfo = await client.getNodeInfo(req.params.pubkey);
+      const nodeInfo = await lnd.getNodeInfoLive(req.params.pubkey);
       const n = nodeInfo?.node || {};
 
       res.json({
@@ -157,12 +158,13 @@ export function agentAnalysisRoutes(daemon) {
     if (!check.valid) return err400Validation(res, check.reason);
 
     try {
+      const lnd = daemon.lndCache;
       const client = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
-      if (!client) return res.json({ error: 'No LND node connected' });
+      if (!client || !lnd) return res.json({ error: 'No LND node connected' });
 
       // 1. Get our channels (who we already connect to)
-      const myChannels = await client.listChannels();
-      const myPeers = (myChannels.channels || []).map(c => c.remote_pubkey);
+      const myChannels = await lnd.getChannelsLive();
+      const myPeers = myChannels.map(c => c.remote_pubkey);
 
       // 2. Get target node's channels (their peers) — include_channels=true to get the channel list
       const targetInfo = await client._get(`/v1/graph/node/${req.params.pubkey}?include_channels=true`);
@@ -178,7 +180,7 @@ export function agentAnalysisRoutes(daemon) {
       const oneHopCandidates = await Promise.all(
         peerList.map(async (pubkey) => {
           try {
-            const info = await client.getNodeInfo(pubkey);
+            const info = await lnd.getNodeInfoLive(pubkey);
             return {
               pubkey,
               alias: info.node?.alias || '',

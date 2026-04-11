@@ -7,6 +7,8 @@ config/*.local.yaml
 .claude/settings.local.json
 .claude/worktrees/
 *.log
+*.tgz
+output/
 .DS_Store
 test/routes/reports/
 
@@ -15,3 +17,7 @@ autoresearch-lessons.md
 autoresearch-state.json
 research-results.tsv
 .gstack/
+
+# Local sequence-diagram generator scratch
+scripts/local-generate-sequence-diagrams.mjs
+docs/agent-sequence-diagrams.html

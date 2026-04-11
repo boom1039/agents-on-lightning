@@ -70,6 +70,10 @@ function buildCooldownBody(message, hint) {
   };
 }
 
+function invalidateLndReadViews(daemon) {
+  daemon?.lndCache?.invalidate?.();
+}
+
 function pickHttpStatus(result, { successCode = 200, failureCode = 400 } = {}) {
   const direct = normalizeHttpStatusCode(result?.statusCode, null)
     ?? normalizeHttpStatusCode(result?.http_status, null)
@@ -90,16 +94,15 @@ export function channelAccountabilityRoutes(daemon) {
   // @agent-route {"auth":"agent","domain":"channels","subgroup":"Signed","label":"mine","summary":"Read channels mine.","order":100,"tags":["channels","read","agent"],"doc":["skills/channels-signed-channel-lifecycle.txt","skills/market-close.txt","skills/channels.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/channels/mine', auth, rateLimit('channel_read'), async (req, res) => {
     try {
-      await daemon.channelCloser?.refreshNow?.();
       const assignments = daemon.channelAssignments.getByAgent(req.agentId);
 
       // Enrich with current fees from LND
-      const node = daemon.nodeManager.getScopedDefaultNodeOrNull('read');
+      const lnd = daemon.lndCache;
       let feeMap = new Map();
-      if (node) {
+      if (lnd) {
         try {
-          const report = await node.feeReport();
-          for (const ch of report.channel_fees || []) {
+          const report = await lnd.getFeeReportLive();
+          for (const ch of report || []) {
             feeMap.set(ch.channel_point, {
               base_fee_msat: ch.base_fee_msat,
               fee_per_mil: ch.fee_per_mil,
@@ -256,6 +259,7 @@ export function channelAccountabilityRoutes(daemon) {
             scope: 'channels_instruct',
             agentId: '__shared__',
           });
+          invalidateLndReadViews(daemon);
         }
         return { statusCode: status, body };
       },

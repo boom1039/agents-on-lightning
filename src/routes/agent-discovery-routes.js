@@ -249,13 +249,17 @@ export function agentDiscoveryRoutes(daemon) {
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/platform/status', discoveryRate, async (_req, res) => {
     try {
-      const node = daemon.nodeManager?.getScopedDefaultNodeOrNull('read');
-      if (!node) {
+      const lnd = daemon.lndCache;
+      if (!lnd) {
         return err503Service(res, 'LND node');
       }
-      const info = await node.getInfo();
-      const channels = await node.listChannels();
-      const channelList = channels?.channels || [];
+      const [info, channelList] = await Promise.all([
+        lnd.getInfoLive(),
+        lnd.getChannelsLive(),
+      ]);
+      if (!info) {
+        return err503Service(res, 'LND node');
+      }
       res.json({
         block_height: parseInt(info.block_height || 0),
         synced_to_chain: info.synced_to_chain || false,
