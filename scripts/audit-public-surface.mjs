@@ -5,6 +5,7 @@ import { getAgentSurfaceManifest } from '../src/monitor/agent-surface-inventory.
 
 const baseUrl = process.env.AOL_AUDIT_BASE_URL || 'https://agentsonlightning.com';
 const expectMcpOnly = process.env.AOL_EXPECT_MCP_ONLY === '1';
+const auditDelayMs = Number(process.env.AOL_AUDIT_DELAY_MS || (expectMcpOnly ? 500 : 0));
 const outDir = resolve(process.cwd(), 'output');
 const now = new Date();
 const stamp = now.toISOString().replace(/[:.]/g, '-');
@@ -83,6 +84,19 @@ async function fetchJson(path, { method = 'GET', body = null, headers = {} } = {
     body: json,
     text,
   };
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+async function fetchJsonWithRetry(path, options = {}) {
+  let result = await fetchJson(path, options);
+  if (expectMcpOnly && result.status === 503) {
+    await sleep(Math.max(250, auditDelayMs * 4));
+    result = await fetchJson(path, options);
+  }
+  return result;
 }
 
 function collectSensitiveFields(value, prefix = '') {
@@ -204,6 +218,7 @@ const report = {
   agent_routes: 0,
   skipped_routes: [],
   mcp_only_hidden_routes: [],
+  mcp_only_blocked_routes: [],
   unexpected_public_agent_routes: [],
   public_payload_risks: [],
   public_ok: [],
@@ -219,11 +234,14 @@ for (const route of manifest.routes) {
 
   const req = buildRequest(route, samples);
   try {
-    const result = await fetchJson(req.path, req);
+    if (auditDelayMs > 0) await sleep(auditDelayMs);
+    const result = await fetchJsonWithRetry(req.path, req);
 
     if (expectMcpOnly && route.path.startsWith('/api/v1/')) {
       if (result.status === 404) {
         report.mcp_only_hidden_routes.push({ key: route.key, status: result.status, url: result.url });
+      } else if (SAFE_UNAUTH_STATUSES.has(result.status)) {
+        report.mcp_only_blocked_routes.push({ key: route.key, status: result.status, url: result.url });
       } else {
         report.unexpected_public_agent_routes.push({
           key: route.key,
@@ -291,6 +309,7 @@ console.log(`manifest_routes=${report.manifest_routes}`);
 console.log(`public_routes_checked=${report.public_routes}`);
 console.log(`agent_routes_checked=${report.agent_routes}`);
 console.log(`mcp_only_hidden_routes=${report.mcp_only_hidden_routes.length}`);
+console.log(`mcp_only_blocked_routes=${report.mcp_only_blocked_routes.length}`);
 console.log(`unexpected_public_agent_routes=${report.unexpected_public_agent_routes.length}`);
 console.log(`public_payload_risks=${report.public_payload_risks.length}`);
 console.log(`probe_failures=${report.probe_failures.length}`);
