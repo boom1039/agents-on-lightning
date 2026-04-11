@@ -1,53 +1,58 @@
-# EC2 Deploy Runbook
+# EC2 Deploy
 
-This repo supports one production deploy shape:
+Production has one normal deploy command:
 
-1. Build a runtime-only artifact off-box.
-2. Deploy it to `APP_DIR/releases/<stamp>`.
-3. Point `APP_DIR/current` at that release.
+```bash
+npm run prod:deploy
+```
 
-Do not use `git pull` as the production deploy path.
-Do not commit server-local env files, config files, certs, macaroons, or data.
+That command owns the full deploy shape:
 
-## Keep these in git
+1. Build a runtime-only tarball locally.
+2. Upload it to EC2.
+3. Extract it to `APP_DIR/releases/<stamp>`.
+4. Point `APP_DIR/current` at that release.
+5. Restart systemd.
+6. Prove prod is healthy.
 
-These files should match what prod runs:
+Do not use `git pull`, manual `scp`, or direct lower-level scripts as the normal prod deploy path.
+Do not commit real env files, config files, certs, macaroons, keys, or live data.
 
-- `deploy/config/agents-on-lightning.env.example`
-- `deploy/config/config.yaml.example`
-- `deploy/systemd/agents-on-lightning.service.template`
-- `deploy/nginx/agents-on-lightning.conf.template`
-- `deploy/nginx/agents-on-lightning-proxy.conf.template`
+## Canonical Deploy
 
-Keep these out of git:
+Create a private deploy env first:
 
-- real env values
-- real config values
-- certs
-- macaroons
-- live data
+```bash
+cp deploy/config/prod-deploy.env.example deploy/prod.env
+```
 
-## Pick your own local values
+Then deploy:
 
-Replace these placeholders on the box:
+```bash
+npm run prod:deploy
+```
 
-- `APP_DIR` — where the repo lives
-- `APP_CONFIG_DIR` — where your private env and config files live
-- `APP_DATA_DIR` — writable app state directory
-- `APP_USER` — service user
-- `APP_HOST` — local bind host
-- `APP_PORT` — app port
-- `DOCS_RATE_LIMIT`, `API_RATE_LIMIT`, `DANGER_RATE_LIMIT`, `MCP_RATE_LIMIT` — your NGINX rate strings
-- `DOCS_BURST`, `API_BURST`, `APP_BURST`, `DANGER_BURST`, `MCP_BURST` — your NGINX burst values
-- `LND_REST_HOST` — your node REST host
-- `LND_REST_PORT` — your node REST port
-- `LND_MACAROON_PATH` — path to the macaroon you want this app to use
-- `LND_TLS_CERT_PATH` — path to the matching TLS cert
-- `CASHU_MINT_URL` — your Cashu mint URL
-- `CASHU_SEED_PATH` — where the Cashu master seed should live
-- `PRIMARY_DOMAIN` and `EXTRA_DOMAINS` — your public hostnames
+What `prod-deploy.sh` does:
 
-## 1. Install packages
+1. Runs `npm run proof:hardening` with a short deploy load proof.
+2. Builds a runtime artifact with `deploy/build-runtime-artifact.sh`.
+3. Deploys it with `deploy/prod-update.sh`.
+4. Runs `deploy/prod-check.sh`.
+5. Runs hosted MCP and public-surface checks.
+
+Useful knobs:
+
+```bash
+AOL_DEPLOY_PROOF_REQUESTS=150000 npm run prod:deploy
+AOL_DEPLOY_SKIP_PROOF=1 npm run prod:deploy
+AOL_DEPLOY_ENV_FILE=/private/path/prod.env npm run prod:deploy
+```
+
+These are still the same deploy flow; they only tune proof size or env-file location.
+
+## One-Time EC2 Setup
+
+Install basics:
 
 ```bash
 sudo apt update
@@ -59,367 +64,251 @@ node -v
 
 Use Node `>=20`.
 
-## 2. Initial clone and install
+Create directories and user:
 
 ```bash
-git clone YOUR_REPO_URL APP_DIR
-cd APP_DIR
+sudo mkdir -p /opt/agents_on_lightning /etc/agents-on-lightning /var/lib/agents-on-lightning /var/www/certbot
+sudo useradd --system --home /opt/agents_on_lightning --shell /usr/sbin/nologin agentsonlightning || true
+sudo chown -R agentsonlightning:agentsonlightning /opt/agents_on_lightning /var/lib/agents-on-lightning
+```
+
+Seed Linux dependencies once during host bootstrap:
+
+```bash
+git clone YOUR_REPO_URL /opt/agents_on_lightning
+cd /opt/agents_on_lightning
 npm ci --omit=dev
+mkdir -p /opt/agents_on_lightning/data /opt/agents_on_lightning/releases
+sudo chown -R agentsonlightning:agentsonlightning /opt/agents_on_lightning
 ```
 
-Important:
+Normal deploys must use `npm run prod:deploy`, not on-box `npm ci`.
 
-- Preferred production layout is `APP_DIR/releases/<stamp>` plus `APP_DIR/current`.
-- The initial clone exists to seed the host with a compatible Linux `node_modules` tree and a home for `releases/` and `current/`.
-- Create `APP_DIR/data` before starting systemd, or the service can fail with `status=226/NAMESPACE` because `ReadWritePaths=APP_DATA_DIR APP_DIR/data` expects that path to exist.
-- Do not run `npm ci` on a small prod box during normal code deploys.
-- For later deploys, build elsewhere and ship a runtime artifact.
+## Prod Runtime Files
 
-## 2b. Preferred runtime artifact build
-
-```bash
-./deploy/build-runtime-artifact.sh
-```
-
-This writes a tarball under `output/runtime-artifacts/` containing runtime files only by default.
-It does **not** bundle `node_modules` unless you explicitly set `AOL_RUNTIME_INCLUDE_NODE_MODULES=1`.
-On macOS, the build uses a portable tar format and disables macOS copyfile metadata so Linux untar stays quiet.
-
-## 3. Create the service user and directories
-
-```bash
-sudo mkdir -p APP_CONFIG_DIR APP_DATA_DIR /var/www/certbot
-sudo useradd --system --home APP_DIR --shell /usr/sbin/nologin APP_USER || true
-sudo chown -R APP_USER:APP_USER APP_DIR APP_DATA_DIR
-```
-
-## 4. Write the env file
-
-Start from `deploy/config/agents-on-lightning.env.example`.
-Create `APP_CONFIG_DIR/agents-on-lightning.env`:
+Private env file on EC2:
 
 ```dotenv
 NODE_ENV=production
 AOL_SERVER_ROLE=prod
-AOL_CONFIG_PATH=APP_CONFIG_DIR/config.yaml
-AOL_DATA_DIR=APP_DATA_DIR
-AOL_JOURNEY_DB_PATH=APP_DATA_DIR/data/journey-analytics.duckdb
-HOST=APP_HOST
-PORT=APP_PORT
+AOL_CONFIG_PATH=/etc/agents-on-lightning/config.yaml
+AOL_DATA_DIR=/var/lib/agents-on-lightning
+AOL_JOURNEY_DB_PATH=/var/lib/agents-on-lightning/data/journey-analytics.duckdb
+HOST=127.0.0.1
+PORT=3302
 TRUST_PROXY=1
 PYTHON3=/usr/bin/python3
-
-# Optional secrets and allowlists:
-# ANTHROPIC_API_KEY=...
-# ANTHROPIC_API_KEY_FILE=PRIVATE_PATH
-# OPERATOR_API_SECRET=...
-# CORS_ORIGINS=https://example.com,https://www.example.com
-# CHANNEL_OPEN_PEER_ALLOWLIST=...
-# CHANNEL_OPEN_REQUIRE_PEER_ALLOWLIST=1
+ANTHROPIC_API_KEY_FILE=/etc/agents-on-lightning/anthropic_api_key
+OPERATOR_API_SECRET=PRIVATE_VALUE
 ```
 
-## 5. Write the app config
+Private config file on EC2:
 
-Start from `deploy/config/config.yaml.example`.
-Create `APP_CONFIG_DIR/config.yaml`:
-
-```yaml
-web:
-  port: APP_PORT
-
-nodes:
-  alpha:
-    host: LND_REST_HOST
-    restPort: LND_REST_PORT
-    macaroonPath: LND_MACAROON_PATH
-    tlsCertPath: LND_TLS_CERT_PATH
-
-cashu:
-  mintUrl: CASHU_MINT_URL
-  seedPath: CASHU_SEED_PATH
-
-# Required hidden service config.
-# Copy the real private values from your non-git local config.
-dangerRoutes:
-  ...
-
-channelOpen:
-  ...
-
-rebalance:
-  ...
-
-safety:
-  signedChannels:
-    defaultCooldownMinutes: PRIVATE_VALUE
-
-help:
-  apiKeyFile: PRIVATE_PATH
-  rateLimit: PRIVATE_VALUE
-  rateWindowMs: PRIVATE_VALUE
-  upstreamTimeoutMs: PRIVATE_VALUE
-  circuitFailureLimit: PRIVATE_VALUE
-  circuitFailureWindowMs: PRIVATE_VALUE
-  circuitOpenMs: PRIVATE_VALUE
-
-swap:
-  minSwapSats: PRIVATE_VALUE
-  maxSwapSats: PRIVATE_VALUE
-  maxConcurrentSwaps: PRIVATE_VALUE
-  pollIntervalMs: PRIVATE_VALUE
-  invoiceTimeoutSeconds: PRIVATE_VALUE
-  feeLimitSat: PRIVATE_VALUE
-  swapExpiryMs: PRIVATE_VALUE
-
-wallet:
-  maxRoutingFeeSats: PRIVATE_VALUE
-  withdrawalTimeoutSeconds: PRIVATE_VALUE
-
-rateLimits:
-  globalCap:
-    limit: PRIVATE_VALUE
-    windowMs: PRIVATE_VALUE
-  progressive:
-    resetWindowMs: PRIVATE_VALUE
-    thresholds:
-      - violations: PRIVATE_VALUE
-        multiplier: PRIVATE_VALUE
-      - violations: PRIVATE_VALUE
-        multiplier: PRIVATE_VALUE
-  categories:
-    registration: ...
-    analysis: ...
-    wallet_write: ...
-    wallet_read: ...
-    social_write: ...
-    social_read: ...
-    discovery: ...
-    mcp: ...
-    channel_instruct: ...
-    channel_read: ...
-    analytics_query: ...
-    capital_read: ...
-    capital_write: ...
-    market_read: ...
-    market_private_read: ...
-    market_write: ...
-    identity_read: ...
-    identity_write: ...
-    node_write: ...
-
-velocity:
-  dailyLimitSats: PRIVATE_VALUE
+```text
+/etc/agents-on-lightning/config.yaml
 ```
 
-## 6. Write the systemd unit
+Start from:
 
-Start from `deploy/systemd/agents-on-lightning.service.template`.
-Create `/etc/systemd/system/agents-on-lightning.service`:
-
-```ini
-[Unit]
-Description=Agents on Lightning API
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=APP_USER
-Group=APP_USER
-WorkingDirectory=APP_DIR/current
-EnvironmentFile=APP_CONFIG_DIR/agents-on-lightning.env
-ExecStart=/usr/bin/node APP_DIR/current/src/index.js
-Restart=on-failure
-RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=APP_DATA_DIR APP_DIR/data APP_DIR/releases APP_DIR/current
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictRealtime=true
-LockPersonality=true
-UMask=0077
-
-[Install]
-WantedBy=multi-user.target
+```text
+deploy/config/config.yaml.example
 ```
 
-Then start it:
+Systemd unit on EC2:
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now agents-on-lightning
-sudo systemctl status agents-on-lightning
+```text
+/etc/systemd/system/agents-on-lightning.service
 ```
 
-## 7. Smoke test the local app
+Start from:
 
-```bash
-curl "http://APP_HOST:APP_PORT/health"
-curl "http://APP_HOST:APP_PORT/llms.txt"
-curl "http://APP_HOST:APP_PORT/api/v1/"
-curl "http://APP_HOST:APP_PORT/journey/"
-curl "http://APP_HOST:APP_PORT/journey/three"
+```text
+deploy/systemd/agents-on-lightning.service.template
 ```
 
-Journey is now operator-protected:
+Important systemd state paths:
 
-- public `/journey`, `/journey/three`, and `/api/journey` should return `401`
-- authorized operator requests should return `200`
-
-## 8. Optional dashboard basic auth
-
-```bash
-sudo htpasswd -c /etc/nginx/.htpasswd-agents-dashboard YOUR_USERNAME
+```text
+ReadWritePaths=/var/lib/agents-on-lightning /opt/agents_on_lightning/releases /opt/agents_on_lightning/current /opt/agents_on_lightning/data
 ```
 
-## 9. Put NGINX in front
+## Runtime State Rules
 
-Start from `deploy/nginx/agents-on-lightning.conf.template` and `deploy/nginx/agents-on-lightning-proxy.conf.template`.
-Use your own domain names and certificate paths.
-Proxy the public site to `APP_HOST:APP_PORT`.
-If you want dashboard auth, protect `/journey/` and `/journey/three` in NGINX.
-There is no separate Journey server now.
-`/journey`, `/journey/three`, `/api/journey`, `/api/journey/events`, and `/api/journey/manifest` must all proxy to the main app on `APP_HOST:APP_PORT`, not an old `3308` monitor upstream.
+Keep these separate:
 
-## 10. Update an existing box safely
+1. Code releases: `/opt/agents_on_lightning/releases/<stamp>`.
+2. Current symlink: `/opt/agents_on_lightning/current`.
+3. Private config: `/etc/agents-on-lightning`.
+4. Runtime state: `/var/lib/agents-on-lightning/data`.
 
-Use `deploy/update-prod.sh` for every normal production deploy.
+Journey analytics must live here:
 
-Important behavior:
-
-- it requires `PROD_RUNTIME_ARTIFACT`
-- it unpacks the artifact to `APP_DIR/releases/<stamp>` and flips `APP_DIR/current`
-- it reuses the current Linux `node_modules` tree only when the new runtime `dependencies` are fully covered
-- it does **not** run `npm ci` unless you explicitly set `PROD_ALLOW_DEP_INSTALL=1`
-- it removes the stale `agents-on-lightning-monitor.service` if that old unit still exists on the host
-- `deploy/check-prod.sh` fails if the active release writes journey analytics into `APP_DIR/current/data`
-
-## 10b. Build a runtime-only artifact off-box
-
-```bash
-./deploy/build-runtime-artifact.sh
+```text
+/var/lib/agents-on-lightning/data/journey-analytics.duckdb
 ```
 
-That artifact includes only:
+It must not live here:
 
-- `src/`
-- `config/default.yaml`
-- `docs/llms.txt`
-- `docs/llms-mcp.txt`
-- `docs/mcp/`
-- `docs/skills/`
-- `docs/knowledge/`
-- `monitoring_dashboards/journey/`
-- `monitoring_dashboards/live/`
-- `package.json`
-- `package-lock.json`
+```text
+/opt/agents_on_lightning/current/data/journey-analytics.duckdb
+```
 
-It excludes repo history, tests, plans, output, and other non-runtime files.
-If you intentionally build with `AOL_RUNTIME_INCLUDE_NODE_MODULES=1`, only deploy that artifact to a matching build platform.
+`deploy/prod-check.sh` fails if that drift happens again.
 
-## 10c. Managed reverse tunnel for laptop-backed services
+## Artifact Contents
 
-The preferred replacement for an ad hoc manual SSH port-forward is a supervised reverse tunnel from the laptop to EC2.
+`npm run prod:deploy` builds the artifact through `deploy/build-runtime-artifact.sh`.
+Do not use the artifact builder as a separate deploy path.
+
+Default artifact includes:
+
+1. `src/`
+2. `config/default.yaml`
+3. `docs/llms.txt`
+4. `docs/llms-mcp.txt`
+5. `docs/mcp/`
+6. `docs/skills/`
+7. `docs/knowledge/`
+8. `monitoring_dashboards/journey/`
+9. `monitoring_dashboards/live/`
+10. `package.json`
+11. `package-lock.json`
+
+It excludes `.git`, `plans`, `output`, tests, scratch scripts, and other non-runtime files.
+Leave `AOL_RUNTIME_INCLUDE_NODE_MODULES` unset for macOS-to-Linux prod deploys.
+
+## Laptop LND Tunnel
+
+If EC2 reaches LND through a laptop reverse tunnel, keep it managed by systemd instead of a manual terminal.
 
 Use:
 
-- `deploy/systemd/agents-on-lightning-reverse-tunnel.service.template`
-- `deploy/config/managed-reverse-tunnel.env.example`
+1. `deploy/systemd/agents-on-lightning-reverse-tunnel.service.template`
+2. `deploy/config/managed-reverse-tunnel.env.example`
 
-Bind all forwarded ports to `127.0.0.1` on EC2, then point the app config at those loopback ports.
+Forward only loopback ports on EC2, then point `config.yaml` at those EC2 loopback ports:
 
-## 11. What broke on Apr 9, 2026
-
-The prod `t4g.micro` OOMed during `npm ci`, then multiple runtime-state JSON files were left at zero bytes:
-
-- `data/security/rate-limits.json`
-- `data/channel-market/deposit-addresses.json`
-- `data/channel-market/performance-uptime.json`
-
-That incident taught 3 hard rules:
-
-1. Code sync is not enough; config drift in `/etc/agents-on-lightning/*` can still break prod.
-2. Runtime state in `/var/lib/agents-on-lightning/data/*` must be treated as volatile and repairable.
-3. Tiny boxes need guarded deploys, swap, or both.
-
-Keep 3 things separate in your head:
-
-1. git code in `/opt/agents_on_lightning`
-2. private prod config in `/etc/agents-on-lightning`
-3. runtime state in `/var/lib/agents-on-lightning/data`
-
-That means local `git`, `origin/main`, and the EC2 checkout can all match while prod is still broken because config or runtime state drifted.
-
-If prod looks half-alive, check these first:
-
-1. `systemctl status agents-on-lightning`
-2. `curl http://127.0.0.1:3302/health`
-3. `/var/lib/agents-on-lightning/data/security/rate-limits.json`
-4. `/var/lib/agents-on-lightning/data/channel-market/deposit-addresses.json`
-5. `/var/lib/agents-on-lightning/data/channel-market/performance-uptime.json`
-
-Hosted MCP can fail because of prod config drift, not repo code drift.
-
-1. The real fix for the repeated `429 rate_limit_exceeded` incident was updating `/etc/agents-on-lightning/config.yaml`
-2. Stale prod MCP limits can survive even when git code is fully synced
-
-Keep `/etc/agents-on-lightning/agents-on-lightning.env` clean.
-
-1. A typo like `nOPERATOR_API_SECRET=...n` can break operator-only routes in confusing ways
-2. Public `/journey`, `/journey/three`, and `/api/journey` should return `401`
-3. Authorized operator requests should return `200`
-
-Runtime-state JSON should be repairable.
-
-1. Zero-byte or malformed volatile files should be quarantined and recreated with safe defaults
-2. Do not silently auto-reset ledger, profile, or other durable money or identity records
-
-Minimal upstream block:
-
-```nginx
-upstream agents_on_lightning_app {
-    server APP_HOST:APP_PORT;
-    keepalive 32;
-}
+```yaml
+nodes:
+  alpha:
+    host: 127.0.0.1
+    restPort: 8080
 ```
 
-Then:
+The app should never need direct public access to your laptop LND.
+
+## Verification
+
+Run prod checks only:
 
 ```bash
-sudo nginx -t
-sudo systemctl reload nginx
+npm run prod:check
 ```
 
-## 12. Update production later
-
-For normal deploys, use:
+Run hosted MCP only:
 
 ```bash
-deploy/update-prod.sh
+npm run test:mcp:prod
 ```
 
-Only run `npm ci --omit=dev` on-box when you explicitly know the host has enough RAM or swap for it and the artifact cannot reuse the current Linux dependency tree.
-
-If you are converting an old copied deploy into a git-based deploy:
+Run public-surface audit only:
 
 ```bash
-sudo systemctl stop agents-on-lightning
-sudo cp APP_CONFIG_DIR/config.yaml APP_CONFIG_DIR/config.yaml.bak_$(date +%Y%m%d_%H%M%S)
-sudo mv APP_DIR APP_DIR_backup_$(date +%Y%m%d_%H%M%S)
-git clone YOUR_REPO_URL APP_DIR
-cd APP_DIR
-npm ci --omit=dev
-mkdir -p APP_DIR/data
-sudo chown -R APP_USER:APP_USER APP_DIR
-sudo systemctl start agents-on-lightning
+npm run test:surface:prod
 ```
 
-Quick failure guide:
+Run local hardening proof:
 
-- `status=226/NAMESPACE`:
-  `APP_DIR/data` is missing, or `ReadWritePaths` points at a path that does not exist.
-- Help endpoint warns `ANTHROPIC_API_KEY missing`:
-  set `ANTHROPIC_API_KEY` in the env file, or set `help.apiKeyFile` in `APP_CONFIG_DIR/config.yaml`, or set `ANTHROPIC_API_KEY_FILE` in the env file.
+```bash
+npm run proof:hardening
+```
+
+Run local proof plus prod checks:
+
+```bash
+npm run proof:hardening:prod
+```
+
+## Emergency Rollback
+
+List releases:
+
+```bash
+ssh -i KEY ec2-user@HOST 'ls -1 /opt/agents_on_lightning/releases | tail -20'
+```
+
+Rollback:
+
+```bash
+ssh -i KEY ec2-user@HOST '
+set -e
+sudo ln -sfn /opt/agents_on_lightning/releases/RELEASE_ID /opt/agents_on_lightning/current
+sudo chown -h agentsonlightning:agentsonlightning /opt/agents_on_lightning/current
+sudo systemctl restart agents-on-lightning
+systemctl is-active agents-on-lightning
+curl -fsS http://127.0.0.1:3302/health
+'
+```
+
+Then run:
+
+```bash
+npm run prod:check
+```
+
+## NGINX
+
+Use these templates:
+
+```text
+deploy/nginx/agents-on-lightning.conf.template
+deploy/nginx/agents-on-lightning-proxy.conf.template
+```
+
+All journey routes must proxy to the main app on port `3302`.
+There is no separate journey monitor service.
+
+These should hit the main app:
+
+1. `/journey`
+2. `/journey/three`
+3. `/api/journey`
+4. `/api/journey/events`
+5. `/api/journey/manifest`
+6. `/api/analytics/*`
+
+## Troubleshooting
+
+Fast checks:
+
+```bash
+systemctl status agents-on-lightning
+curl http://127.0.0.1:3302/health
+ps -C node -o pid=,rss=,pcpu=,pmem=,cmd=
+```
+
+State files to inspect first:
+
+1. `/var/lib/agents-on-lightning/data/security/rate-limits.json`
+2. `/var/lib/agents-on-lightning/data/channel-market/deposit-addresses.json`
+3. `/var/lib/agents-on-lightning/data/channel-market/performance-uptime.json`
+4. `/var/lib/agents-on-lightning/data/journey-analytics.duckdb`
+
+Common failures:
+
+1. `status=226/NAMESPACE`: a `ReadWritePaths` directory is missing.
+2. Hosted MCP returns too many `429`s: prod rate-limit config drifted.
+3. Journey analytics looks stale: check `AOL_JOURNEY_DB_PATH`.
+4. Help endpoint warns about Anthropic: set `ANTHROPIC_API_KEY_FILE` or `ANTHROPIC_API_KEY`.
+
+## Apr 2026 Incident Lessons
+
+On a `t4g.micro`, `npm ci` OOMed the box and corrupted zero-byte runtime JSON files.
+
+Rules from that incident:
+
+1. Build artifacts off-box.
+2. Do not run normal deploys through `git pull` plus `npm ci`.
+3. Keep runtime state in `/var/lib/agents-on-lightning/data`.
+4. Keep deploy checks versioned.
+5. Treat config drift as seriously as code drift.

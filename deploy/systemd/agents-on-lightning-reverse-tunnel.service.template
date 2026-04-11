@@ -1,0 +1,30 @@
+[Unit]
+Description=Agents on Lightning reverse tunnel to EC2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=TUNNEL_USER
+EnvironmentFile=APP_CONFIG_DIR/managed-reverse-tunnel.env
+ExecStart=/bin/sh -lc '/usr/bin/ssh -NT \
+  -i "$REMOTE_SSH_KEY" \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=yes \
+  -R "127.0.0.1:$REMOTE_LND_REST_PORT:$LOCAL_LND_REST_HOST:$LOCAL_LND_REST_PORT" \
+  -R "127.0.0.1:$REMOTE_LOOP_RPC_PORT:$LOCAL_LOOP_RPC_HOST:$LOCAL_LOOP_RPC_PORT" \
+  -R "127.0.0.1:$REMOTE_CASHU_PORT:$LOCAL_CASHU_HOST:$LOCAL_CASHU_PORT" \
+  "$REMOTE_SSH_TARGET"'
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

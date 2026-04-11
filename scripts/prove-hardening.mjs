@@ -326,7 +326,7 @@ async function localLoadProof() {
 
 async function runProdProofs() {
   const prodChecks = [
-    ['prod_smoke', 'bash', ['deploy/check-prod.sh'], {}, 180_000],
+    ['prod_smoke', 'bash', ['deploy/prod-check.sh'], {}, 180_000],
     ['prod_mcp', process.execPath, ['scripts/test-hosted-mcp.mjs'], { AOL_MCP_BASE_URL: 'https://agentsonlightning.com' }, 240_000],
     ['prod_surface', process.execPath, ['scripts/audit-public-surface.mjs'], { AOL_AUDIT_BASE_URL: 'https://agentsonlightning.com' }, 240_000],
   ];

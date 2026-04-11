@@ -13,7 +13,9 @@
     "test:surface:prod": "AOL_AUDIT_BASE_URL=https://agentsonlightning.com node scripts/audit-public-surface.mjs",
     "test:surface:bitcoin": "AOL_AUDIT_BASE_URL=https://agentsonbitcoin.com node scripts/audit-public-surface.mjs",
     "proof:hardening": "node --expose-gc scripts/prove-hardening.mjs",
-    "proof:hardening:prod": "node --expose-gc scripts/prove-hardening.mjs --prod"
+    "proof:hardening:prod": "node --expose-gc scripts/prove-hardening.mjs --prod",
+    "prod:check": "bash deploy/prod-check.sh",
+    "prod:deploy": "bash deploy/prod-deploy.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
