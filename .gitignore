@@ -11,6 +11,7 @@ config/*.local.yaml
 output/
 .DS_Store
 test/routes/reports/
+plans/*.md
 
 # Local research scratch files
 autoresearch-lessons.md
