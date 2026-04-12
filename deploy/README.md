@@ -111,8 +111,11 @@ TRUST_PROXY=1
 PYTHON3=/usr/bin/python3
 ANTHROPIC_API_KEY_FILE=/etc/agents-on-lightning/anthropic_api_key
 OPERATOR_API_SECRET=PRIVATE_VALUE
-# ENABLE_OPERATOR_ROUTES stays unset or 0 unless doing a temporary local operator SQL investigation.
+# ENABLE_OPERATOR_ROUTES stays unset or 0 unless enabling broad local-only operator routes.
 ```
+
+The operator secret stays on the server in `/etc/agents-on-lightning/agents-on-lightning.env`.
+Do not copy it into the repo; use the scripted query path below when a local session needs prod analytics.
 
 Private config file on EC2:
 
@@ -228,6 +231,14 @@ Run public-surface audit only:
 ```bash
 npm run test:surface:prod
 ```
+
+Query prod analytics with operator auth:
+
+```bash
+npm run prod:analytics:query -- --sql "SELECT COUNT(*) AS calls FROM mcp_tool_events"
+```
+
+That command uses `deploy/prod.env` for `PROD_SSH_TARGET`, `PROD_SSH_KEY`, `PROD_LOCAL_HOST`, and `PROD_LOCAL_PORT`, then reads `OPERATOR_API_SECRET` from the EC2 env file without printing it.
 
 Run local hardening proof:
 

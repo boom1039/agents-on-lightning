@@ -5,6 +5,7 @@ import {
   INTERNAL_MCP_HEADER_NAME,
   rejectExternalAgentApiRoute,
   rejectExternalDocRoute,
+  rejectUnauthorizedAnalyticsQueryRoute,
   rejectUnauthorizedJourneyRoute,
 } from './request-security.js';
 import { PUBLIC_MCP_DOC_PATHS } from '../mcp/catalog.js';
@@ -90,6 +91,45 @@ test('journey guard allows loopback requests without extra auth', () => {
     }), res);
     assert.equal(result, null);
     assert.equal(res.statusCode, 200);
+  } finally {
+    if (prev === undefined) delete process.env.OPERATOR_API_SECRET;
+    else process.env.OPERATOR_API_SECRET = prev;
+  }
+});
+
+test('analytics SQL query guard allows remote operator-authenticated requests without broad operator routes', () => {
+  const prevSecret = process.env.OPERATOR_API_SECRET;
+  const prevEnabled = process.env.ENABLE_OPERATOR_ROUTES;
+  process.env.OPERATOR_API_SECRET = 'topsecret';
+  delete process.env.ENABLE_OPERATOR_ROUTES;
+  try {
+    const res = mockRes();
+    const result = rejectUnauthorizedAnalyticsQueryRoute(mockReq({
+      path: '/api/analytics/query',
+      headers: { 'x-operator-secret': 'topsecret' },
+    }), res);
+    assert.equal(result, null);
+    assert.equal(res.statusCode, 200);
+  } finally {
+    if (prevSecret === undefined) delete process.env.OPERATOR_API_SECRET;
+    else process.env.OPERATOR_API_SECRET = prevSecret;
+    if (prevEnabled === undefined) delete process.env.ENABLE_OPERATOR_ROUTES;
+    else process.env.ENABLE_OPERATOR_ROUTES = prevEnabled;
+  }
+});
+
+test('analytics SQL query guard requires operator secret even on loopback', () => {
+  const prev = process.env.OPERATOR_API_SECRET;
+  process.env.OPERATOR_API_SECRET = 'topsecret';
+  try {
+    const res = mockRes();
+    const result = rejectUnauthorizedAnalyticsQueryRoute(mockReq({
+      remoteAddress: '127.0.0.1',
+      path: '/api/analytics/query',
+    }), res);
+    assert.equal(result, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body?.error, 'forbidden');
   } finally {
     if (prev === undefined) delete process.env.OPERATOR_API_SECRET;
     else process.env.OPERATOR_API_SECRET = prev;

@@ -7,8 +7,8 @@ import { getJourneyMonitor } from '../monitor/journey-monitor.js';
 import { err404HiddenRoute } from '../identity/agent-friendly-errors.js';
 import {
   isLoopbackRequest,
+  rejectUnauthorizedAnalyticsQueryRoute,
   rejectUnauthorizedJourneyRoute,
-  rejectUnauthorizedOperatorRoute,
 } from '../identity/request-security.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -395,7 +395,7 @@ export function journeyRoutes() {
   ));
 
   router.post('/api/analytics/query', async (req, res) => {
-    const rejection = rejectUnauthorizedOperatorRoute(req, res);
+    const rejection = rejectUnauthorizedAnalyticsQueryRoute(req, res);
     if (rejection) return rejection;
     try {
       const { sql, params } = req.body || {};

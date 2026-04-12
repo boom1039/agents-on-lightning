@@ -213,7 +213,7 @@ export function err403LoopbackOnly(res, subject = 'This route', hint) {
 export function err403OperatorSecretRequired(res) {
   return err403AbuseDenied(res, {
     message: 'Nice try. Operator secret required.',
-    hint: 'Send the configured x-operator-secret header from a local operator client.',
+    hint: 'Send the configured x-operator-secret header from a trusted operator client.',
   });
 }
 
@@ -221,7 +221,7 @@ export function err503OperatorMisconfigured(res) {
   return agentError(res, 503, {
     error: 'operator_misconfigured',
     message: 'Operator route unavailable.',
-    hint: 'Configure the operator secret, then retry from a local operator client.',
+    hint: 'Configure the operator secret, then retry from a trusted operator client.',
   });
 }
 

@@ -307,6 +307,18 @@ export function rejectUnauthorizedOperatorRoute(req, res) {
   return null;
 }
 
+export function rejectUnauthorizedAnalyticsQueryRoute(req, res) {
+  if (!hasConfiguredOperatorSecret()) {
+    logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);
+    return err503OperatorMisconfigured(res);
+  }
+  if (!hasValidOperatorSecret(req)) {
+    logAuthorizationDenied(req.path, req.agentId || null, null, getSocketAddress(req) || null);
+    return err403OperatorSecretRequired(res);
+  }
+  return null;
+}
+
 function sendJourneyAuthRequired(res) {
   res.set('WWW-Authenticate', 'Basic realm="Journey"');
   return agentError(res, 401, {

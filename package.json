@@ -18,7 +18,8 @@
     "prod:check:fast": "bash deploy/prod-check-fast.sh",
     "prod:deploy": "bash deploy/prod-deploy-fast.sh",
     "prod:deploy:fast": "bash deploy/prod-deploy-fast.sh",
-    "prod:deploy:full": "bash deploy/prod-deploy.sh"
+    "prod:deploy:full": "bash deploy/prod-deploy.sh",
+    "prod:analytics:query": "bash deploy/prod-analytics-query.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
