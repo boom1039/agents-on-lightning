@@ -35,9 +35,9 @@ const HINTS = {
     'signature of the canonical JSON of the instruction object. See playbook Step 11.',
 
   no_pubkey:
-    'Register your secp256k1 compressed public key via PUT /api/v1/agents/me with { "pubkey": "<66-char-hex>" }. ' +
+    'Register your secp256k1 compressed public key with aol_update_me using { "pubkey": "<66-char-hex>" }. ' +
     'Generate a secp256k1 keypair, save the private key securely, and register the compressed public key ' +
-    'as a hex string. See playbook Step 8 and Step 11.',
+    'as a hex string. See /llms.txt signed channel work and /docs/mcp/reference.txt.',
 
   unknown_action: (action) =>
     `Allowed actions: ${[...ALLOWED_ACTIONS].join(', ')}. ` +
@@ -48,7 +48,7 @@ const HINTS = {
   agent_id_mismatch:
     'The instruction.agent_id field must exactly match your authenticated agent ID. ' +
     'This prevents one agent from submitting instructions that impersonate another. ' +
-    'GET /api/v1/agents/me to see your agent_id.',
+    'Use aol_get_me to see your agent_id.',
 
   stale_timestamp: (serverTime, instrTime, drift) =>
     `Timestamp must be within 300 seconds (5 minutes) of server time. ` +
@@ -66,7 +66,7 @@ const HINTS = {
 
   channel_wrong_agent:
     'This channel is assigned to a different agent. ' +
-    'GET /api/v1/channels/mine to see your assigned channels and their channel_id values.',
+    'Use aol_get_channels_mine to see your assigned channels and their channel_id values.',
 
   invalid_signature:
     'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key and send the DER-encoded signature as hex. ' +
@@ -81,7 +81,7 @@ const HINTS = {
     if (min !== undefined && max !== undefined) parts.push(', ');
     if (max !== undefined) parts.push(`max=${max}`);
     parts.push(`. Requested: ${value}. `);
-    parts.push('GET /api/v1/channels/mine shows current constraints for each assigned channel.');
+    parts.push('aol_get_channels_mine shows current constraints for each assigned channel.');
     return parts.join('');
   },
 
@@ -92,12 +92,12 @@ const HINTS = {
   lnd_unavailable:
     'The LND node is temporarily unreachable. This is usually a transient condition. ' +
     'Wait a bit and retry. If persistent, the node operator may be performing maintenance. ' +
-    'GET /api/v1/channels/status shows current LND connectivity.',
+    'aol_get_channel_status shows current LND connectivity.',
 
   lnd_execution_failed: (errMsg) =>
     `The instruction passed all validation but LND rejected the change: ${summarizeLndError(errMsg, { action: 'channel policy change', fallback: 'LND rejected the change.' })}. ` +
     'Common causes: channel was closed between validation and execution, or the remote peer ' +
-    'disconnected. Check GET /api/v1/channels/mine to verify channel is still active.',
+    'disconnected. Check aol_get_channels_mine to verify channel is still active.',
 };
 
 /**
@@ -274,7 +274,7 @@ export class SignedInstructionExecutor {
       return await fail({
         error: 'Invalid secp256k1 signature',
         hint: signatureFailure.hint
-          ? `${signatureFailure.hint} Use GET /docs/skills/signing-secp256k1.txt if you need the stable helper-file flow.`
+          ? `${signatureFailure.hint} Use /llms.txt and the returned build-instruction tool output as the stable signing boundary.`
           : HINTS.invalid_signature,
         status: 401,
         failedAt: 'signature_valid',
@@ -404,7 +404,7 @@ export class SignedInstructionExecutor {
       },
       current_policy,
       learn: 'Preview ran all 9 validation checks without executing. ' +
-        'Submit the identical payload to POST /api/v1/channels/instruct to execute for real. ' +
+        'Submit the identical payload with aol_instruct_channel_policy to execute for real. ' +
         'The instruction will be audit-logged in a tamper-evident SHA-256 hash chain.',
     };
   }
@@ -572,7 +572,7 @@ export class SignedInstructionExecutor {
         },
         learn: 'Your channel update has been applied to LND and recorded in the audit chain. ' +
           'Fee changes also appear in the public ledger. The monitor will verify the change took effect within ~30 seconds. ' +
-          'GET /api/v1/channels/audit/' + instruction.channel_id + ' to see the full history.',
+          'Use aol_get_channel_audit with this channel_id to see the full history.',
       };
     } finally {
       unlock();

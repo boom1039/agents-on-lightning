@@ -2,12 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { configureRateLimiterPolicy } from '../identity/rate-limiter.js';
 import { createMcpOnlyApiGuard } from '../identity/request-security.js';
-import { MCP_DOCS, SIMPLIFIED_MCP_DOC_NAMES } from '../mcp/catalog.js';
+import {
+  MCP_DOCS,
+  MCP_RECOMMENDED_PROMPTS,
+  MCP_RECOMMENDED_TOOLS,
+  MCP_TOOL_NAMES,
+  PUBLIC_MCP_DOC_PATHS,
+  SIMPLIFIED_MCP_DOC_NAMES,
+} from '../mcp/catalog.js';
+import { getJourneyMonitor, startJourneyMonitor, stopJourneyMonitor } from '../monitor/journey-monitor.js';
 import { mcpRoutes } from './mcp-routes.js';
 
 async function startApp() {
@@ -60,6 +71,7 @@ async function startApp() {
 }
 
 test('hosted MCP works in stateless mode without mcp-session-id headers', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'aol-mcp-routes-'));
   const { server, baseUrl } = await startApp();
   const seenSessionHeaders = [];
   const fetchWithHeaderCapture = async (input, init) => {
@@ -74,29 +86,40 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
   });
 
   try {
+    await startJourneyMonitor({
+      dbPath: join(tempDir, 'journey.duckdb'),
+      idleShutdownMs: 50,
+    });
     const discovery = await fetch(new URL('/mcp', baseUrl));
     assert.equal(discovery.status, 200);
 
     await client.connect(transport);
     const tools = await client.listTools();
     const toolNames = (tools.tools || []).map((tool) => tool.name);
-    assert(toolNames.includes('aol_get_root'));
-    assert(toolNames.includes('aol_list_mcp_docs'));
-    assert(!toolNames.includes('aol_list_skills'));
-    assert(!toolNames.includes('aol_request'));
-    assert(!toolNames.includes('aol_get_llms_mcp'));
-    assert(!toolNames.includes('aol_test_node_connection'));
-    assert(!toolNames.includes('aol_connect_node'));
-    assert(!toolNames.includes('aol_get_node_status'));
+    assert.deepEqual([...toolNames].sort(), [...MCP_TOOL_NAMES].sort());
     const manifest = await (await fetch(new URL('/.well-known/mcp.json', baseUrl))).json();
     assert.equal(manifest.server_card, `${baseUrl}/.well-known/mcp/server-card.json`);
-    assert.equal(manifest.$schema, 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json');
+    assert.equal(manifest.$schema, undefined);
     assert.equal(manifest.protocolVersion, '2025-06-18');
     assert.equal(manifest.serverInfo.name, 'agents-on-lightning-mcp');
+    assert.match(manifest.description, /routing-fee revenue/);
+    assert.match(manifest.description, /zero platform fees/);
+    assert.match(manifest.description, /zero commissions/);
     assert.equal(manifest.transport.type, 'streamable-http');
     assert.deepEqual(manifest.tools, ['dynamic']);
     assert.deepEqual(manifest.prompts, ['dynamic']);
     assert.deepEqual(manifest.resources, ['dynamic']);
+    assert.deepEqual(manifest.recommended_prompts, [...MCP_RECOMMENDED_PROMPTS]);
+    assert.deepEqual(manifest.recommended_tools, [...MCP_RECOMMENDED_TOOLS]);
+    assert((manifest.workflow_summaries || []).some((workflow) => workflow.name === 'earn-and-monitor'));
+    assert((manifest.tool_groups || []).some((group) => group.name === 'signed-channel-work'));
+    assert.equal(manifest._meta?.zero_platform_fees, true);
+    assert.equal(manifest._meta?.zero_commissions, true);
+    assert.equal(manifest._meta?.routing_fee_opportunity, true);
+    assert.equal(manifest._meta?.['com.agentsonlightning/ethos']?.audience, 'outside agents');
+    assert.equal(JSON.stringify(manifest).includes('/api/v1'), false);
+    assert.equal(JSON.stringify(manifest).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(manifest).includes('/llms-full.txt'), false);
     assert.deepEqual(
       (manifest.resource_summaries || []).map((resource) => resource.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
@@ -107,13 +130,21 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(serverCardResponse.headers.get('access-control-allow-origin'), '*');
     assert.match(serverCardResponse.headers.get('content-type') || '', /application\/json/);
     const serverCard = await serverCardResponse.json();
-    assert.equal(serverCard.$schema, 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json');
+    assert.equal(serverCard.$schema, undefined);
     assert.equal(serverCard.protocolVersion, '2025-06-18');
     assert.equal(serverCard.serverInfo.name, 'agents-on-lightning-mcp');
+    assert.equal(serverCard.start, '/llms.txt');
+    assert.match(serverCard.description, /zero platform fees/);
+    assert.match(serverCard.instructions, /routing-fee revenue/);
     assert.equal(serverCard.transport.endpoint, '/mcp');
     assert.deepEqual(serverCard.tools, ['dynamic']);
     assert.deepEqual(serverCard.prompts, ['dynamic']);
     assert.deepEqual(serverCard.resources, ['dynamic']);
+    assert.equal(serverCard._meta?.zero_platform_fees, true);
+    assert.equal(serverCard._meta?.zero_commissions, true);
+    assert.equal(serverCard._meta?.signed_channel_actions, true);
+    assert.equal(JSON.stringify(serverCard).includes('/api/v1'), false);
+    assert.equal(JSON.stringify(serverCard).includes('/docs/skills'), false);
     const agentCardResponse = await fetch(new URL('/.well-known/agent-card.json', baseUrl));
     assert.equal(agentCardResponse.status, 200);
     assert.equal(agentCardResponse.headers.get('access-control-allow-origin'), '*');
@@ -125,6 +156,14 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(agentCard.supportedInterfaces[0].protocolBinding, 'MCP');
     assert.deepEqual(agentCard.defaultInputModes, ['application/json', 'text/plain']);
     assert((agentCard.skills || []).some((skill) => skill.id === 'use-hosted-mcp'));
+    assert((agentCard.skills || []).some((skill) => skill.id === 'earn-routing-fees'));
+    assert.equal(agentCard.capabilities.zeroPlatformFees, true);
+    assert.equal(agentCard.capabilities.zeroCommissions, true);
+    assert.equal(agentCard.capabilities.routingFeeOpportunity, true);
+    assert.equal(agentCard.capabilities.signedChannelActions, true);
+    assert.equal(agentCard._meta?.['com.agentsonlightning/ethos']?.platform_fees, 'none');
+    assert.equal(JSON.stringify(agentCard).includes('/api/v1'), false);
+    assert.equal(JSON.stringify(agentCard).includes('/docs/skills'), false);
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
@@ -143,14 +182,28 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const resources = await client.listResources();
     const resourceUris = (resources.resources || []).map((resource) => resource.uri);
     assert(resourceUris.includes('mcp://server-card.json'));
+    for (const docPath of PUBLIC_MCP_DOC_PATHS) {
+      assert(resourceUris.some((uri) => uri.endsWith(docPath)), `Missing MCP resource ${docPath}`);
+    }
     const directApi = await fetch(new URL('/api/v1/', baseUrl));
     assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));
+
+    await getJourneyMonitor().analyticsDb.flush();
+    const mcpActivity = await getJourneyMonitor().mcpToolActivity({ limit: 20 });
+    const rootEvent = mcpActivity.find((event) => event.mcp_tool_name === 'aol_get_root');
+    assert(rootEvent);
+    assert.equal(rootEvent.tool_group, 'discovery');
+    assert.equal(rootEvent.workflow_stage, 'discovery');
+    assert.equal(rootEvent.risk_level, 'read_only');
+    assert.equal(JSON.stringify(rootEvent).includes('api_key'), false);
 
     const closeResponse = await fetch(new URL('/mcp', baseUrl), { method: 'DELETE' });
     assert.equal(closeResponse.status, 204);
   } finally {
     await transport.close().catch(() => {});
+    await stopJourneyMonitor();
     await new Promise((resolve) => server.close(resolve));
+    await rm(tempDir, { recursive: true, force: true });
   }
 });

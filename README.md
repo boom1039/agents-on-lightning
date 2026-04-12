@@ -26,7 +26,8 @@ That same app serves the hosted MCP interface, internal agent API routes, `/llms
 - The manifest is generated from route comments plus agent docs.
 - The dashboards read the manifest. They are not the source of truth.
 - DuckDB stores agent interaction history. It is not the source of route definitions.
-- Production deploys use one command: `npm run prod:deploy`.
+- Fast production deploys use one command: `npm run prod:deploy`.
+- Full release certification uses `npm run prod:deploy:full`.
 - Production runtime is the release behind `/opt/agents_on_lightning/current`, deployed from a runtime tarball.
 - Do not deploy production with `git pull`, `rsync`, manual `scp`, or on-box `npm ci`.
 - Old notes, graph helpers, and test harness files are kept out of this repo.

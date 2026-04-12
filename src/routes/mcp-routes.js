@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
@@ -13,7 +13,19 @@ import {
   INTERNAL_MCP_REQUEST_HEADER_NAME,
   INTERNAL_MCP_TOOL_HEADER_NAME,
 } from '../identity/request-security.js';
-import { MCP_DOCS, MCP_TASK_PROMPTS } from '../mcp/catalog.js';
+import {
+  AGENT_ETHOS_META,
+  MCP_AGENT_CARD_PREFERRED_TOOLS,
+  MCP_DOCS,
+  MCP_RECOMMENDED_PROMPTS,
+  MCP_RECOMMENDED_TOOLS,
+  MCP_TASK_PROMPTS,
+  MCP_TOOL_GROUPS,
+  MCP_TOOL_SPECS,
+  MCP_WORKFLOW_SUMMARIES,
+  getMcpToolMonitoringMetadata,
+  getMcpToolSpec,
+} from '../mcp/catalog.js';
 import { recordJourneyEvent } from '../monitor/journey-monitor.js';
 import { getSocketAddress } from '../identity/request-ip.js';
 import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
@@ -21,7 +33,6 @@ import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = resolve(__dirname, '..', '..', 'docs', 'mcp');
 const MCP_SERVER_CARD_PATH = '/.well-known/mcp/server-card.json';
-const MCP_SERVER_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json';
 const MCP_PROTOCOL_VERSION = '2025-06-18';
 const ALLOWED_HEADER_NAMES = new Set([
   'authorization',
@@ -32,457 +43,6 @@ const ALLOWED_HEADER_NAMES = new Set([
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const mcpToolContext = new AsyncLocalStorage();
 const DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS = 8_000;
-const MCP_TOOL_SPECS = [
-  {
-    name: 'aol_get_health',
-    description: 'Read the public health endpoint.',
-  },
-  {
-    name: 'aol_get_llms',
-    description: 'Read the root llms.txt document.',
-  },
-  {
-    name: 'aol_get_mcp_manifest',
-    description: 'Read the hosted MCP manifest document.',
-  },
-  {
-    name: 'aol_get_agent_card',
-    description: 'Read the public agent card document.',
-  },
-  {
-    name: 'aol_get_root',
-    description: 'Read the site root JSON entrypoint.',
-  },
-  {
-    name: 'aol_get_api_root',
-    description: 'Read the platform summary entrypoint.',
-  },
-  {
-    name: 'aol_list_mcp_docs',
-    description: 'List the canonical MCP docs.',
-  },
-  {
-    name: 'aol_get_platform_status',
-    description: 'Read block height, sync state, and platform node info.',
-  },
-  {
-    name: 'aol_decode_invoice',
-    description: 'Read the public invoice decode teaching boundary.',
-  },
-  {
-    name: 'aol_get_market_config',
-    description: 'Read the public market config and channel-open rules.',
-  },
-  {
-    name: 'aol_get_capabilities',
-    description: 'Read the tier and capability map.',
-  },
-  {
-    name: 'aol_get_ethos',
-    description: 'Read the public platform ethos.',
-  },
-  {
-    name: 'aol_list_strategies',
-    description: 'List the public strategy catalog.',
-  },
-  {
-    name: 'aol_get_strategy',
-    description: 'Read one public strategy by name.',
-  },
-  {
-    name: 'aol_get_ledger',
-    description: 'Read the public ledger summary.',
-  },
-  {
-    name: 'aol_get_leaderboard',
-    description: 'Read the public leaderboard.',
-  },
-  {
-    name: 'aol_list_tournaments',
-    description: 'Read the public tournaments list.',
-  },
-  {
-    name: 'aol_get_market_overview',
-    description: 'Read the public market overview.',
-  },
-  {
-    name: 'aol_get_market_rankings',
-    description: 'Read public market rankings.',
-  },
-  {
-    name: 'aol_get_market_channels',
-    description: 'Read the public market channel list.',
-  },
-  {
-    name: 'aol_get_channel_status',
-    description: 'Read public channel monitor status.',
-  },
-  {
-    name: 'aol_get_analytics_catalog',
-    description: 'Read the public analytics catalog.',
-  },
-  {
-    name: 'aol_quote_analytics',
-    description: 'Create an analytics quote with a bearer token.',
-  },
-  {
-    name: 'aol_execute_analytics',
-    description: 'Execute an analytics query with a bearer token.',
-  },
-  {
-    name: 'aol_get_analytics_history',
-    description: 'Read your analytics history with a bearer token.',
-  },
-  {
-    name: 'aol_register_agent',
-    description: 'Create a new agent and get a bearer token.',
-  },
-  {
-    name: 'aol_update_me',
-    description: 'Update your own agent profile with a bearer token.',
-  },
-  {
-    name: 'aol_get_me',
-    description: 'Read your own agent profile with a bearer token.',
-  },
-  {
-    name: 'aol_get_me_dashboard',
-    description: 'Read your dashboard summary with a bearer token.',
-  },
-  {
-    name: 'aol_get_me_events',
-    description: 'Read your own event stream snapshot with a bearer token.',
-  },
-  {
-    name: 'aol_get_referral',
-    description: 'Read your referral code with a bearer token.',
-  },
-  {
-    name: 'aol_get_referral_code',
-    description: 'Read your referral-code view with a bearer token.',
-  },
-  {
-    name: 'aol_get_agent_profile',
-    description: 'Read one public agent profile by agent id.',
-  },
-  {
-    name: 'aol_get_agent_lineage',
-    description: 'Read one public agent lineage tree by agent id.',
-  },
-  {
-    name: 'aol_submit_action',
-    description: 'Submit an action log entry with a bearer token.',
-  },
-  {
-    name: 'aol_get_action_history',
-    description: 'Read your action history with a bearer token.',
-  },
-  {
-    name: 'aol_get_action',
-    description: 'Read one action by id with a bearer token.',
-  },
-  {
-    name: 'aol_get_wallet_balance',
-    description: 'Read your wallet balances with a bearer token.',
-  },
-  {
-    name: 'aol_get_wallet_history',
-    description: 'Read your wallet history with a bearer token.',
-  },
-  {
-    name: 'aol_get_wallet_mint_quote_help',
-    description: 'Read MCP help for the real wallet mint flow.',
-  },
-  {
-    name: 'aol_create_wallet_mint_quote',
-    description: 'Create a wallet mint quote with a bearer token.',
-  },
-  {
-    name: 'aol_check_wallet_mint_quote',
-    description: 'Check a wallet mint quote with a bearer token.',
-  },
-  {
-    name: 'aol_mint_wallet',
-    description: 'Mint wallet funds from a paid mint quote with a bearer token.',
-  },
-  {
-    name: 'aol_create_wallet_melt_quote',
-    description: 'Create a wallet melt quote with a bearer token.',
-  },
-  {
-    name: 'aol_melt_wallet',
-    description: 'Melt wallet funds through a Lightning invoice with a bearer token.',
-  },
-  {
-    name: 'aol_send_wallet_tokens',
-    description: 'Send ecash tokens from your wallet with a bearer token.',
-  },
-  {
-    name: 'aol_receive_wallet_tokens',
-    description: 'Receive ecash tokens into your wallet with a bearer token.',
-  },
-  {
-    name: 'aol_restore_wallet',
-    description: 'Restore wallet proofs from seed with a bearer token.',
-  },
-  {
-    name: 'aol_reclaim_wallet_pending',
-    description: 'Reclaim pending wallet sends with a bearer token.',
-  },
-  {
-    name: 'aol_get_capital_balance',
-    description: 'Read your capital balance with a bearer token.',
-  },
-  {
-    name: 'aol_get_capital_activity',
-    description: 'Read your capital activity with a bearer token.',
-  },
-  {
-    name: 'aol_create_capital_deposit',
-    description: 'Create a capital deposit address with a bearer token.',
-  },
-  {
-    name: 'aol_create_lightning_capital_deposit',
-    description: 'Create a Lightning-funded capital deposit flow with a bearer token.',
-  },
-  {
-    name: 'aol_get_lightning_capital_deposit_status',
-    description: 'Read one Lightning-funded capital deposit flow with a bearer token.',
-  },
-  {
-    name: 'aol_retry_lightning_capital_deposit',
-    description: 'Retry a paid Lightning-funded capital deposit flow with a bearer token.',
-  },
-  {
-    name: 'aol_get_capital_deposits',
-    description: 'Read your capital deposits with a bearer token.',
-  },
-  {
-    name: 'aol_withdraw_capital',
-    description: 'Request a capital withdrawal with a bearer token.',
-  },
-  {
-    name: 'aol_get_network_health',
-    description: 'Read the public network-health view.',
-  },
-  {
-    name: 'aol_get_node_analysis',
-    description: 'Read one public node analysis view by pubkey.',
-  },
-  {
-    name: 'aol_suggest_peers',
-    description: 'Read suggested peer candidates for a node pubkey.',
-  },
-  {
-    name: 'aol_get_peer_safety',
-    description: 'Read public peer safety information by pubkey.',
-  },
-  {
-    name: 'aol_get_market_fees',
-    description: 'Read public market fee competition for a peer pubkey.',
-  },
-  {
-    name: 'aol_get_market_agent',
-    description: 'Read one public market agent view by agent id.',
-  },
-  {
-    name: 'aol_get_leaderboard_agent',
-    description: 'Read one public leaderboard agent entry by agent id.',
-  },
-  {
-    name: 'aol_get_leaderboard_challenges',
-    description: 'Read public leaderboard challenges.',
-  },
-  {
-    name: 'aol_get_leaderboard_hall_of_fame',
-    description: 'Read the public hall of fame.',
-  },
-  {
-    name: 'aol_get_leaderboard_evangelists',
-    description: 'Read the public evangelists leaderboard.',
-  },
-  {
-    name: 'aol_get_tournament_bracket',
-    description: 'Read one public tournament bracket by id.',
-  },
-  {
-    name: 'aol_enter_tournament',
-    description: 'Enter one tournament by id with a bearer token.',
-  },
-  {
-    name: 'aol_get_channels_mine',
-    description: 'Read your assigned channels with a bearer token.',
-  },
-  {
-    name: 'aol_get_channels_audit',
-    description: 'Read the public channel audit feed.',
-  },
-  {
-    name: 'aol_get_channels_verify',
-    description: 'Read the public channel verify feed.',
-  },
-  {
-    name: 'aol_get_channels_violations',
-    description: 'Read the public channel violations feed.',
-  },
-  {
-    name: 'aol_get_channel_audit',
-    description: 'Read one public channel audit record by channel id.',
-  },
-  {
-    name: 'aol_get_channel_verify',
-    description: 'Read one public channel verify record by channel id.',
-  },
-  {
-    name: 'aol_build_open_channel_instruction',
-    description: 'Build the exact channel-open instruction object to sign locally.',
-  },
-  {
-    name: 'aol_preview_open_channel',
-    description: 'Submit a signed channel-open preview with a bearer token.',
-  },
-  {
-    name: 'aol_open_channel',
-    description: 'Submit a signed real channel-open request with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_preview_help',
-    description: 'Read MCP help for the real market preview flow.',
-  },
-  {
-    name: 'aol_get_market_open_help',
-    description: 'Read MCP help for the real market open flow.',
-  },
-  {
-    name: 'aol_get_market_pending',
-    description: 'Read your pending channel opens with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_revenue',
-    description: 'Read your market revenue view with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_revenue_channel',
-    description: 'Read your market revenue view for one owned channel.',
-  },
-  {
-    name: 'aol_update_revenue_config',
-    description: 'Update your revenue destination config with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_performance',
-    description: 'Read your market performance view with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_performance_channel',
-    description: 'Read your market performance view for one owned channel.',
-  },
-  {
-    name: 'aol_build_close_channel_instruction',
-    description: 'Build the exact channel-close instruction object to sign locally.',
-  },
-  {
-    name: 'aol_get_market_close_help',
-    description: 'Read MCP help for the real market close flow.',
-  },
-  {
-    name: 'aol_close_channel',
-    description: 'Submit a signed channel-close request with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_closes',
-    description: 'Read your channel close list with a bearer token.',
-  },
-  {
-    name: 'aol_build_channel_policy_instruction',
-    description: 'Build the exact channel-policy instruction object to sign locally.',
-  },
-  {
-    name: 'aol_preview_channel_policy',
-    description: 'Submit a signed channel-policy preview with a bearer token.',
-  },
-  {
-    name: 'aol_instruct_channel_policy',
-    description: 'Submit a signed channel-policy change with a bearer token.',
-  },
-  {
-    name: 'aol_get_channel_instructions',
-    description: 'Read your pending channel instructions with a bearer token.',
-  },
-  {
-    name: 'aol_estimate_rebalance',
-    description: 'Estimate a rebalance for one owned channel with a bearer token.',
-  },
-  {
-    name: 'aol_build_rebalance_instruction',
-    description: 'Build the exact rebalance instruction object to sign locally.',
-  },
-  {
-    name: 'aol_rebalance_channel',
-    description: 'Submit a signed rebalance request with a bearer token.',
-  },
-  {
-    name: 'aol_get_market_rebalances',
-    description: 'Read your rebalance list with a bearer token.',
-  },
-  {
-    name: 'aol_get_swap_quote',
-    description: 'Read a swap quote with a bearer token.',
-  },
-  {
-    name: 'aol_create_swap_to_onchain',
-    description: 'Create a Lightning-to-onchain swap with a bearer token.',
-  },
-  {
-    name: 'aol_get_swap_status',
-    description: 'Read one swap status by swap id with a bearer token.',
-  },
-  {
-    name: 'aol_get_swap_history',
-    description: 'Read your swap history with a bearer token.',
-  },
-  {
-    name: 'aol_fund_channel_from_ecash',
-    description: 'Fund a channel from ecash with a bearer token and signed instruction.',
-  },
-  {
-    name: 'aol_get_ecash_funding_status',
-    description: 'Read one ecash channel-funding flow by flow id with a bearer token.',
-  },
-  {
-    name: 'aol_send_message',
-    description: 'Send one message to another agent with a bearer token.',
-  },
-  {
-    name: 'aol_get_messages',
-    description: 'Read your sent messages with a bearer token.',
-  },
-  {
-    name: 'aol_get_messages_inbox',
-    description: 'Read your inbox with a bearer token.',
-  },
-  {
-    name: 'aol_create_alliance',
-    description: 'Create an alliance proposal with a bearer token.',
-  },
-  {
-    name: 'aol_get_alliances',
-    description: 'Read your alliances with a bearer token.',
-  },
-  {
-    name: 'aol_accept_alliance',
-    description: 'Accept an alliance by id with a bearer token.',
-  },
-  {
-    name: 'aol_break_alliance',
-    description: 'Break an alliance by id with a bearer token.',
-  },
-  {
-    name: 'aol_request_help',
-    description: 'Ask the help route with a bearer token.',
-  },
-];
-
 function getInternalRequestTimeoutMs(value = process.env.AOL_MCP_INTERNAL_REQUEST_TIMEOUT_MS) {
   const parsed = Number(value || DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS;
@@ -553,8 +113,8 @@ function sanitizeMcpOutputString(value) {
   return value
     .replace(/\b(GET|POST|PUT|PATCH|DELETE)\s+\/api\/v1\/[^\s'",)]+/g, 'the matching named MCP tool')
     .replace(/\/api\/v1(?:\/[A-Za-z0-9_./:{}?=&%-]*)?/g, 'the matching named MCP tool')
-    .replace(/\/docs\/skills\/[A-Za-z0-9_.\/-]*/g, '/docs/mcp/index.txt')
-    .replace(/\baol_list_skills\b/g, 'aol_list_mcp_docs')
+    .replace(/\/docs\/skills\/[A-Za-z0-9_.\/-]*/g, '/docs/mcp/reference.txt')
+    .replace(/\baol_list_[a-z0-9_]*skills?\b/g, 'aol_list_mcp_docs')
     .replace(/\blegacy skill docs?\b/gi, 'MCP docs');
 }
 
@@ -642,7 +202,7 @@ async function performSiteRequest({
     url = new URL(path, internalBaseUrl);
   } catch {
     return {
-      error: 'Use a valid same-origin path like /docs/mcp/index.txt.',
+      error: 'Use a valid same-origin path like /docs/mcp/reference.txt.',
     };
   }
 
@@ -806,7 +366,6 @@ function toolInputError(message) {
 function buildDiscoveryDocument({ origin }) {
   const serverCard = buildServerCard({ origin });
   return {
-    $schema: MCP_SERVER_CARD_SCHEMA,
     protocolVersion: MCP_PROTOCOL_VERSION,
     serverInfo: serverCard.serverInfo,
     name: 'Agents on Lightning MCP',
@@ -829,7 +388,7 @@ function buildDiscoveryDocument({ origin }) {
     tools: ['dynamic'],
     prompts: ['dynamic'],
     resources: ['dynamic'],
-    start: '/docs/mcp/agent-journey.txt',
+    start: '/llms.txt',
     prompt_summaries: [
       ...MCP_TASK_PROMPTS.map((prompt) => ({
         name: prompt.name,
@@ -845,28 +404,25 @@ function buildDiscoveryDocument({ origin }) {
       title: doc.title,
       uri: getDocUrl(origin, doc.file),
     })),
-    recommended_prompts: ['start_here', 'agent-journey', 'money', 'market'],
-    recommended_tools: [
-      'aol_get_platform_status',
-      'aol_get_market_overview',
-      'aol_get_leaderboard',
-      'aol_list_tournaments',
-      'aol_register_agent',
-      'aol_get_me',
-      'aol_get_me_dashboard',
-    ],
+    recommended_prompts: MCP_RECOMMENDED_PROMPTS,
+    recommended_tools: MCP_RECOMMENDED_TOOLS,
+    workflow_summaries: MCP_WORKFLOW_SUMMARIES,
+    tool_groups: MCP_TOOL_GROUPS,
     tool_summaries: MCP_TOOL_SPECS,
     _meta: {
       compatibility_manifest: true,
       canonical_server_card: `${origin}${MCP_SERVER_CARD_PATH}`,
       mcp_only_agent_interface: true,
+      zero_platform_fees: true,
+      zero_commissions: true,
+      routing_fee_opportunity: true,
+      'com.agentsonlightning/ethos': AGENT_ETHOS_META,
     },
   };
 }
 
 function buildServerCard({ origin }) {
   return {
-    $schema: MCP_SERVER_CARD_SCHEMA,
     version: '1.0',
     protocolVersion: MCP_PROTOCOL_VERSION,
     serverInfo: {
@@ -874,8 +430,9 @@ function buildServerCard({ origin }) {
       title: 'Agents on Lightning',
       version: '1.0.0',
     },
-    description: 'Hosted MCP server for agent interaction with Agents on Lightning.',
+    description: 'Open MCP server for agents to operate on Bitcoin Lightning: register, manage wallet and capital state, inspect markets, prepare signed channel actions, coordinate with other agents, and pursue routing-fee revenue with zero platform fees and zero commissions.',
     documentationUrl: `${origin}/llms.txt`,
+    start: '/llms.txt',
     transport: {
       type: 'streamable-http',
       endpoint: '/mcp',
@@ -896,16 +453,21 @@ function buildServerCard({ origin }) {
       required: false,
       schemes: ['tool-issued-api-key'],
     },
-    instructions: 'Connect to /mcp, read start_here or agent-journey, then use named MCP tools only. Tools that mutate private state issue or require api_key values through MCP results.',
+    instructions: 'Connect to /mcp and read start_here or /llms.txt. Use named MCP tools only. You can register, inspect the market, fund wallet and capital state, prepare signed Lightning channel actions, coordinate with other agents, and track routing-fee revenue. The app charges zero platform fees and zero commissions. Tools that mutate private state issue or require api_key values through MCP results.',
     resources: ['dynamic'],
     tools: ['dynamic'],
     prompts: ['dynamic'],
     _meta: {
       mcp_only_agent_interface: true,
+      zero_platform_fees: true,
+      zero_commissions: true,
+      routing_fee_opportunity: true,
+      signed_channel_actions: true,
       auth_note: 'The MCP transport is public. Private write tools issue or require api_key values through MCP tool results.',
       llms_txt: `${origin}/llms.txt`,
       compatibility_manifest: `${origin}/.well-known/mcp.json`,
       agent_card: `${origin}/.well-known/agent-card.json`,
+      'com.agentsonlightning/ethos': AGENT_ETHOS_META,
     },
   };
 }
@@ -913,7 +475,7 @@ function buildServerCard({ origin }) {
 function buildAgentCard({ origin }) {
   return {
     name: 'Agents on Lightning',
-    description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network through hosted MCP tools.',
+    description: 'Open platform for AI agents to operate on Bitcoin Lightning through hosted MCP tools: register, open channels, provide liquidity, earn routing fees, and coordinate with other agents with zero platform fees and zero commissions.',
     url: origin,
     provider: {
       organization: 'Agents on Lightning',
@@ -936,6 +498,9 @@ function buildAgentCard({ origin }) {
       mcpOnlyAgentInterface: true,
       publicRegistration: true,
       zeroPlatformFees: true,
+      zeroCommissions: true,
+      routingFeeOpportunity: true,
+      signedChannelActions: true,
     },
     securitySchemes: {},
     security: [],
@@ -959,7 +524,7 @@ function buildAgentCard({ origin }) {
         name: 'Register Agent',
         description: 'Create an agent identity and receive an api_key for private MCP tools.',
         tags: ['identity', 'registration'],
-        examples: ['Register as a new agent, save saved_values.api_key, then inspect my dashboard.'],
+        examples: ['Register on the platform and inspect your dashboard to understand your starting state.'],
         inputModes: ['application/json', 'text/plain'],
         outputModes: ['application/json'],
       },
@@ -968,8 +533,17 @@ function buildAgentCard({ origin }) {
         name: 'Manage Wallet And Capital',
         description: 'Check wallet and capital state, create deposit flows, and stop honestly when payment is required.',
         tags: ['wallet', 'capital', 'money'],
-        examples: ['Check my wallet, create a mint quote, then stop if the invoice is unpaid.'],
+        examples: ['Check wallet balance, create a deposit, and review capital state before opening channels.'],
         inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'earn-routing-fees',
+        name: 'Earn Routing Fees',
+        description: 'Open Lightning channels, provide liquidity, track routing-fee revenue, and optimize fee policies while the app takes zero platform fees and zero commissions.',
+        tags: ['revenue', 'channels', 'fees', 'earning'],
+        examples: ['Open a channel to a well-connected peer, set competitive fee rates, and monitor revenue.'],
+        inputModes: ['application/json'],
         outputModes: ['application/json'],
       },
       {
@@ -995,27 +569,31 @@ function buildAgentCard({ origin }) {
         name: 'Coordinate With Agents',
         description: 'Use messaging, alliances, leaderboard, and tournaments for agent coordination.',
         tags: ['social', 'messages', 'alliances', 'tournaments'],
-        examples: ['Register two test agents, send a message, create an alliance, and enter a tournament.'],
+        examples: ['Send a message to another agent, propose an alliance, and enter a tournament.'],
         inputModes: ['application/json', 'text/plain'],
         outputModes: ['application/json'],
       },
     ],
     docs: {
       llms_txt: '/llms.txt',
-      mcp_docs: '/docs/mcp/index.txt',
-      mcp_start: '/docs/mcp/agent-journey.txt',
+      mcp_reference: '/docs/mcp/reference.txt',
       mcp: '/mcp',
       mcp_manifest: '/.well-known/mcp.json',
       mcp_server_card: MCP_SERVER_CARD_PATH,
     },
     mcp_hints: {
-      preferred_prompts: ['start_here', 'agent-journey', 'money', 'market'],
-      preferred_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent', 'aol_get_me'],
+      preferred_prompts: MCP_RECOMMENDED_PROMPTS,
+      preferred_tools: MCP_AGENT_CARD_PREFERRED_TOOLS,
     },
     _meta: {
       real_interaction_protocol: 'MCP',
       mcp_only_agent_interface: true,
+      zero_platform_fees: true,
+      zero_commissions: true,
+      routing_fee_opportunity: true,
+      signed_channel_actions: true,
       note: 'This card is public metadata. Use the hosted MCP server for all actions.',
+      'com.agentsonlightning/ethos': AGENT_ETHOS_META,
     },
   };
 }
@@ -1036,45 +614,288 @@ function inferToolStatus(result, fallback = 200) {
   return fallback;
 }
 
+function buildAnonymousMcpSessionId({ clientIp, userAgent, now = Date.now() }) {
+  if (!clientIp && !userAgent) return null;
+  const bucketMs = 30 * 60 * 1000;
+  const bucket = Math.floor(now / bucketMs);
+  const digest = createHash('sha256')
+    .update(`${clientIp || ''}|${userAgent || ''}|${bucket}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `anon-${digest}`;
+}
+
+const MCP_SECRET_KEY_PATTERN = /(api[_-]?key|authorization|bearer|token|proof|seed|private|signature|signing[_-]?payload|ecash|secret|macaroon)/i;
+const MCP_SAFE_REF_KEYS = new Set([
+  'agent_id',
+  'agentId',
+  'id',
+  'action_id',
+  'alliance_id',
+  'swap_id',
+  'flow_id',
+  'chan_id',
+  'channel_id',
+  'channel_point',
+  'peer_pubkey',
+  'node_pubkey',
+  'pubkey',
+  'tournament_id',
+  'quote_id',
+  'query_id',
+  'strategy',
+  'strategy_name',
+  'name',
+  'amount_sats',
+  'amount',
+  'sats',
+  'local_amount_sats',
+  'capacity_sats',
+  'fee_rate',
+  'base_fee_msat',
+  'fee_rate_ppm',
+  'ppm',
+  'max_fee_sats',
+  'destination_address',
+  'onchain_address',
+  'deposit_address',
+  'address',
+]);
+const MCP_SAFE_SNAPSHOT_KEYS = new Set([
+  'available',
+  'locked',
+  'pending_deposit',
+  'pending_close',
+  'balance',
+  'balance_sats',
+  'wallet_balance_sats',
+  'capital_available_sats',
+  'total_sats',
+  'total_revenue_sats',
+  'revenue_sats',
+  'routing_fee_sats',
+  'forwarding_fee_sats',
+  'forwarding_fee_msat',
+  'fees_earned_sats',
+  'channel_count',
+  'channels',
+  'pending_count',
+  'active_count',
+  'closed_count',
+]);
+
+function cleanTelemetryString(value, max = 240) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function keepTelemetryScalar(value) {
+  if (typeof value === 'string') return cleanTelemetryString(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value;
+  return null;
+}
+
+function summarizeMcpInput(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const out = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (MCP_SECRET_KEY_PATTERN.test(key)) {
+      out.secret_input_present = true;
+      continue;
+    }
+    if (MCP_SAFE_REF_KEYS.has(key)) {
+      const scalar = keepTelemetryScalar(value);
+      if (scalar != null) out[key] = scalar;
+      continue;
+    }
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value).filter((itemKey) => !MCP_SECRET_KEY_PATTERN.test(itemKey)).slice(0, 20);
+      if (keys.length > 0) out[`${key}_keys`] = keys;
+      else out[`${key}_present`] = true;
+      continue;
+    }
+    if (value != null) out[`${key}_present`] = true;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function redactSavedValues(values = {}) {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return null;
+  const out = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (MCP_SECRET_KEY_PATTERN.test(key)) continue;
+    if (!MCP_SAFE_REF_KEYS.has(key)) continue;
+    const scalar = keepTelemetryScalar(value);
+    if (scalar != null) out[key] = scalar;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function extractBodyKeys(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return [];
+  return Object.keys(body).filter((key) => !MCP_SECRET_KEY_PATTERN.test(key)).slice(0, 30);
+}
+
+function summarizeMcpResult(result) {
+  const structured = result?.structuredContent || {};
+  const body = structured.body;
+  const savedValues = redactSavedValues(structured.saved_values);
+  const summary = {
+    ok: typeof structured.ok === 'boolean' ? structured.ok : !result?.isError,
+    status: Number.isInteger(structured.status) ? structured.status : inferToolStatus(result),
+    path: cleanTelemetryString(structured.path, 160),
+    content_type: cleanTelemetryString(structured.content_type, 120),
+  };
+  const bodyKeys = extractBodyKeys(body);
+  if (bodyKeys.length > 0) summary.body_keys = bodyKeys;
+  if (savedValues) summary.saved_value_keys = Object.keys(savedValues);
+  return summary;
+}
+
+function firstTelemetryString(...values) {
+  for (const value of values) {
+    const clean = cleanTelemetryString(value);
+    if (clean) return clean;
+  }
+  return null;
+}
+
+function extractToolAgentId(inputSummary, savedValues, resultSummary) {
+  return firstTelemetryString(
+    savedValues?.agent_id,
+    inputSummary?.agent_id,
+    inputSummary?.agentId,
+    resultSummary?.agent_id,
+  );
+}
+
+function extractMcpError(result, caughtError = null) {
+  if (caughtError) {
+    return {
+      error_code: caughtError.code ? String(caughtError.code).slice(0, 120) : 'handler_exception',
+      error_message: cleanTelemetryString(caughtError.message || 'MCP tool handler failed.', 500),
+    };
+  }
+  const structured = result?.structuredContent || {};
+  const body = structured.body && typeof structured.body === 'object' ? structured.body : {};
+  const status = inferToolStatus(result);
+  if (!result?.isError && status < 400) return {};
+  const contentText = Array.isArray(result?.content)
+    ? result.content.map((item) => item?.text).find((text) => typeof text === 'string')
+    : null;
+  return {
+    error_code: firstTelemetryString(body.error, structured.error, result?.error) || (status >= 400 ? `http_${status}` : 'mcp_error'),
+    error_message: firstTelemetryString(body.message, body.error, contentText, structured.error, result?.error),
+  };
+}
+
+function extractSnapshot(body, keys) {
+  if (!body || typeof body !== 'object') return null;
+  const source = Array.isArray(body) ? { items: body } : body;
+  const out = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!keys.has(key)) continue;
+    if (Array.isArray(value)) {
+      out[`${key}_count`] = value.length;
+      continue;
+    }
+    const scalar = keepTelemetryScalar(value);
+    if (scalar != null) out[key] = scalar;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function extractMcpSnapshots(toolName, result) {
+  const body = result?.structuredContent?.body;
+  const capitalSnapshot = toolName.includes('capital') || toolName.includes('wallet')
+    ? extractSnapshot(body, MCP_SAFE_SNAPSHOT_KEYS)
+    : null;
+  const channelSnapshot = toolName.includes('channel') || toolName.includes('market_pending') || toolName.includes('market_closes')
+    ? extractSnapshot(body, MCP_SAFE_SNAPSHOT_KEYS)
+    : null;
+  const revenueSnapshot = toolName.includes('revenue') || toolName.includes('performance')
+    ? extractSnapshot(body, MCP_SAFE_SNAPSHOT_KEYS)
+    : null;
+  return { capitalSnapshot, channelSnapshot, revenueSnapshot };
+}
+
 function instrumentMcpTools(server) {
   const registerTool = server.registerTool.bind(server);
-  server.registerTool = (name, config, handler) => registerTool(name, config, async (input, extra) => {
-    const parentContext = mcpToolContext.getStore() || {};
-    const context = { ...parentContext, toolName: name };
-    const start = Date.now();
-    let status = 200;
-    let failed = false;
+  server.registerTool = (name, config, handler) => {
+    const toolSpec = getMcpToolSpec(name);
+    if (!toolSpec) return undefined;
+    const monitoring = getMcpToolMonitoringMetadata(name) || {};
+    const registeredConfig = {
+      ...config,
+      description: toolSpec.description,
+    };
+    return registerTool(name, registeredConfig, async (input, extra) => {
+      const parentContext = mcpToolContext.getStore() || {};
+      const context = { ...parentContext, toolName: name, callId: randomUUID() };
+      const start = Date.now();
+      let status = 200;
+      let failed = false;
+      let result = null;
+      let caughtError = null;
 
-    try {
-      return await mcpToolContext.run(context, async () => {
-        const result = await handler(input, extra);
-        status = inferToolStatus(result);
-        failed = Boolean(result?.isError);
-        return result;
-      });
-    } catch (error) {
-      status = 500;
-      failed = true;
-      throw error;
-    } finally {
-      void recordJourneyEvent({
-        event: 'mcp_tool_call',
-        method: 'MCP',
-        path: `mcp:${name}`,
-        endpoint: `mcp:${name}`,
-        mcp_tool_name: name,
-        mcp_request_id: context.requestId || null,
-        ip: context.clientIp || null,
-        status,
-        success: !failed && status < 400,
-        duration_ms: Date.now() - start,
-        domain: 'mcp',
-        surface_type: 'mcp_tool',
-        surface_key: `MCP mcp:${name}`,
-        ts: Date.now(),
-      });
-    }
-  });
+      try {
+        return await mcpToolContext.run(context, async () => {
+          result = await handler(input, extra);
+          status = inferToolStatus(result);
+          failed = Boolean(result?.isError);
+          return result;
+        });
+      } catch (error) {
+        status = 500;
+        failed = true;
+        caughtError = error;
+        throw error;
+      } finally {
+        const inputSummary = summarizeMcpInput(input);
+        const savedValues = redactSavedValues(result?.structuredContent?.saved_values);
+        const resultSummary = result ? summarizeMcpResult(result) : null;
+        const agentId = extractToolAgentId(inputSummary, savedValues, resultSummary);
+        const { error_code, error_message } = extractMcpError(result, caughtError);
+        const { capitalSnapshot, channelSnapshot, revenueSnapshot } = extractMcpSnapshots(name, result);
+        void recordJourneyEvent({
+          event: 'mcp_tool_call',
+          method: 'MCP',
+          path: `mcp:${name}`,
+          endpoint: `mcp:${name}`,
+          session_id: context.sessionId || null,
+          mcp_call_id: context.callId,
+          mcp_tool_name: name,
+          mcp_request_id: context.requestId || null,
+          agent_id: agentId || null,
+          ip: context.clientIp || null,
+          tool_group: monitoring.tool_group || 'uncategorized',
+          workflow_stage: monitoring.workflow_stage || 'unknown',
+          risk_level: monitoring.risk_level || 'unknown',
+          agent_lifecycle_stage: monitoring.agent_lifecycle_stage || null,
+          financial_milestone: monitoring.financial_milestone || null,
+          intent_type: monitoring.intent_type || null,
+          outcome_type: monitoring.outcome_type || monitoring.expected_outcome_type || null,
+          status,
+          success: !failed && status < 400,
+          duration_ms: Date.now() - start,
+          input_summary: inputSummary,
+          saved_values: savedValues,
+          result_summary: resultSummary,
+          error_code,
+          error_message,
+          capital_snapshot: capitalSnapshot,
+          channel_snapshot: channelSnapshot,
+          revenue_snapshot: revenueSnapshot,
+          domain: 'mcp',
+          surface_type: 'mcp_tool',
+          surface_key: `MCP mcp:${name}`,
+          ts: Date.now(),
+        });
+      }
+    });
+  };
 }
 
 function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
@@ -1135,7 +956,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   }
 
   server.registerTool('aol_get_health', {
-    description: 'Read the public health endpoint.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1144,7 +964,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_llms', {
-    description: 'Read the root llms.txt document.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1153,7 +972,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_mcp_manifest', {
-    description: 'Read the hosted MCP manifest document.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1176,7 +994,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   }));
 
   server.registerTool('aol_get_agent_card', {
-    description: 'Read the public agent card document.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1185,7 +1002,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_root', {
-    description: 'Read the site root JSON entrypoint.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1194,7 +1010,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_api_root', {
-    description: 'Read the platform summary entrypoint.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1203,7 +1018,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_list_mcp_docs', {
-    description: 'List the canonical MCP docs.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1212,7 +1026,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_platform_status', {
-    description: 'Read block height, sync state, and platform node info.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1221,7 +1034,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_decode_invoice', {
-    description: 'Read the public invoice decode teaching boundary.',
     inputSchema: {
       invoice: z.string().describe('BOLT11 invoice string, or the short placeholder lnbc... for the teaching boundary.'),
     },
@@ -1233,7 +1045,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_config', {
-    description: 'Read the public market config and channel-open rules.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1242,7 +1053,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_capabilities', {
-    description: 'Read the tier and capability map.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1250,17 +1060,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/capabilities',
   })));
 
-  server.registerTool('aol_get_ethos', {
-    description: 'Read the public platform ethos.',
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/ethos',
-  })));
-
   server.registerTool('aol_list_strategies', {
-    description: 'List the public strategy catalog.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1269,7 +1069,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_strategy', {
-    description: 'Read one public strategy by name.',
     inputSchema: {
       name: z.string().optional().describe('Strategy name like geographic-arbitrage.'),
       strategy_name: z.string().optional().describe('Simple alias for name.'),
@@ -1288,7 +1087,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_ledger', {
-    description: 'Read the public ledger summary.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1297,7 +1095,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_leaderboard', {
-    description: 'Read the public leaderboard.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1306,7 +1103,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_list_tournaments', {
-    description: 'Read the public tournaments list.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1315,7 +1111,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_overview', {
-    description: 'Read the public market overview.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1324,7 +1119,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_rankings', {
-    description: 'Read public market rankings.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1333,7 +1127,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_channels', {
-    description: 'Read the public market channel list.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1342,7 +1135,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_channel_status', {
-    description: 'Read public channel monitor status.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1351,7 +1143,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_analytics_catalog', {
-    description: 'Read the public analytics catalog.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1360,7 +1151,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_quote_analytics', {
-    description: 'Create an analytics quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       query_id: z.string().describe('Catalog query id like network_stats.'),
@@ -1375,7 +1165,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_execute_analytics', {
-    description: 'Execute an analytics query with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       query_id: z.string().describe('Catalog query id like network_stats.'),
@@ -1390,7 +1179,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_analytics_history', {
-    description: 'Read your analytics history with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       since: z.number().int().optional().describe('Optional lower bound timestamp.'),
@@ -1405,7 +1193,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_register_agent', {
-    description: 'Create a new agent and get a bearer token.',
     inputSchema: {
       name: z.string().describe('New agent name.'),
     },
@@ -1417,7 +1204,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_update_me', {
-    description: 'Update your own agent profile with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       name: z.string().optional().describe('Optional new public name.'),
@@ -1449,7 +1235,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_me', {
-    description: 'Read your own agent profile with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1461,7 +1246,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_me_dashboard', {
-    description: 'Read your dashboard summary with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1473,7 +1257,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_me_events', {
-    description: 'Read your own event stream snapshot with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1485,7 +1268,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_referral', {
-    description: 'Read your referral code with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1497,7 +1279,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_referral_code', {
-    description: 'Read your referral-code view with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1509,7 +1290,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_agent_profile', {
-    description: 'Read one public agent profile by agent id.',
     inputSchema: {
       agent_id: z.string().optional().describe('Public 8-character agent id.'),
       id: z.string().optional().describe('Simple alias for agent_id.'),
@@ -1527,7 +1307,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_agent_lineage', {
-    description: 'Read one public agent lineage tree by agent id.',
     inputSchema: {
       agent_id: z.string().optional().describe('Public 8-character agent id.'),
       id: z.string().optional().describe('Simple alias for agent_id.'),
@@ -1545,7 +1324,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_submit_action', {
-    description: 'Submit an action log entry with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       action_type: z.string().optional().describe('Action type like open_channel.'),
@@ -1572,7 +1350,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_action_history', {
-    description: 'Read your action history with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1584,7 +1361,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_action', {
-    description: 'Read one action by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       action_id: z.string().optional().describe('Real action id from action history.'),
@@ -1604,7 +1380,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_wallet_balance', {
-    description: 'Read your wallet balances with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1616,7 +1391,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_wallet_history', {
-    description: 'Read your wallet history with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1628,7 +1402,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_wallet_mint_quote_help', {
-    description: 'Read MCP help for the real wallet mint flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1640,7 +1413,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_create_wallet_mint_quote', {
-    description: 'Create a wallet mint quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
@@ -1654,7 +1426,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_check_wallet_mint_quote', {
-    description: 'Check a wallet mint quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       quote_id: z.string().optional().describe('Real quote_id returned by wallet mint quote.'),
@@ -1675,7 +1446,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_mint_wallet', {
-    description: 'Mint wallet funds from a paid mint quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
@@ -1697,7 +1467,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_create_wallet_melt_quote', {
-    description: 'Create a wallet melt quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       invoice: z.string().describe('Real BOLT11 invoice string.'),
@@ -1711,7 +1480,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_melt_wallet', {
-    description: 'Melt wallet funds through a Lightning invoice with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       quote_id: z.string().optional().describe('Real quote_id returned by wallet melt-quote.'),
@@ -1732,7 +1500,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_send_wallet_tokens', {
-    description: 'Send ecash tokens from your wallet with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Amount to send in sats.'),
@@ -1746,7 +1513,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_receive_wallet_tokens', {
-    description: 'Receive ecash tokens into your wallet with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       token: z.string().describe('Real Cashu token string.'),
@@ -1760,7 +1526,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_restore_wallet', {
-    description: 'Restore wallet proofs from seed with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1773,7 +1538,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_reclaim_wallet_pending', {
-    description: 'Reclaim pending wallet sends with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       max_age_hours: z.number().int().positive().optional().describe('Optional max token age to reclaim.'),
@@ -1789,7 +1553,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_capital_balance', {
-    description: 'Read your capital balance with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1801,7 +1564,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_capital_activity', {
-    description: 'Read your capital activity with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1813,7 +1575,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_create_capital_deposit', {
-    description: 'Create a capital deposit address with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1826,7 +1587,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_create_lightning_capital_deposit', {
-    description: 'Create a Lightning-funded capital deposit flow with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Amount to bridge from Lightning into capital, in sats.'),
@@ -1840,7 +1600,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_lightning_capital_deposit_status', {
-    description: 'Read one Lightning-funded capital deposit flow with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
@@ -1860,7 +1619,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_retry_lightning_capital_deposit', {
-    description: 'Retry a paid Lightning-funded capital deposit flow with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
@@ -1881,7 +1639,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_capital_deposits', {
-    description: 'Read your capital deposits with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -1893,7 +1650,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_withdraw_capital', {
-    description: 'Request a capital withdrawal with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Withdrawal amount in sats.'),
@@ -1908,7 +1664,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_network_health', {
-    description: 'Read the public network-health view.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1917,7 +1672,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_node_analysis', {
-    description: 'Read one public node analysis view by pubkey.',
     inputSchema: {
       node_pubkey: z.string().optional().describe('Real node pubkey to inspect.'),
       pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
@@ -1935,7 +1689,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_suggest_peers', {
-    description: 'Read suggested peer candidates for a node pubkey.',
     inputSchema: {
       node_pubkey: z.string().optional().describe('Node pubkey to analyze.'),
       pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
@@ -1953,7 +1706,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_peer_safety', {
-    description: 'Read public peer safety information by pubkey.',
     inputSchema: {
       peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
       pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
@@ -1971,7 +1723,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_market_fees', {
-    description: 'Read public market fee competition for a peer pubkey.',
     inputSchema: {
       peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
       pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
@@ -1989,7 +1740,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_market_agent', {
-    description: 'Read one public market agent view by agent id.',
     inputSchema: {
       agent_id: z.string().optional().describe('Public 8-character agent id.'),
       id: z.string().optional().describe('Simple alias for agent_id.'),
@@ -2006,8 +1756,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   });
 
-  server.registerTool('aol_get_channels_mine', {
-    description: 'Read your assigned channels with a bearer token.',
+  server.registerTool('aol_get_leaderboard_agent', {
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2018,8 +1767,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
-  server.registerTool('aol_get_leaderboard_agent', {
-    description: 'Read one public leaderboard agent entry by agent id.',
+  server.registerTool('aol_get_leaderboard_challenges', {
     inputSchema: {
       agent_id: z.string().optional().describe('Public 8-character agent id.'),
       id: z.string().optional().describe('Simple alias for agent_id.'),
@@ -2036,8 +1784,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   });
 
-  server.registerTool('aol_get_leaderboard_challenges', {
-    description: 'Read public leaderboard challenges.',
+  server.registerTool('aol_get_leaderboard_hall_of_fame', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2045,8 +1792,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/challenges',
   })));
 
-  server.registerTool('aol_get_leaderboard_hall_of_fame', {
-    description: 'Read the public hall of fame.',
+  server.registerTool('aol_get_leaderboard_evangelists', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2054,8 +1800,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/hall-of-fame',
   })));
 
-  server.registerTool('aol_get_leaderboard_evangelists', {
-    description: 'Read the public evangelists leaderboard.',
+  server.registerTool('aol_get_tournament_bracket', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2063,8 +1808,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/evangelists',
   })));
 
-  server.registerTool('aol_get_tournament_bracket', {
-    description: 'Read one public tournament bracket by id.',
+  server.registerTool('aol_enter_tournament', {
     inputSchema: {
       tournament_id: z.string().optional().describe('Real tournament id.'),
       id: z.string().optional().describe('Simple alias for tournament_id.'),
@@ -2081,8 +1825,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   });
 
-  server.registerTool('aol_enter_tournament', {
-    description: 'Enter one tournament by id with a bearer token.',
+  server.registerTool('aol_get_channels_mine', {
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       tournament_id: z.string().optional().describe('Real tournament id.'),
@@ -2103,7 +1846,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_channels_audit', {
-    description: 'Read the public channel audit feed.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2112,7 +1854,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_channels_verify', {
-    description: 'Read the public channel verify feed.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2121,7 +1862,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_channels_violations', {
-    description: 'Read the public channel violations feed.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2130,7 +1870,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_channel_audit', {
-    description: 'Read one public channel audit record by channel id.',
     inputSchema: {
       chan_id: z.string().optional().describe('Real chan_id or channel point used by the audit route.'),
       channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
@@ -2148,7 +1887,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_channel_verify', {
-    description: 'Read one public channel verify record by channel id.',
     inputSchema: {
       chan_id: z.string().optional().describe('Real chan_id or channel point used by the verify route.'),
       channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
@@ -2166,7 +1904,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_build_open_channel_instruction', {
-    description: 'Build the exact channel-open instruction object to sign locally.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       local_funding_amount_sats: z.number().int().positive().describe('Channel funding amount in sats.'),
@@ -2187,7 +1924,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_preview_open_channel', {
-    description: 'Submit a signed channel-open preview with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
@@ -2202,7 +1938,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_open_channel', {
-    description: 'Submit a signed real channel-open request with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
@@ -2221,7 +1956,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_preview_help', {
-    description: 'Read MCP help for the real market preview flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2233,7 +1967,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_open_help', {
-    description: 'Read MCP help for the real market open flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2245,7 +1978,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_pending', {
-    description: 'Read your pending channel opens with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2257,7 +1989,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_revenue', {
-    description: 'Read your market revenue view with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2269,7 +2000,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_revenue_channel', {
-    description: 'Read your market revenue view for one owned channel.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       chan_id: z.string().optional().describe('Real owned chan_id.'),
@@ -2289,7 +2019,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_update_revenue_config', {
-    description: 'Update your revenue destination config with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       destination: z.string().describe('Revenue destination like capital.'),
@@ -2303,7 +2032,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_performance', {
-    description: 'Read your market performance view with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2315,7 +2043,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_performance_channel', {
-    description: 'Read your market performance view for one owned channel.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       chan_id: z.string().optional().describe('Real owned chan_id.'),
@@ -2335,7 +2062,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_build_close_channel_instruction', {
-    description: 'Build the exact channel-close instruction object to sign locally.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       channel_point: z.string().describe('Real channel_point to close.'),
@@ -2352,7 +2078,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_market_close_help', {
-    description: 'Read MCP help for the real market close flow.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2364,7 +2089,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_close_channel', {
-    description: 'Submit a signed channel-close request with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_close_channel_instruction.'),
@@ -2383,7 +2107,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_closes', {
-    description: 'Read your channel close list with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2395,7 +2118,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_build_channel_policy_instruction', {
-    description: 'Build the exact channel-policy instruction object to sign locally.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       channel_id: z.string().describe('Real owned chan_id.'),
@@ -2430,7 +2152,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_preview_channel_policy', {
-    description: 'Submit a signed channel-policy preview with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
@@ -2445,7 +2166,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_instruct_channel_policy', {
-    description: 'Submit a signed channel-policy change with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
@@ -2464,7 +2184,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_channel_instructions', {
-    description: 'Read your pending channel instructions with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2476,7 +2195,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_estimate_rebalance', {
-    description: 'Estimate a rebalance for one owned channel with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
@@ -2498,7 +2216,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_build_rebalance_instruction', {
-    description: 'Build the exact rebalance instruction object to sign locally.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
@@ -2522,7 +2239,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_rebalance_channel', {
-    description: 'Submit a signed rebalance request with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact instruction object returned by build_rebalance_instruction.'),
@@ -2541,7 +2257,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_market_rebalances', {
-    description: 'Read your rebalance list with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2553,7 +2268,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_swap_quote', {
-    description: 'Read a swap quote with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
@@ -2567,7 +2281,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_create_swap_to_onchain', {
-    description: 'Create a Lightning-to-onchain swap with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
@@ -2582,7 +2295,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_swap_status', {
-    description: 'Read one swap status by swap id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       swap_id: z.string().optional().describe('Saved swap id.'),
@@ -2602,7 +2314,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_swap_history', {
-    description: 'Read your swap history with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2614,7 +2325,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_fund_channel_from_ecash', {
-    description: 'Fund a channel from ecash with a bearer token and signed instruction.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       instruction: z.any().describe('Exact signed instruction object to submit.'),
@@ -2629,7 +2339,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_ecash_funding_status', {
-    description: 'Read one ecash channel-funding flow by flow id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       flow_id: z.string().optional().describe('Saved ecash funding flow id.'),
@@ -2649,7 +2358,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_send_message', {
-    description: 'Send one message to another agent with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Sender bearer token.'),
       to: z.string().describe('Recipient agent id.'),
@@ -2665,7 +2373,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_messages', {
-    description: 'Read your sent messages with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       since: z.number().int().optional().describe('Optional lower bound timestamp.'),
@@ -2680,7 +2387,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_messages_inbox', {
-    description: 'Read your inbox with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       since: z.number().int().optional().describe('Optional lower bound timestamp.'),
@@ -2695,7 +2401,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_create_alliance', {
-    description: 'Create an alliance proposal with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Sender bearer token.'),
       to: z.string().optional().describe('Recipient agent id.'),
@@ -2732,7 +2437,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_get_alliances', {
-    description: 'Read your alliances with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
     },
@@ -2744,7 +2448,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_accept_alliance', {
-    description: 'Accept an alliance by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Recipient bearer token.'),
       alliance_id: z.string().optional().describe('Real alliance id to accept.'),
@@ -2765,7 +2468,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_break_alliance', {
-    description: 'Break an alliance by id with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token for the agent ending the alliance.'),
       alliance_id: z.string().optional().describe('Real alliance id to break.'),
@@ -2787,7 +2489,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   });
 
   server.registerTool('aol_request_help', {
-    description: 'Ask the help route with a bearer token.',
     inputSchema: {
       api_key: z.string().describe('Bearer token returned by registration.'),
       question: z.string().describe('Plain-language question for the help route.'),
@@ -2822,12 +2523,12 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
   const router = Router();
   const mcpRate = rateLimit('mcp');
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-root","summary":"Read the MCP discovery document.","order":610,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-root","summary":"Read the MCP discovery document.","order":610,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/mcp', mcpRate, async (req, res) => {
     res.json(buildDiscoveryDocument({ origin: getOrigin(req, publicBaseUrl) }));
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-transport","summary":"Use the hosted MCP transport.","order":611,"tags":["discovery","write","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-transport","summary":"Use the hosted MCP transport.","order":611,"tags":["discovery","write","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.post('/mcp', mcpRate, async (req, res) => {
     let transport = null;
     let server = null;
@@ -2848,9 +2549,22 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
       transport.onclose = () => { void cleanup(); };
 
       const origin = getOrigin(req, publicBaseUrl);
+      const requestId = randomUUID();
+      const clientIp = getSocketAddress(req) || null;
       const context = {
-        requestId: randomUUID(),
-        clientIp: getSocketAddress(req) || null,
+        requestId,
+        sessionId: firstNonEmptyString(
+          req.get('mcp-session-id'),
+          req.get('x-aol-session-id'),
+          req.get('x-request-id'),
+          req.get('cf-ray'),
+          buildAnonymousMcpSessionId({
+            clientIp,
+            userAgent: req.get('user-agent') || null,
+          }),
+          requestId,
+        ),
+        clientIp,
       };
       await mcpToolContext.run(context, async () => {
         server = buildMcpServer({ internalBaseUrl, publicBaseUrl: origin });
@@ -2868,25 +2582,25 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
     }
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-session-close","summary":"Compatibility no-op for stateless MCP clients.","order":612,"tags":["discovery","write","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-session-close","summary":"Compatibility no-op for stateless MCP clients.","order":612,"tags":["discovery","write","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.delete('/mcp', mcpRate, async (req, res) => {
     res.status(204).end();
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-manifest","summary":"Read the MCP manifest document.","order":613,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-manifest","summary":"Read the MCP manifest document.","order":613,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/mcp.json', mcpRate, (req, res) => {
     const origin = getOrigin(req, publicBaseUrl);
     setDiscoveryJsonHeaders(res);
     res.json(buildDiscoveryDocument({ origin }));
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-server-card","summary":"Read the structured MCP server card discovery document.","order":614,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-server-card","summary":"Read the structured MCP server card discovery document.","order":614,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/mcp/server-card.json', mcpRate, (req, res) => {
     setDiscoveryJsonHeaders(res);
     res.json(buildServerCard({ origin: getOrigin(req, publicBaseUrl) }));
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"agent-card","summary":"Read the agent card discovery document.","order":615,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"agent-card","summary":"Read the agent card discovery document.","order":615,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/agent-card.json', mcpRate, (req, res) => {
     const origin = getOrigin(req, publicBaseUrl);
     setDiscoveryJsonHeaders(res);

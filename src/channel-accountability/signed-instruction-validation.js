@@ -27,12 +27,12 @@ import {
  */
 export const SHARED_VALIDATION_HINTS = {
   no_pubkey:
-    'Register your secp256k1 compressed public key via PUT /api/v1/agents/me with { "pubkey": "<66-char-hex>" }. ' +
-    'See playbook Step 8.',
+    'Register your secp256k1 compressed public key with aol_update_me using { "pubkey": "<66-char-hex>" }. ' +
+    'See /llms.txt signed channel work and /docs/mcp/reference.txt.',
 
   agent_id_mismatch:
     'instruction.agent_id must exactly match your authenticated agent ID. ' +
-    'GET /api/v1/agents/me to see your agent_id.',
+    'Use aol_get_me to see your agent_id.',
 
   stale_timestamp: (serverTime, instrTime, drift) =>
     `Timestamp must be within 300 seconds of server time. ` +
@@ -191,7 +191,7 @@ export async function validateSignedInstruction({
     return await fail({
       error: 'Invalid secp256k1 signature',
       hint: signatureFailure.hint
-        ? `${signatureFailure.hint} Use the stable helper flow from GET /docs/skills/signing-secp256k1.txt if you need a known-good command path.`
+        ? `${signatureFailure.hint} Use /llms.txt and the returned build-instruction tool output as the stable signing boundary.`
         : SHARED_VALIDATION_HINTS.invalid_signature,
       status: 401,
       failedAt: 'signature_valid',

@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { MCP_TOOL_NAMES } from '../src/mcp/catalog.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'https://agentsonlightning.com';
 const realTestInvoice = process.env.AOL_REAL_TEST_INVOICE || null;
@@ -91,6 +92,7 @@ function useRealOrFallback(value, fallback) {
 
 const client = new Client({ name: 'aol-mcp-route-coverage', version: '1.0.0' });
 const transport = new StreamableHTTPClientTransport(new URL('/mcp', baseUrl));
+const mcpToolNameSet = new Set(MCP_TOOL_NAMES);
 let transportClosed = false;
 
 try {
@@ -98,6 +100,7 @@ try {
   markTransport('GET /mcp', 'Hosted MCP transport connected');
 
   async function callTool(name, args = {}) {
+    assert(mcpToolNameSet.has(name), `MCP route coverage called uncataloged tool: ${name}`);
     const result = await client.callTool({ name, arguments: args });
     markTransport('POST /mcp', `Used ${name}`);
     return result;
@@ -144,9 +147,6 @@ try {
 
   const capabilities = await callTool('aol_get_capabilities');
   markResult('GET /api/v1/capabilities', 'aol_get_capabilities', capabilities, { success: [200] });
-
-  const ethos = await callTool('aol_get_ethos');
-  markResult('GET /api/v1/ethos', 'aol_get_ethos', ethos, { success: [200] });
 
   const marketConfig = await callTool('aol_get_market_config');
   markResult('GET /api/v1/market/config', 'aol_get_market_config', marketConfig, { success: [200] });
@@ -226,15 +226,6 @@ try {
 
   const actionGet = await callTool('aol_get_action', { api_key: agentAKey, id: actionId });
   markResult('GET /api/v1/actions/:id', 'aol_get_action', actionGet, { success: [200] });
-
-  const nodeTest = await callTool('aol_test_node_connection', { api_key: agentAKey, host: 'example.com:9735', macaroon: '00', tls_cert: '00' });
-  markResult('POST /api/v1/node/test-connection', 'aol_test_node_connection', nodeTest, { boundary: [400] });
-
-  const nodeConnect = await callTool('aol_connect_node', { api_key: agentAKey, host: 'example.com:9735', macaroon: '00', tls_cert: '00', tier: 'readonly' });
-  markResult('POST /api/v1/node/connect', 'aol_connect_node', nodeConnect, { boundary: [400] });
-
-  const nodeStatus = await callTool('aol_get_node_status', { api_key: agentAKey });
-  markResult('GET /api/v1/node/status', 'aol_get_node_status', nodeStatus, { success: [200] });
 
   const walletBalance = await callTool('aol_get_wallet_balance', { api_key: agentAKey });
   markResult('GET /api/v1/wallet/balance', 'aol_get_wallet_balance', walletBalance, { success: [200] });

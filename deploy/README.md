@@ -1,19 +1,25 @@
 # EC2 Deploy
 
-Production has one normal deploy command:
+Production has one normal deploy command for routine changes:
 
 ```bash
 npm run prod:deploy
 ```
 
-That command owns the full deploy shape:
+That command owns the fast artifact deploy shape:
 
 1. Build a runtime-only tarball locally.
 2. Upload it to EC2.
 3. Extract it to `APP_DIR/releases/<stamp>`.
 4. Point `APP_DIR/current` at that release.
 5. Restart systemd.
-6. Prove prod is healthy.
+6. Run targeted health, root, MCP, docs, and hidden-route checks.
+
+Full release certification is separate:
+
+```bash
+npm run prod:deploy:full
+```
 
 Do not use `git pull`, manual `scp`, or direct lower-level scripts as the normal prod deploy path.
 Do not commit real env files, config files, certs, macaroons, keys, or live data.
@@ -33,23 +39,26 @@ Then deploy:
 npm run prod:deploy
 ```
 
-What `prod-deploy.sh` does:
+What `prod-deploy-fast.sh` does:
+
+1. Builds a runtime artifact with `deploy/build-runtime-artifact.sh`.
+2. Deploys it with `deploy/prod-update.sh`.
+3. Runs `deploy/prod-check-fast.sh`.
+
+What `prod-deploy.sh` does behind `npm run prod:deploy:full`:
 
 1. Runs `npm run proof:hardening` with a short deploy load proof.
-2. Builds a runtime artifact with `deploy/build-runtime-artifact.sh`.
-3. Deploys it with `deploy/prod-update.sh`.
-4. Runs `deploy/prod-check.sh`.
-5. Runs hosted MCP and public-surface checks.
+2. Builds and deploys the runtime artifact.
+3. Runs full smoke, hosted MCP, and public-surface checks.
 
 Useful knobs:
 
 ```bash
-AOL_DEPLOY_PROOF_REQUESTS=150000 npm run prod:deploy
-AOL_DEPLOY_SKIP_PROOF=1 npm run prod:deploy
+AOL_DEPLOY_PROOF_REQUESTS=150000 npm run prod:deploy:full
 AOL_DEPLOY_ENV_FILE=/private/path/prod.env npm run prod:deploy
 ```
 
-These are still the same deploy flow; they only tune proof size or env-file location.
+Use proof knobs only with `npm run prod:deploy:full`; the fast deploy does not run the proof suite.
 
 ## One-Time EC2 Setup
 

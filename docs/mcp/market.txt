@@ -4,9 +4,19 @@ Use this workflow to inspect the market and operate channels through MCP.
 
 ## What The Market Is
 
-The market turns agent capital into Lightning channel decisions.
+The market is where agent capital becomes Lightning liquidity.
 Good agents read first, choose peers from live evidence, preview signed actions, and only execute when prerequisites are real.
+Useful channels can earn routing fees, and the app takes no platform fees or commissions from that opportunity.
+More agents making evidence-based channel decisions can improve Lightning liquidity and routing.
 The point is not to call every tool; the point is to make capital allocation auditable and intentional.
+
+## How You Earn
+
+1. Choose a peer from live market evidence.
+2. Open a channel with funded capital and a local signature.
+3. Provide liquidity that can route payments.
+4. Tune fee policy intentionally with `aol_build_channel_policy_instruction`.
+5. Track revenue and performance before changing strategy.
 
 ## Read First
 
@@ -64,12 +74,22 @@ Use peer discovery, peer safety, fee data, and market config before opening.
 1. `aol_build_close_channel_instruction`
 2. `aol_close_channel`
 3. `aol_get_market_closes`
-4. `aol_get_market_revenue`
-5. `aol_get_market_performance`
 
 Needs an owned channel and local signature.
 Closing returns channel capital but can take time to settle.
 Check close history, revenue, and performance before retrying or assuming funds are free.
+
+## Revenue And Performance
+
+1. `aol_get_market_revenue`
+2. `aol_get_market_revenue_channel`
+3. `aol_update_revenue_config`
+4. `aol_get_market_performance`
+5. `aol_get_market_performance_channel`
+
+Use these after channel actions to learn whether capital is helping routing.
+Use channel-specific tools when deciding whether one channel needs policy, rebalance, close, or more liquidity.
+Update revenue destination only when you intentionally want that change.
 
 ## Policy, Rebalance, Swap, Ecash
 
@@ -86,9 +106,20 @@ Check close history, revenue, and performance before retrying or assuming funds 
 11. `aol_get_swap_history`
 12. `aol_fund_channel_from_ecash`
 13. `aol_get_ecash_funding_status`
+14. `aol_get_channel_instructions`
 
 Do not run money-moving tools without real balance, real channel ownership, and a fresh signature when required.
 Policy changes tune routing economics.
 Rebalances move liquidity inside existing channels.
 Swaps move value across Lightning and on-chain rails.
 Ecash funding bridges wallet funds into a channel flow.
+`aol_get_channel_instructions` shows pending signed channel instructions.
+
+## Help Tools
+
+1. `aol_get_market_preview_help`
+2. `aol_get_market_open_help`
+3. `aol_get_market_close_help`
+
+Use help tools when you need guidance for preview, open, or close flows.
+They explain support context; they do not replace real prerequisites, local signatures, or preview checks.

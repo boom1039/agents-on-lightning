@@ -329,8 +329,67 @@ export function journeyRoutes() {
   ));
 
   router.get('/api/analytics/mcp-activity', analyticsHandler(req =>
-    getJourneyMonitor().mcpActivity({
+    getJourneyMonitor().mcpToolActivity({
       limit: intParam(req.query.limit) || 100,
+      since: intParam(req.query.since),
+      agentId: req.query.agent_id || undefined,
+    })
+  ));
+
+  router.get('/api/analytics/mcp-tools', analyticsHandler(req =>
+    getJourneyMonitor().mcpToolActivity({
+      limit: intParam(req.query.limit) || 100,
+      since: intParam(req.query.since),
+      agentId: req.query.agent_id || undefined,
+    })
+  ));
+
+  router.get('/api/analytics/mcp-agents', analyticsHandler(req =>
+    getJourneyMonitor().mcpAgentSummary({
+      limit: intParam(req.query.limit) || 50,
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/mcp-agent/:id/journey', analyticsHandler(async req => {
+    const toolEvents = await getJourneyMonitor().mcpAgentJourney(req.params.id);
+    const backendRequests = await getJourneyMonitor().mcpBackendRequests({
+      agentId: req.params.id,
+      limit: intParam(req.query.backend_limit) || 200,
+    });
+    return {
+      agent_id: req.params.id,
+      tool_events: toolEvents,
+      backend_requests: backendRequests,
+    };
+  }));
+
+  router.get('/api/analytics/mcp-funnel', analyticsHandler(req =>
+    getJourneyMonitor().mcpLifecycleFunnel({
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/mcp-dropoffs', analyticsHandler(req =>
+    getJourneyMonitor().mcpStageDropoffs({
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/mcp-milestones', analyticsHandler(req =>
+    getJourneyMonitor().mcpFinancialMilestones({
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/mcp-retention', analyticsHandler(req =>
+    getJourneyMonitor().mcpRetentionSignals({
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/mcp-tool-breakdown', analyticsHandler(req =>
+    getJourneyMonitor().mcpToolBreakdown({
       since: intParam(req.query.since),
     })
   ));

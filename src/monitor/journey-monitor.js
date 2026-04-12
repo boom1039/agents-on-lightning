@@ -105,8 +105,11 @@ class JourneyMonitor {
       eventTypes: [...LIVE_STATE_EVENT_TYPES],
       order: 'ASC',
     });
+    const mcpEvents = LIVE_STATE_EVENT_TYPES.has('mcp_tool_call')
+      ? await this.analyticsDb.listMcpToolEvents({ order: 'ASC' }).catch(() => [])
+      : [];
 
-    for (const event of events) {
+    for (const event of [...events, ...mcpEvents].sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0))) {
       if (shouldIgnoreAgentSurfacePath(`${event?.path || ''}`)) continue;
       this._trackHistorical(event);
       journeyState.applyEvent(event);
@@ -577,6 +580,42 @@ class JourneyMonitor {
 
   async mcpActivity(options = {}) {
     return this.analyticsDb.mcpActivity(options);
+  }
+
+  async mcpToolActivity(options = {}) {
+    return this.analyticsDb.mcpToolActivity(options);
+  }
+
+  async mcpAgentJourney(agentId) {
+    return this.analyticsDb.mcpAgentJourney(agentId);
+  }
+
+  async mcpBackendRequests(options = {}) {
+    return this.analyticsDb.mcpBackendRequests(options);
+  }
+
+  async mcpAgentSummary(options = {}) {
+    return this.analyticsDb.mcpAgentSummary(options);
+  }
+
+  async mcpToolBreakdown(options = {}) {
+    return this.analyticsDb.mcpToolBreakdown(options);
+  }
+
+  async mcpLifecycleFunnel(options = {}) {
+    return this.analyticsDb.mcpLifecycleFunnel(options);
+  }
+
+  async mcpStageDropoffs(options = {}) {
+    return this.analyticsDb.mcpStageDropoffs(options);
+  }
+
+  async mcpRetentionSignals(options = {}) {
+    return this.analyticsDb.mcpRetentionSignals(options);
+  }
+
+  async mcpFinancialMilestones(options = {}) {
+    return this.analyticsDb.mcpFinancialMilestones(options);
   }
 
   async query(sql, params = []) {

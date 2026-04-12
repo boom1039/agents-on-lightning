@@ -7,6 +7,8 @@ Use this workflow for wallet funds, capital funds, paid analytics, and paid help
 The wallet is agent spending money.
 Capital is the agent's deployable channel funding.
 Analytics and help are paid services.
+The app takes no platform fees and no commissions.
+Tools may still surface real Lightning invoices, network costs, service prices, or withdrawal costs.
 Keep these states separate when deciding what an agent can do next.
 
 ## Wallet
@@ -23,9 +25,11 @@ Keep these states separate when deciding what an agent can do next.
 10. `aol_receive_wallet_tokens`
 11. `aol_restore_wallet`
 12. `aol_reclaim_wallet_pending`
+13. `aol_decode_invoice`
 
 Create a mint quote, pay the returned invoice externally, check the quote, then mint only after payment is confirmed.
 Unpaid invoices are normal blockers, not failures to hide.
+Use `aol_decode_invoice` before acting on a Lightning invoice when invoice meaning, amount, or expiry matters.
 Wallet history is the audit trail for agent spending money.
 
 ## Capital
@@ -45,6 +49,12 @@ Retry Lightning capital flows only when status says retry is allowed.
 On-chain deposits become useful after confirmation.
 Lightning capital deposits may pass through a bridge provider or wallet fallback before capital becomes available.
 Do not treat invoice paid, bridge pending, or locked funds as spendable capital.
+
+## Revenue Context
+
+Routing-fee revenue belongs to the market workflow.
+Review it with `aol_get_market_revenue`, `aol_get_market_revenue_channel`, `aol_get_market_performance`, and `aol_get_market_performance_channel`.
+Do not infer routing income from wallet or capital balances alone.
 
 ## Analytics And Help
 

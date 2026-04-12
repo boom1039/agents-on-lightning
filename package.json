@@ -15,7 +15,10 @@
     "proof:hardening": "node --expose-gc scripts/prove-hardening.mjs",
     "proof:hardening:prod": "node --expose-gc scripts/prove-hardening.mjs --prod",
     "prod:check": "bash deploy/prod-check.sh",
-    "prod:deploy": "bash deploy/prod-deploy.sh"
+    "prod:check:fast": "bash deploy/prod-check-fast.sh",
+    "prod:deploy": "bash deploy/prod-deploy-fast.sh",
+    "prod:deploy:fast": "bash deploy/prod-deploy-fast.sh",
+    "prod:deploy:full": "bash deploy/prod-deploy.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

@@ -1,58 +1,10 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { canonicalJSON } from '../src/channel-accountability/crypto-utils.js';
+import { MCP_TOOL_NAMES, PUBLIC_MCP_DOC_PATHS } from '../src/mcp/catalog.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'http://127.0.0.1:3302';
-const requiredTools = [
-  'aol_get_root',
-  'aol_get_health',
-  'aol_get_llms',
-  'aol_get_mcp_manifest',
-  'aol_get_api_root',
-  'aol_list_mcp_docs',
-  'aol_get_platform_status',
-  'aol_get_market_config',
-  'aol_register_agent',
-  'aol_update_me',
-  'aol_get_me',
-  'aol_get_agent_profile',
-  'aol_get_agent_lineage',
-  'aol_get_strategy',
-  'aol_get_wallet_mint_quote_help',
-  'aol_create_wallet_mint_quote',
-  'aol_check_wallet_mint_quote',
-  'aol_restore_wallet',
-  'aol_reclaim_wallet_pending',
-  'aol_create_capital_deposit',
-  'aol_create_lightning_capital_deposit',
-  'aol_get_lightning_capital_deposit_status',
-  'aol_withdraw_capital',
-  'aol_build_open_channel_instruction',
-  'aol_get_market_preview_help',
-  'aol_get_market_open_help',
-  'aol_build_close_channel_instruction',
-  'aol_get_market_close_help',
-  'aol_build_channel_policy_instruction',
-  'aol_build_rebalance_instruction',
-  'aol_create_swap_to_onchain',
-  'aol_get_swap_status',
-  'aol_fund_channel_from_ecash',
-  'aol_get_ecash_funding_status',
-  'aol_get_channels_audit',
-  'aol_get_market_performance',
-  'aol_get_market_agent',
-  'aol_get_channel_audit',
-  'aol_get_channel_verify',
-];
 const requiredPrompts = ['start_here'];
-const removedTools = [
-  'aol_request',
-  'aol_list_skills',
-  'aol_get_llms_mcp',
-  'aol_test_node_connection',
-  'aol_connect_node',
-  'aol_get_node_status',
-];
 
 function assert(condition, message) {
   if (!condition) {
@@ -149,17 +101,20 @@ assert(Array.isArray(manifest.tools) && manifest.tools.includes('dynamic'), 'Hos
 assert(Array.isArray(manifest.prompts) && manifest.prompts.includes('dynamic'), 'Hosted MCP manifest prompts should be dynamic');
 assert((manifest.tool_summaries || []).some((tool) => tool.name === 'aol_register_agent'), 'Hosted MCP manifest is missing tool summaries');
 const serverCard = await fetchJson('/.well-known/mcp/server-card.json');
-assert(serverCard?.$schema === 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json', 'Server card schema is missing');
+assert(serverCard?.$schema == null || /^https:\/\//.test(serverCard.$schema), 'Server card schema must be absent or a valid HTTPS URL');
 assert(serverCard?.protocolVersion === '2025-06-18', 'Server card protocolVersion is wrong');
 assert(serverCard?.serverInfo?.name === 'agents-on-lightning-mcp', 'Server card serverInfo.name is wrong');
 assert(serverCard?.transport?.endpoint === '/mcp', 'Server card transport endpoint is wrong');
 assert(Array.isArray(serverCard?.tools) && serverCard.tools.includes('dynamic'), 'Server card tools should be dynamic');
+assert(serverCard?.start === '/llms.txt', 'Server card start doc is missing');
 const agentCard = await fetchJson('/.well-known/agent-card.json');
 assert(agentCard?.name === 'Agents on Lightning', 'Agent card name is wrong');
 assert(agentCard?.version === '1.0.0', 'Agent card version is wrong');
 assert(agentCard?.documentationUrl === `${baseUrl}/llms.txt`, 'Agent card docs URL is wrong');
 assert(agentCard?.supportedInterfaces?.[0]?.url === `${baseUrl}/mcp`, 'Agent card MCP interface is missing');
 assert((agentCard?.skills || []).some((skill) => skill.id === 'use-hosted-mcp'), 'Agent card skills are missing');
+assert((agentCard?.skills || []).some((skill) => skill.id === 'earn-routing-fees'), 'Agent card is missing routing-fee skill');
+assert(agentCard?.capabilities?.zeroCommissions === true, 'Agent card is missing zeroCommissions capability');
 
 const client = new Client({
   name: 'aol-mcp-smoke',
@@ -178,22 +133,27 @@ try {
   const promptNames = getPromptNames(prompts);
   const resourceUris = getResourceUris(resources);
 
-  for (const toolName of removedTools) {
-    assert(!toolNames.includes(toolName), `Removed MCP tool ${toolName} is still exposed`);
-  }
-  for (const toolName of requiredTools) {
+  assert(
+    JSON.stringify([...toolNames].sort()) === JSON.stringify([...MCP_TOOL_NAMES].sort()),
+    'Hosted MCP tool list does not match catalog.js',
+  );
+  for (const toolName of MCP_TOOL_NAMES) {
     assert(toolNames.includes(toolName), `Missing MCP tool ${toolName}`);
   }
   for (const promptName of requiredPrompts) {
     assert(promptNames.includes(promptName), `Missing MCP prompt ${promptName}`);
   }
-  assert(resourceUris.some((uri) => uri.endsWith('/docs/mcp/index.txt')), 'Missing MCP index resource');
+  for (const docPath of PUBLIC_MCP_DOC_PATHS) {
+    assert(resourceUris.some((uri) => uri.endsWith(docPath)), `Missing MCP resource ${docPath}`);
+  }
   assert(resourceUris.includes('mcp://server-card.json'), 'Missing MCP server-card resource');
 
   if (process.env.AOL_EXPECT_MCP_ONLY === '1') {
     assert(await fetchStatus('/api/v1/') === 404, 'MCP-only mode did not hide /api/v1/');
     assert(await fetchStatus('/docs/skills/discovery.txt') === 404, 'MCP-only mode did not hide legacy skill docs');
-    assert(await fetchStatus('/docs/mcp/index.txt') === 200, 'MCP-only mode did not keep MCP docs public');
+    for (const docPath of PUBLIC_MCP_DOC_PATHS) {
+      assert(await fetchStatus(docPath) === 200, `MCP-only mode did not keep ${docPath} public`);
+    }
   }
 
   const startPrompt = await client.getPrompt({

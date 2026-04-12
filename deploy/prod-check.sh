@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${AOL_DEPLOY_ENV_FILE:-$SCRIPT_DIR/prod.env}"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -46,6 +47,29 @@ check_url() {
     echo "fail $code  $label" >&2
     FAILURES=1
   fi
+}
+
+check_mcp_docs() {
+  local label="$1"
+  local base_url="$2"
+  node --input-type=module - "$base_url" "$label" "$ROOT_DIR" <<'NODE'
+import { pathToFileURL } from 'node:url';
+
+const [baseUrl, label, rootDir] = process.argv.slice(2);
+const { PUBLIC_MCP_DOC_PATHS } = await import(new URL('src/mcp/catalog.js', pathToFileURL(`${rootDir}/`)));
+let failures = 0;
+for (const docPath of PUBLIC_MCP_DOC_PATHS) {
+  const response = await fetch(new URL(docPath, baseUrl));
+  await response.arrayBuffer();
+  if (response.status === 200) {
+    console.log(`ok   200  ${label} ${docPath}`);
+  } else {
+    console.error(`fail ${response.status}  ${label} ${docPath}`);
+    failures = 1;
+  }
+}
+process.exit(failures);
+NODE
 }
 
 check_operator_url() {
@@ -150,7 +174,9 @@ check_url "primary /llms.txt" "$PROD_PRIMARY_BASE_URL/llms.txt"
 check_url "primary /.well-known/mcp.json" "$PROD_PRIMARY_BASE_URL/.well-known/mcp.json"
 check_url "primary /.well-known/mcp/server-card.json" "$PROD_PRIMARY_BASE_URL/.well-known/mcp/server-card.json"
 check_url "primary /mcp discovery" "$PROD_PRIMARY_BASE_URL/mcp"
-check_url "primary /docs/mcp/index.txt" "$PROD_PRIMARY_BASE_URL/docs/mcp/index.txt"
+if ! check_mcp_docs "primary" "$PROD_PRIMARY_BASE_URL"; then
+  FAILURES=1
+fi
 check_url "primary /api/v1 hidden externally" "$PROD_PRIMARY_BASE_URL/api/v1/" "404"
 check_url "primary /docs/skills hidden externally" "$PROD_PRIMARY_BASE_URL/docs/skills/discovery.txt" "404"
 check_url "primary /journey/ public block" "$PROD_PRIMARY_BASE_URL/journey/" "401"
@@ -164,7 +190,9 @@ if [[ -n "${PROD_SECONDARY_BASE_URL:-}" ]]; then
   check_url "secondary /.well-known/mcp.json" "$PROD_SECONDARY_BASE_URL/.well-known/mcp.json"
   check_url "secondary /.well-known/mcp/server-card.json" "$PROD_SECONDARY_BASE_URL/.well-known/mcp/server-card.json"
   check_url "secondary /mcp discovery" "$PROD_SECONDARY_BASE_URL/mcp"
-  check_url "secondary /docs/mcp/index.txt" "$PROD_SECONDARY_BASE_URL/docs/mcp/index.txt"
+  if ! check_mcp_docs "secondary" "$PROD_SECONDARY_BASE_URL"; then
+    FAILURES=1
+  fi
   check_url "secondary /api/v1 hidden externally" "$PROD_SECONDARY_BASE_URL/api/v1/" "404"
   check_url "secondary /docs/skills hidden externally" "$PROD_SECONDARY_BASE_URL/docs/skills/discovery.txt" "404"
   check_url "secondary /journey/ public block" "$PROD_SECONDARY_BASE_URL/journey/" "401"

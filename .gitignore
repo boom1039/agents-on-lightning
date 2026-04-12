@@ -1,6 +1,7 @@
 node_modules/
 data/
 .env
+deploy/prod.env
 .local/
 config/local.yaml
 config/*.local.yaml
@@ -22,3 +23,4 @@ research-results.tsv
 # Local sequence-diagram generator scratch
 scripts/local-generate-sequence-diagrams.mjs
 docs/agent-sequence-diagrams.html
+opencode.json

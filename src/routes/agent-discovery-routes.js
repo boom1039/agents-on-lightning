@@ -10,7 +10,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { err503Service, err400MissingField, err400Validation, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
-import { MCP_DOCS } from '../mcp/catalog.js';
+import { MCP_DOCS, MCP_RECOMMENDED_TOOLS } from '../mcp/catalog.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -179,16 +179,16 @@ export function agentDiscoveryRoutes(daemon) {
   const discoveryRate = rateLimit('discovery');
 
   // Return the platform summary used by the MCP tool wrapper.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the platform summary for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the platform summary for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
-      name: 'Lightning Observatory',
+      name: 'Agents on Lightning',
       version: '1.0.0',
       ethos: 'Zero platform fees. You keep every satoshi you earn.',
       description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
-      preferred_machine_interface: '/mcp',
-      machine_start: '/mcp',
-      machine_note: 'Agents with MCP support should use /mcp first.',
+      agent_start: '/llms.txt',
+      mcp_endpoint: '/mcp',
+      tool_reference: '/docs/mcp/reference.txt',
       access_model: 'External agents use MCP tools. Internal routes are implementation details.',
       agents_registered: daemon.agentRegistry?.count() || 0,
       tools: {
@@ -199,25 +199,15 @@ export function agentDiscoveryRoutes(daemon) {
         strategy_detail: 'aol_get_strategy',
         leaderboard: 'aol_get_leaderboard',
         ledger: 'aol_get_ledger',
-        ethos: 'aol_get_ethos',
         mcp_manifest: 'aol_get_mcp_manifest',
       },
-      links: {
-        llms_txt: '/llms.txt',
-        mcp_docs: '/docs/mcp/index.txt',
-        mcp: '/mcp',
+      discovery: {
         agent_card: '/.well-known/agent-card.json',
         mcp_manifest: '/.well-known/mcp.json',
         mcp_server_card: '/.well-known/mcp/server-card.json',
       },
-      mcp_start: {
-        endpoint: '/mcp',
-        manifest: '/.well-known/mcp.json',
-        server_card: '/.well-known/mcp/server-card.json',
-        primary_doc: '/docs/mcp/agent-journey.txt',
-        first_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent'],
-        first_prompts: ['start_here', 'agent-journey', 'money', 'market'],
-      },
+      first_tools: MCP_RECOMMENDED_TOOLS,
+      first_prompts: ['start_here', 'reference'],
     });
   });
 
@@ -362,7 +352,7 @@ export function agentDiscoveryRoutes(daemon) {
   // --- MCP files: canonical machine documentation ---
 
   // List the MCP documents agents can open through the hosted MCP server.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["mcp/index.txt","mcp/agent-journey.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     const docs = MCP_DOCS.map((doc) => ({
       name: doc.name,
@@ -372,14 +362,14 @@ export function agentDiscoveryRoutes(daemon) {
       file: `/docs/mcp/${doc.file}`,
     }));
     res.json({
-      preferred_machine_interface: '/mcp',
+      agent_start: '/llms.txt',
+      mcp_endpoint: '/mcp',
+      tool_reference: '/docs/mcp/reference.txt',
       mcp_manifest: '/.well-known/mcp.json',
       mcp_server_card: '/.well-known/mcp/server-card.json',
-      mcp_start: '/docs/mcp/agent-journey.txt',
-      mcp_docs: '/llms.txt',
       docs,
       count: docs.length,
-      note: 'MCP docs are canonical for agents.',
+      note: '/llms.txt is the operating manual. /docs/mcp/reference.txt is the flat tool index.',
       canonical_base: '/docs/mcp/',
       canonical_root_doc: '/llms.txt',
     });

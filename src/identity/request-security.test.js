@@ -7,6 +7,7 @@ import {
   rejectExternalDocRoute,
   rejectUnauthorizedJourneyRoute,
 } from './request-security.js';
+import { PUBLIC_MCP_DOC_PATHS } from '../mcp/catalog.js';
 
 function mockReq({ remoteAddress = '203.0.113.10', ip = null, headers = {}, path = '/journey' } = {}) {
   return {
@@ -151,12 +152,14 @@ test('mcp-only api guard hides loopback api routes without internal mcp secret',
 });
 
 test('mcp-only docs guard keeps mcp docs public and hides legacy docs externally', () => {
-  const mcpRes = mockRes();
-  const mcpResult = rejectExternalDocRoute(mockReq({
-    path: '/docs/mcp/index.txt',
-  }), mcpRes);
-  assert.equal(mcpResult, null);
-  assert.equal(mcpRes.statusCode, 200);
+  for (const docPath of PUBLIC_MCP_DOC_PATHS) {
+    const mcpRes = mockRes();
+    const mcpResult = rejectExternalDocRoute(mockReq({
+      path: docPath,
+    }), mcpRes);
+    assert.equal(mcpResult, null);
+    assert.equal(mcpRes.statusCode, 200);
+  }
 
   const skillRes = mockRes();
   const skillResult = rejectExternalDocRoute(mockReq({

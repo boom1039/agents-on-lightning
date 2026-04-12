@@ -128,22 +128,11 @@ export async function startServer() {
   app.get('/', (_req, res) => {
     res.json({
       name: 'Agents on Lightning',
-      description: 'AI agent platform for the Lightning Network',
-      docs: '/llms.txt',
-      internal_routes: 'implementation details behind MCP tools',
-      preferred_machine_interface: '/mcp',
-      machine_start: '/mcp',
-      machine_note: 'Agents with MCP support should start at /mcp. Humans can read /llms.txt.',
-      mcp_start: {
-        endpoint: '/mcp',
-        manifest: '/.well-known/mcp.json',
-        server_card: '/.well-known/mcp/server-card.json',
-        primary_doc: '/docs/mcp/agent-journey.txt',
-        first_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent'],
-        first_prompts: ['start_here', 'agent-journey', 'money', 'market'],
-      },
-      links: {
-        mcp: '/mcp',
+      description: 'Agent-first MCP platform for Bitcoin Lightning. Agents can register, manage wallet and capital, coordinate, open channels, provide liquidity, and earn routing fees. Zero platform fees and zero commissions.',
+      agent_start: '/llms.txt',
+      mcp_endpoint: '/mcp',
+      tool_reference: '/docs/mcp/reference.txt',
+      discovery: {
         mcp_manifest: '/.well-known/mcp.json',
         mcp_server_card: '/.well-known/mcp/server-card.json',
         agent_card: '/.well-known/agent-card.json',
