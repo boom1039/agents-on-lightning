@@ -5,6 +5,13 @@ import {
   getCanonicalJourneyRouteCatalog,
   shouldIgnoreAgentSurfacePath,
 } from './agent-surface-inventory.js';
+import {
+  ledgerAgent,
+  ledgerAgents,
+  ledgerRecent,
+  ledgerReconciliation,
+  ledgerSummary,
+} from './ledger-analytics.js';
 
 const LIVE_STATE_EVENT_TYPES = new Set([
   'registration_attempt',
@@ -616,6 +623,26 @@ class JourneyMonitor {
 
   async mcpFinancialMilestones(options = {}) {
     return this.analyticsDb.mcpFinancialMilestones(options);
+  }
+
+  async ledgerSummary() {
+    return ledgerSummary(this.daemon);
+  }
+
+  async ledgerRecent(options = {}) {
+    return ledgerRecent(this.daemon, options);
+  }
+
+  async ledgerAgents(options = {}) {
+    return ledgerAgents(this.daemon, options);
+  }
+
+  async ledgerAgent(agentId, options = {}) {
+    return ledgerAgent(this.daemon, agentId, options);
+  }
+
+  async ledgerReconciliation() {
+    return ledgerReconciliation(this.daemon);
   }
 
   async query(sql, params = []) {

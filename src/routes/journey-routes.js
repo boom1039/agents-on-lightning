@@ -150,6 +150,7 @@ export function journeyRoutes() {
   router.use('/journey/vendor/pretext', express.static(PRETEXT_DIST_DIR, { etag: false, maxAge: 0 }));
   router.use('/journey', express.static(JOURNEY_DIR, { etag: false, maxAge: 0 }));
   router.get('/journey', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'index.html')));
+  router.get('/journey/agents', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'agents.html')));
   router.get('/journey/three', (_req, res) => res.sendFile(resolve(JOURNEY_DIR, 'three.html')));
 
   router.use(async (req, res, next) => {
@@ -392,6 +393,43 @@ export function journeyRoutes() {
     getJourneyMonitor().mcpToolBreakdown({
       since: intParam(req.query.since),
     })
+  ));
+
+  router.get('/api/analytics/ledger/summary', analyticsHandler(() =>
+    getJourneyMonitor().ledgerSummary()
+  ));
+
+  router.get('/api/analytics/ledger/recent', analyticsHandler(req =>
+    getJourneyMonitor().ledgerRecent({
+      limit: intParam(req.query.limit) || 100,
+      offset: intParam(req.query.offset) || 0,
+      since: intParam(req.query.since),
+      type: req.query.type || undefined,
+      agentId: req.query.agent_id || undefined,
+    })
+  ));
+
+  router.get('/api/analytics/ledger/agents', analyticsHandler(req =>
+    getJourneyMonitor().ledgerAgents({
+      limit: intParam(req.query.limit) || 100,
+      offset: intParam(req.query.offset) || 0,
+      agentId: req.query.agent_id || undefined,
+    })
+  ));
+
+  router.get('/api/analytics/ledger/agent/:id', analyticsHandler(req =>
+    getJourneyMonitor().ledgerAgent(req.params.id, {
+      limit: intParam(req.query.limit) || 100,
+      offset: intParam(req.query.offset) || 0,
+      capitalLimit: intParam(req.query.capital_limit) || 100,
+      capitalOffset: intParam(req.query.capital_offset) || 0,
+      type: req.query.type || undefined,
+      since: intParam(req.query.since),
+    })
+  ));
+
+  router.get('/api/analytics/ledger/reconciliation', analyticsHandler(() =>
+    getJourneyMonitor().ledgerReconciliation()
   ));
 
   router.post('/api/analytics/query', async (req, res) => {

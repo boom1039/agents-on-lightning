@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agents on Lightning - MCP Ledger Console</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050606;
+      --panel: #0b0d0c;
+      --panel-2: #101312;
+      --line: #27302d;
+      --line-2: #3a4641;
+      --text: #d9e2dc;
+      --muted: #8e9b94;
+      --dim: #5f6b66;
+      --green: #40d071;
+      --red: #ff5d5d;
+      --amber: #e7b94f;
+      --cyan: #65d8d2;
+      --white: #f4fff8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+    button, input, select, textarea {
+      font: inherit;
+      color: var(--text);
+      background: #070908;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+    }
+    button {
+      cursor: pointer;
+      padding: 3px 8px;
+      color: var(--green);
+    }
+    button:hover { border-color: var(--green); }
+    input, select { height: 22px; padding: 2px 6px; }
+    textarea {
+      width: 100%;
+      min-height: 84px;
+      resize: vertical;
+      padding: 8px;
+      line-height: 1.35;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(39,48,45,0.72);
+      padding: 3px 5px;
+      vertical-align: top;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #0f1311;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    tr:hover td { background: rgba(64,208,113,0.055); }
+    .app {
+      display: grid;
+      grid-template-rows: auto auto 1fr 250px;
+      height: 100vh;
+      gap: 6px;
+      padding: 8px;
+    }
+    .topline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 4px 8px;
+    }
+    .brand {
+      color: var(--white);
+      font-weight: 800;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .nav {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .nav a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+    .nav a:hover { color: var(--green); }
+    .status {
+      color: var(--muted);
+      min-width: 180px;
+      text-align: right;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(110px, 1fr));
+      gap: 6px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      min-height: 58px;
+      padding: 6px;
+    }
+    .metric label {
+      display: block;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    .metric strong {
+      display: block;
+      color: var(--white);
+      font-size: 18px;
+      line-height: 1.25;
+      margin-top: 2px;
+    }
+    .metric small {
+      color: var(--dim);
+      display: block;
+      margin-top: 1px;
+    }
+    .main {
+      display: grid;
+      grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1.35fr) minmax(350px, 0.9fr);
+      gap: 6px;
+      min-height: 0;
+    }
+    .pane {
+      min-height: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .pane-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      padding: 5px 7px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+    .pane-head h2 {
+      margin: 0;
+      color: var(--white);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .pane-head .grow { flex: 1; }
+    .pane-body {
+      min-height: 0;
+      overflow: auto;
+    }
+    .split-body {
+      display: grid;
+      grid-template-rows: 1fr 150px;
+      min-height: 0;
+      flex: 1;
+    }
+    .right-stack {
+      display: grid;
+      grid-template-rows: 1fr 1fr 1.15fr;
+      min-height: 0;
+      gap: 6px;
+    }
+    .subpane {
+      min-height: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .subhead {
+      padding: 5px 7px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--white);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 10px;
+    }
+    .scroll { overflow: auto; min-height: 0; }
+    .ledger-pane {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .filters {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .filters input { width: 118px; }
+    .mono { font-variant-numeric: tabular-nums; }
+    .ok { color: var(--green); }
+    .bad { color: var(--red); }
+    .warn { color: var(--amber); }
+    .cyan { color: var(--cyan); }
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+    .selected td {
+      background: rgba(64,208,113,0.12);
+      color: var(--white);
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--line-2);
+      padding: 0 4px;
+      border-radius: 3px;
+      color: var(--muted);
+      line-height: 15px;
+    }
+    .pill.ok { border-color: rgba(64,208,113,0.45); }
+    .pill.bad { border-color: rgba(255,93,93,0.45); }
+    .bar {
+      width: 100%;
+      height: 12px;
+      background: #070908;
+      border: 1px solid rgba(39,48,45,0.72);
+      position: relative;
+    }
+    .bar i {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--green), var(--cyan));
+    }
+    .bar.fail i {
+      background: linear-gradient(90deg, var(--red), var(--amber));
+    }
+    .spark {
+      display: inline-block;
+      width: 92px;
+      height: 20px;
+      vertical-align: middle;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 118px 1fr;
+      gap: 3px 8px;
+      padding: 7px;
+      border-bottom: 1px solid var(--line);
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 74px 56px minmax(130px, 1fr) 54px minmax(120px, 1fr);
+      gap: 6px;
+      padding: 3px 6px;
+      border-bottom: 1px solid rgba(39,48,45,0.72);
+      align-items: baseline;
+    }
+    .timeline-row:hover { background: rgba(64,208,113,0.055); }
+    .sql-results {
+      max-height: 180px;
+      overflow: auto;
+      border-top: 1px solid var(--line);
+      margin-top: 6px;
+    }
+    .nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 1280px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100vh; grid-template-rows: auto auto auto 320px; }
+      .metrics { grid-template-columns: repeat(4, 1fr); }
+      .main { grid-template-columns: 1fr; }
+      .pane, .subpane { min-height: 320px; }
+      .right-stack { grid-template-rows: repeat(3, 260px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topline">
+      <div class="brand">AOL MCP LEDGER CONSOLE</div>
+      <div class="muted">intent + backend + economic truth</div>
+      <div class="nav">
+        <a href="/journey">route-grid</a>
+        <a href="/journey/three">3d</a>
+        <a href="/llms.txt">llms</a>
+      </div>
+      <div class="status" id="status">loading</div>
+    </header>
+
+    <section class="metrics" id="metrics"></section>
+
+    <main class="main">
+      <section class="pane">
+        <div class="pane-head">
+          <h2>Agents</h2>
+          <span class="grow"></span>
+          <input id="agent-filter" placeholder="agent id">
+          <button id="refresh">refresh</button>
+        </div>
+        <div class="pane-body">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:82px">agent</th>
+                <th style="width:44px">calls</th>
+                <th style="width:38px">fail</th>
+                <th style="width:86px">stage</th>
+                <th>last tool</th>
+                <th style="width:88px">capital</th>
+                <th style="width:78px">ledger</th>
+                <th style="width:98px">signal</th>
+              </tr>
+            </thead>
+            <tbody id="agents-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="pane">
+        <div class="pane-head">
+          <h2>Agent Timeline</h2>
+          <span id="selected-agent" class="cyan">none selected</span>
+          <span class="grow"></span>
+          <button id="clear-agent">clear</button>
+        </div>
+        <div class="split-body">
+          <div class="scroll" id="timeline"></div>
+          <div class="scroll" id="agent-detail"></div>
+        </div>
+      </section>
+
+      <aside class="right-stack">
+        <section class="subpane">
+          <div class="subhead">Funnel</div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>stage</th><th style="width:52px">agents</th><th style="width:72px">calls</th><th style="width:110px">chart</th></tr></thead>
+              <tbody id="funnel-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="subpane">
+          <div class="subhead">Tools + Failures</div>
+          <div class="scroll">
+            <table>
+              <thead><tr><th>tool</th><th style="width:72px">group</th><th style="width:44px">calls</th><th style="width:44px">fail</th><th style="width:98px">chart</th></tr></thead>
+              <tbody id="tools-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="subpane">
+          <div class="subhead">SQL Explorer</div>
+          <div class="scroll" style="padding:6px">
+            <div class="filters" style="margin-bottom:5px">
+              <button data-sql="SELECT agent_id, COUNT(*) AS calls, SUM(CASE WHEN success = false OR status >= 400 THEN 1 ELSE 0 END) AS failures FROM mcp_tool_events GROUP BY agent_id ORDER BY calls DESC LIMIT 25">agents</button>
+              <button data-sql="SELECT tool_name, COUNT(*) AS calls, AVG(duration_ms) AS avg_ms FROM mcp_tool_events GROUP BY tool_name ORDER BY calls DESC LIMIT 25">tools</button>
+              <button data-sql="SELECT error_code, COUNT(*) AS failures FROM mcp_tool_events WHERE success = false OR status >= 400 GROUP BY error_code ORDER BY failures DESC LIMIT 25">errors</button>
+            </div>
+            <textarea id="sql">SELECT COUNT(*) AS calls FROM mcp_tool_events</textarea>
+            <div class="filters" style="margin-top:5px">
+              <button id="run-sql">run select</button>
+              <span id="sql-status" class="muted"></span>
+            </div>
+            <div class="sql-results" id="sql-results"></div>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <section class="ledger-pane">
+      <div class="pane-head">
+        <h2>Ledger Stream</h2>
+        <span class="muted">latest 100 public entries by default</span>
+        <span class="grow"></span>
+        <div class="filters">
+          <input id="ledger-agent" placeholder="agent id">
+          <input id="ledger-type" placeholder="type">
+          <button id="ledger-prev">prev</button>
+          <button id="ledger-next">next</button>
+          <button id="ledger-apply">apply</button>
+          <span id="ledger-page" class="muted"></span>
+        </div>
+      </div>
+      <div class="pane-body">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:118px">time</th>
+              <th style="width:92px">agent</th>
+              <th style="width:142px">type</th>
+              <th style="width:94px">amount</th>
+              <th style="width:88px">source</th>
+              <th>reference / details</th>
+              <th style="width:100px">ledger id</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      selectedAgent: null,
+      ledgerOffset: 0,
+      ledgerLimit: 100,
+      data: {},
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const dashboardSource = new URLSearchParams(window.location.search).get('source');
+    const esc = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    function fmtNum(value) {
+      const n = Number(value || 0);
+      return Number.isFinite(n) ? Math.round(n).toLocaleString() : '0';
+    }
+
+    function fmtSats(value) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n === 0) return '0';
+      if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}m`;
+      if (Math.abs(n) >= 10_000) return `${(n / 1000).toFixed(1)}k`;
+      return Math.round(n).toLocaleString();
+    }
+
+    function fmtTime(value) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return '-';
+      return new Date(n).toLocaleString([], {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    function short(value, n = 16) {
+      const s = String(value ?? '');
+      return s.length > n ? `${s.slice(0, n - 3)}...` : s;
+    }
+
+    function apiPath(path, options = {}) {
+      if (!['local', 'prod'].includes(dashboardSource)) return path;
+      if (options.method && options.method !== 'GET') return path;
+      if (!path.startsWith('/api/')) return path;
+      const url = new URL(path, window.location.origin);
+      url.searchParams.set('source', dashboardSource);
+      return `${url.pathname}${url.search}`;
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(apiPath(path, options), {
+        cache: 'no-store',
+        headers: options.body ? { 'content-type': 'application/json' } : undefined,
+        ...options,
+      });
+      if (!res.ok) {
+        let message = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          message = body.message || body.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+      return res.json();
+    }
+
+    function spark(values, color = '#40d071') {
+      const nums = values.map((v) => Number(v || 0));
+      const max = Math.max(...nums, 1);
+      const width = 92;
+      const height = 20;
+      const points = nums.map((v, i) => {
+        const x = nums.length <= 1 ? 0 : (i / (nums.length - 1)) * (width - 2) + 1;
+        const y = height - 2 - ((v / max) * (height - 4));
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      return `<svg class="spark" viewBox="0 0 ${width} ${height}" aria-hidden="true">
+        <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5"/>
+        <line x1="0" y1="${height - 1}" x2="${width}" y2="${height - 1}" stroke="#27302d" stroke-width="1"/>
+      </svg>`;
+    }
+
+    function bar(value, max, fail = false) {
+      const pct = Math.max(0, Math.min(100, (Number(value || 0) / Math.max(Number(max || 1), 1)) * 100));
+      return `<div class="bar ${fail ? 'fail' : ''}"><i style="width:${pct.toFixed(1)}%"></i></div>`;
+    }
+
+    function metric(label, value, note, values, color) {
+      return `<div class="metric">
+        <label>${esc(label)}</label>
+        <strong>${esc(value)}</strong>
+        <small>${esc(note || '')}</small>
+        ${Array.isArray(values) ? spark(values, color) : ''}
+      </div>`;
+    }
+
+    function eventAgent(entry) {
+      return entry?.agent_id || entry?.from_agent_id || entry?.to_agent_id || '';
+    }
+
+    function detailText(entry) {
+      const parts = [];
+      for (const key of ['reference', 'flow_id', 'txid', 'channel_point', 'from_bucket', 'to_bucket', 'status', 'reason', 'address_hint']) {
+        if (entry?.[key] !== undefined && entry?.[key] !== null) parts.push(`${key}=${entry[key]}`);
+      }
+      return parts.join(' ');
+    }
+
+    function combineAgents() {
+      const mcpAgents = Array.isArray(state.data.mcpAgents) ? state.data.mcpAgents : [];
+      const ledgerRows = Array.isArray(state.data.ledgerAgents?.entries) ? state.data.ledgerAgents.entries : [];
+      const byId = new Map();
+      for (const row of ledgerRows) byId.set(row.agent_id, { ...row });
+      for (const row of mcpAgents) {
+        const base = byId.get(row.agent_id) || { agent_id: row.agent_id };
+        byId.set(row.agent_id, { ...base, ...row });
+      }
+      const filter = $('agent-filter').value.trim();
+      return [...byId.values()]
+        .filter((row) => !filter || row.agent_id.includes(filter))
+        .sort((a, b) => Number(b.last_seen || b.last_ledger_at || 0) - Number(a.last_seen || a.last_ledger_at || 0));
+    }
+
+    function renderMetrics() {
+      const summary = state.data.summary || {};
+      const ledger = state.data.ledgerSummary || {};
+      const publicLedger = ledger.public_ledger || {};
+      const capital = ledger.capital || {};
+      const agents = Array.isArray(state.data.mcpAgents) ? state.data.mcpAgents : [];
+      const calls = agents.reduce((sum, row) => sum + Number(row.tool_calls || 0), 0);
+      const failures = agents.reduce((sum, row) => sum + Number(row.failed_calls || 0), 0);
+      const funnelValues = (state.data.funnel || []).map((row) => row.agents);
+      const milestoneValues = (state.data.milestones || []).map((row) => row.agents);
+      $('metrics').innerHTML = [
+        metric('agents', fmtNum(agents.length), 'mcp identities', funnelValues, '#40d071'),
+        metric('mcp calls', fmtNum(calls), `${fmtNum(failures)} failures`, [calls - failures, failures], failures ? '#e7b94f' : '#40d071'),
+        metric('success', calls ? `${(((calls - failures) / calls) * 100).toFixed(1)}%` : '-', 'tool success rate', [calls - failures, failures], '#65d8d2'),
+        metric('ledger rows', fmtNum(publicLedger.total_entries), 'public append-only', (publicLedger.type_counts || []).map((r) => r.count), '#40d071'),
+        metric('capital', fmtSats(capital.total_committed_sats), 'available+locked+pending', [capital.available_sats, capital.locked_sats, capital.pending_deposit_sats, capital.pending_close_sats], '#65d8d2'),
+        metric('locked', fmtSats(capital.locked_sats), 'channel capital', [capital.locked_sats, capital.available_sats], '#e7b94f'),
+        metric('revenue', fmtSats(capital.total_revenue_credited_sats), 'credited sats', milestoneValues, '#40d071'),
+        metric('db events', fmtNum(summary.total_events), `${fmtNum(summary.unique_agents)} unique agents`, [summary.total_events, summary.unique_agents], '#65d8d2'),
+      ].join('');
+    }
+
+    function renderAgents() {
+      const rows = combineAgents();
+      const maxCalls = Math.max(...rows.map((r) => Number(r.tool_calls || 0)), 1);
+      $('agents-body').innerHTML = rows.map((row) => {
+        const fail = Number(row.failed_calls || 0);
+        const calls = Number(row.tool_calls || 0);
+        const selected = row.agent_id === state.selectedAgent ? ' class="selected"' : '';
+        const capital = Number(row.capital_available_sats || 0) + Number(row.capital_locked_sats || 0) + Number(row.capital_pending_deposit_sats || 0) + Number(row.capital_pending_close_sats || 0);
+        return `<tr${selected} data-agent="${esc(row.agent_id)}">
+          <td class="cyan">${esc(short(row.agent_id, 12))}</td>
+          <td class="mono">${fmtNum(calls)}</td>
+          <td class="${fail ? 'bad' : 'ok'} mono">${fmtNum(fail)}</td>
+          <td>${esc(short(row.last_workflow_stage || '-', 14))}</td>
+          <td>${esc(short(row.last_tool || '-', 28))}</td>
+          <td class="mono">${fmtSats(capital)}</td>
+          <td class="mono">${fmtNum(row.public_ledger_entries || 0)}</td>
+          <td>${bar(calls, maxCalls, fail > 0)}</td>
+        </tr>`;
+      }).join('');
+      for (const tr of $('agents-body').querySelectorAll('tr[data-agent]')) {
+        tr.addEventListener('click', () => selectAgent(tr.dataset.agent));
+      }
+    }
+
+    function renderFunnel() {
+      const rows = Array.isArray(state.data.funnel) ? state.data.funnel : [];
+      const maxAgents = Math.max(...rows.map((r) => Number(r.agents || 0)), 1);
+      $('funnel-body').innerHTML = rows.map((row) => `<tr>
+        <td>${esc(row.workflow_stage)}</td>
+        <td class="mono">${fmtNum(row.agents)}</td>
+        <td class="mono">${fmtNum(row.tool_calls)}</td>
+        <td>${bar(row.agents, maxAgents)}</td>
+      </tr>`).join('');
+    }
+
+    function renderTools() {
+      const rows = (Array.isArray(state.data.tools) ? state.data.tools : []).slice(0, 42);
+      const maxCalls = Math.max(...rows.map((r) => Number(r.calls || 0)), 1);
+      $('tools-body').innerHTML = rows.map((row) => `<tr>
+        <td>${esc(short(row.tool_name, 34))}</td>
+        <td>${esc(short(row.tool_group, 13))}</td>
+        <td class="mono">${fmtNum(row.calls)}</td>
+        <td class="${row.failures ? 'bad' : 'ok'} mono">${fmtNum(row.failures)}</td>
+        <td>${bar(row.calls, maxCalls, Number(row.failures || 0) > 0)}</td>
+      </tr>`).join('');
+    }
+
+    function renderLedger() {
+      const payload = state.data.ledgerRecent || { entries: [], total: 0, limit: state.ledgerLimit, offset: state.ledgerOffset };
+      $('ledger-page').textContent = `${fmtNum(payload.offset || 0)}-${fmtNum((payload.offset || 0) + (payload.entries || []).length)} / ${fmtNum(payload.total || 0)}`;
+      $('ledger-body').innerHTML = (payload.entries || []).map((entry) => {
+        const agent = eventAgent(entry);
+        return `<tr data-agent="${esc(agent)}">
+          <td>${fmtTime(tsOf(entry))}</td>
+          <td class="cyan">${esc(short(agent || '-', 14))}</td>
+          <td>${esc(short(entry.type || '-', 24))}</td>
+          <td class="mono">${fmtSats(entry.amount_sats)}</td>
+          <td>${esc(short(entry.source || '-', 14))}</td>
+          <td>${esc(short(detailText(entry), 96))}</td>
+          <td class="dim">${esc(short(entry.ledger_id || '-', 14))}</td>
+        </tr>`;
+      }).join('');
+      for (const tr of $('ledger-body').querySelectorAll('tr[data-agent]')) {
+        if (tr.dataset.agent) tr.addEventListener('click', () => selectAgent(tr.dataset.agent));
+      }
+    }
+
+    function tsOf(entry) {
+      return Number(entry?.recorded_at || entry?._ts || entry?.ts || 0) || 0;
+    }
+
+    function renderAgentDetail(agentPayload, ledgerPayload) {
+      const agent = combineAgents().find((row) => row.agent_id === state.selectedAgent) || {};
+      const capital = ledgerPayload?.capital_balance || {};
+      const publicTotal = Number(ledgerPayload?.public_total || 0);
+      $('agent-detail').innerHTML = `<div class="kv">
+        <div>agent</div><div class="cyan">${esc(state.selectedAgent || '-')}</div>
+        <div>calls</div><div>${fmtNum(agent.tool_calls || 0)} tool calls, ${fmtNum(agent.failed_calls || 0)} failures</div>
+        <div>stage</div><div>${esc(agent.last_workflow_stage || '-')} / ${esc(agent.highest_financial_milestone || '-')}</div>
+        <div>capital</div><div>${fmtSats((capital.available || 0) + (capital.locked || 0) + (capital.pending_deposit || 0) + (capital.pending_close || 0))} total tracked</div>
+        <div>buckets</div><div>avail ${fmtSats(capital.available)} | locked ${fmtSats(capital.locked)} | pend dep ${fmtSats(capital.pending_deposit)} | pend close ${fmtSats(capital.pending_close)}</div>
+        <div>ledger</div><div>${fmtNum(publicTotal)} public rows, ${fmtNum(ledgerPayload?.capital_activity_total || 0)} capital activity rows</div>
+        <div>last error</div><div class="${agent.last_error_message ? 'bad' : 'muted'}">${esc(agent.last_error_message || 'none')}</div>
+      </div>`;
+    }
+
+    function renderTimeline(agentPayload, ledgerPayload) {
+      const toolEvents = Array.isArray(agentPayload?.tool_events) ? agentPayload.tool_events : [];
+      const backend = Array.isArray(agentPayload?.backend_requests) ? agentPayload.backend_requests : [];
+      const ledgerTimeline = Array.isArray(ledgerPayload?.timeline) ? ledgerPayload.timeline : [];
+      const rows = [
+        ...toolEvents.map((event) => ({
+          ts: event.ts,
+          kind: 'mcp',
+          label: event.tool_name,
+          status: event.status,
+          outcome: event.outcome_type || event.error_code || '-',
+          detail: `${event.workflow_stage || '-'} ${event.risk_level || ''}`,
+          bad: event.success === false || Number(event.status || 0) >= 400,
+        })),
+        ...backend.map((event) => ({
+          ts: event.ts,
+          kind: 'api',
+          label: `${event.method || ''} ${event.path || ''}`,
+          status: event.status,
+          outcome: event.status >= 400 ? 'backend_failure' : 'backend_ok',
+          detail: event.tool_name || event.mcp_request_id || '-',
+          bad: Number(event.status || 0) >= 400,
+        })),
+        ...ledgerTimeline.map((event) => ({
+          ts: event.ts,
+          kind: event.source === 'capital_activity' ? 'capital' : 'ledger',
+          label: event.entry?.type || '-',
+          status: '',
+          outcome: `${fmtSats(event.entry?.amount_sats)} sats`,
+          detail: detailText(event.entry),
+          bad: false,
+        })),
+      ].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)).slice(0, 220);
+
+      $('timeline').innerHTML = rows.length ? rows.map((row) => `<div class="timeline-row">
+        <div class="mono muted">${fmtTime(row.ts)}</div>
+        <div class="${row.bad ? 'bad' : row.kind === 'ledger' || row.kind === 'capital' ? 'ok' : 'cyan'}">${esc(row.kind)}</div>
+        <div class="nowrap">${esc(row.label)}</div>
+        <div class="${row.bad ? 'bad' : 'ok'} mono">${esc(row.status || '')}</div>
+        <div class="nowrap">${esc(row.outcome)} <span class="dim">${esc(row.detail)}</span></div>
+      </div>`).join('') : '<div class="kv"><div>empty</div><div>No agent selected or no events found.</div></div>';
+    }
+
+    async function selectAgent(agentId) {
+      if (!agentId) return;
+      state.selectedAgent = agentId;
+      $('selected-agent').textContent = agentId;
+      renderAgents();
+      $('timeline').innerHTML = '<div class="kv"><div>loading</div><div>fetching agent timeline</div></div>';
+      try {
+        const [agentPayload, ledgerPayload] = await Promise.all([
+          api(`/api/analytics/mcp-agent/${encodeURIComponent(agentId)}/journey?backend_limit=250`),
+          api(`/api/analytics/ledger/agent/${encodeURIComponent(agentId)}?limit=250&capital_limit=250`),
+        ]);
+        renderTimeline(agentPayload, ledgerPayload);
+        renderAgentDetail(agentPayload, ledgerPayload);
+      } catch (err) {
+        $('timeline').innerHTML = `<div class="kv"><div class="bad">error</div><div>${esc(err.message)}</div></div>`;
+      }
+    }
+
+    function renderSql(rows) {
+      if (!Array.isArray(rows) || rows.length === 0) {
+        $('sql-results').innerHTML = '<div class="kv"><div>result</div><div>0 rows</div></div>';
+        return;
+      }
+      const cols = Object.keys(rows[0]);
+      $('sql-results').innerHTML = `<table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${
+        rows.slice(0, 100).map((row) => `<tr>${cols.map((c) => `<td>${esc(typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c])}</td>`).join('')}</tr>`).join('')
+      }</tbody></table>`;
+    }
+
+    async function runSql() {
+      $('sql-status').textContent = 'running';
+      try {
+        const rows = await api('/api/analytics/query', {
+          method: 'POST',
+          body: JSON.stringify({ sql: $('sql').value, params: [] }),
+        });
+        $('sql-status').textContent = `${fmtNum(rows.length)} rows`;
+        renderSql(rows);
+      } catch (err) {
+        $('sql-status').textContent = err.message;
+        $('sql-results').innerHTML = '';
+      }
+    }
+
+    async function loadLedgerPage() {
+      const params = new URLSearchParams({
+        limit: String(state.ledgerLimit),
+        offset: String(state.ledgerOffset),
+      });
+      const agent = $('ledger-agent').value.trim();
+      const type = $('ledger-type').value.trim();
+      if (agent) params.set('agent_id', agent);
+      if (type) params.set('type', type);
+      state.data.ledgerRecent = await api(`/api/analytics/ledger/recent?${params}`);
+      renderLedger();
+    }
+
+    async function refreshAll() {
+      $('status').textContent = 'loading';
+      try {
+        const [
+          summary,
+          mcpAgents,
+          funnel,
+          tools,
+          milestones,
+          ledgerSummary,
+          ledgerRecent,
+          ledgerAgents,
+          reconciliation,
+        ] = await Promise.all([
+          api('/api/analytics/summary'),
+          api('/api/analytics/mcp-agents?limit=100'),
+          api('/api/analytics/mcp-funnel'),
+          api('/api/analytics/mcp-tool-breakdown'),
+          api('/api/analytics/mcp-milestones'),
+          api('/api/analytics/ledger/summary'),
+          api('/api/analytics/ledger/recent?limit=100&offset=0'),
+          api('/api/analytics/ledger/agents?limit=100'),
+          api('/api/analytics/ledger/reconciliation'),
+        ]);
+        state.data = { summary, mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation };
+        state.ledgerOffset = 0;
+        renderMetrics();
+        renderAgents();
+        renderFunnel();
+        renderTools();
+        renderLedger();
+        $('status').innerHTML = `<span class="${reconciliation.ok ? 'ok' : 'warn'}">recon ${reconciliation.ok ? 'ok' : `${reconciliation.issue_count} issues`}</span> | updated ${fmtTime(Date.now())}`;
+        if (state.selectedAgent) await selectAgent(state.selectedAgent);
+      } catch (err) {
+        $('status').innerHTML = `<span class="bad">${esc(err.message)}</span>`;
+      }
+    }
+
+    $('refresh').addEventListener('click', refreshAll);
+    $('agent-filter').addEventListener('input', renderAgents);
+    $('clear-agent').addEventListener('click', () => {
+      state.selectedAgent = null;
+      $('selected-agent').textContent = 'none selected';
+      $('timeline').innerHTML = '';
+      $('agent-detail').innerHTML = '';
+      renderAgents();
+    });
+    $('ledger-apply').addEventListener('click', () => {
+      state.ledgerOffset = 0;
+      loadLedgerPage().catch((err) => { $('status').textContent = err.message; });
+    });
+    $('ledger-prev').addEventListener('click', () => {
+      state.ledgerOffset = Math.max(0, state.ledgerOffset - state.ledgerLimit);
+      loadLedgerPage().catch((err) => { $('status').textContent = err.message; });
+    });
+    $('ledger-next').addEventListener('click', () => {
+      state.ledgerOffset += state.ledgerLimit;
+      loadLedgerPage().catch((err) => { $('status').textContent = err.message; });
+    });
+    $('run-sql').addEventListener('click', runSql);
+    for (const btn of document.querySelectorAll('[data-sql]')) {
+      btn.addEventListener('click', () => {
+        $('sql').value = btn.dataset.sql;
+        runSql();
+      });
+    }
+
+    refreshAll();
+    setInterval(refreshAll, 30_000);
+  </script>
+</body>
+</html>
