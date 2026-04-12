@@ -7,6 +7,7 @@ limit_req_zone $binary_remote_addr zone=aol_docs:10m rate=DOCS_RATE_LIMIT;
 limit_req_zone $binary_remote_addr zone=aol_api:10m rate=API_RATE_LIMIT;
 limit_req_zone $binary_remote_addr zone=aol_danger:10m rate=DANGER_RATE_LIMIT;
 limit_req_zone $binary_remote_addr zone=aol_mcp:10m rate=MCP_RATE_LIMIT;
+limit_req_zone $binary_remote_addr zone=aol_operator:10m rate=600r/m;
 limit_conn_zone $binary_remote_addr zone=aol_conn:10m;
 
 server {
@@ -67,6 +68,11 @@ server {
     }
 
     location ^~ /api/journey {
+        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
+    }
+
+    location ^~ /api/analytics/ {
+        limit_req zone=aol_operator burst=200 nodelay;
         include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
     }
 
@@ -202,6 +208,11 @@ server {
     }
 
     location ^~ /api/journey {
+        include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
+    }
+
+    location ^~ /api/analytics/ {
+        limit_req zone=aol_operator burst=200 nodelay;
         include /etc/nginx/snippets/agents-on-lightning-proxy.conf;
     }
 
