@@ -245,21 +245,6 @@
     }
     .pill.ok { border-color: rgba(64,208,113,0.45); }
     .pill.bad { border-color: rgba(255,93,93,0.45); }
-    .bar {
-      width: 100%;
-      height: 12px;
-      background: #070908;
-      border: 1px solid rgba(39,48,45,0.72);
-      position: relative;
-    }
-    .bar i {
-      display: block;
-      height: 100%;
-      background: linear-gradient(90deg, var(--green), var(--cyan));
-    }
-    .bar.fail i {
-      background: linear-gradient(90deg, var(--red), var(--amber));
-    }
     .spark {
       display: inline-block;
       width: 92px;
@@ -326,7 +311,8 @@
     <main class="main">
       <section class="pane">
         <div class="pane-head">
-          <h2>Agents</h2>
+          <h2>Agent Index</h2>
+          <span class="muted">MCP + ledger identities</span>
           <span class="grow"></span>
           <input id="agent-filter" placeholder="agent id">
           <button id="refresh">refresh</button>
@@ -342,7 +328,7 @@
                 <th>last tool</th>
                 <th style="width:88px">capital</th>
                 <th style="width:78px">ledger</th>
-                <th style="width:98px">signal</th>
+                <th style="width:132px">activity note</th>
               </tr>
             </thead>
             <tbody id="agents-body"></tbody>
@@ -368,7 +354,7 @@
           <div class="subhead">Funnel</div>
           <div class="scroll">
             <table>
-              <thead><tr><th>stage</th><th style="width:52px">agents</th><th style="width:72px">calls</th><th style="width:110px">chart</th></tr></thead>
+              <thead><tr><th>stage</th><th style="width:52px">agents</th><th style="width:72px">calls</th><th style="width:134px">stage note</th></tr></thead>
               <tbody id="funnel-body"></tbody>
             </table>
           </div>
@@ -377,7 +363,7 @@
           <div class="subhead">Tools + Failures</div>
           <div class="scroll">
             <table>
-              <thead><tr><th>tool</th><th style="width:72px">group</th><th style="width:44px">calls</th><th style="width:44px">fail</th><th style="width:98px">chart</th></tr></thead>
+              <thead><tr><th>tool</th><th style="width:72px">group</th><th style="width:44px">calls</th><th style="width:44px">fail</th><th style="width:128px">usage note</th></tr></thead>
               <tbody id="tools-body"></tbody>
             </table>
           </div>
@@ -531,11 +517,6 @@
       </svg>`;
     }
 
-    function bar(value, max, fail = false) {
-      const pct = Math.max(0, Math.min(100, (Number(value || 0) / Math.max(Number(max || 1), 1)) * 100));
-      return `<div class="bar ${fail ? 'fail' : ''}"><i style="width:${pct.toFixed(1)}%"></i></div>`;
-    }
-
     function metric(label, value, note, values, color) {
       return `<div class="metric">
         <label>${esc(label)}</label>
@@ -583,7 +564,7 @@
       const funnelValues = (state.data.funnel || []).map((row) => row.agents);
       const milestoneValues = (state.data.milestones || []).map((row) => row.agents);
       $('metrics').innerHTML = [
-        metric('agents', fmtNum(agents.length), 'mcp identities', funnelValues, '#40d071'),
+        metric('mcp agents', fmtNum(agents.length), 'identities seen using MCP tools', funnelValues, '#40d071'),
         metric('mcp calls', fmtNum(calls), `${fmtNum(failures)} failures`, [calls - failures, failures], failures ? '#e7b94f' : '#40d071'),
         metric('success', calls ? `${(((calls - failures) / calls) * 100).toFixed(1)}%` : '-', 'tool success rate', [calls - failures, failures], '#65d8d2'),
         metric('ledger rows', fmtNum(publicLedger.total_entries), 'public append-only', (publicLedger.type_counts || []).map((r) => r.count), '#40d071'),
@@ -602,6 +583,9 @@
         const calls = Number(row.tool_calls || 0);
         const selected = row.agent_id === state.selectedAgent ? ' class="selected"' : '';
         const capital = Number(row.capital_available_sats || 0) + Number(row.capital_locked_sats || 0) + Number(row.capital_pending_deposit_sats || 0) + Number(row.capital_pending_close_sats || 0);
+        const activityNote = calls > 0
+          ? `${fmtNum(calls)} calls / max ${fmtNum(maxCalls)}; ${fmtNum(fail)} fail`
+          : 'ledger-only; 0 MCP calls';
         return `<tr${selected} data-agent="${esc(row.agent_id)}">
           <td class="cyan">${esc(short(row.agent_id, 12))}</td>
           <td class="mono">${fmtNum(calls)}</td>
@@ -610,7 +594,7 @@
           <td>${esc(short(row.last_tool || '-', 28))}</td>
           <td class="mono">${fmtSats(capital)}</td>
           <td class="mono">${fmtNum(row.public_ledger_entries || 0)}</td>
-          <td>${bar(calls, maxCalls, fail > 0)}</td>
+          <td class="${fail ? 'warn' : 'muted'}" title="MCP calls for this agent compared with the most active MCP agent. Ledger-only means this ID appears in ledger data but not MCP telemetry.">${esc(activityNote)}</td>
         </tr>`;
       }).join('');
       for (const tr of $('agents-body').querySelectorAll('tr[data-agent]')) {
@@ -625,7 +609,7 @@
         <td>${esc(row.workflow_stage)}</td>
         <td class="mono">${fmtNum(row.agents)}</td>
         <td class="mono">${fmtNum(row.tool_calls)}</td>
-        <td>${bar(row.agents, maxAgents)}</td>
+        <td class="muted" title="Agents that reached this workflow stage compared with the largest stage.">${fmtNum(row.agents)} agents / max ${fmtNum(maxAgents)}</td>
       </tr>`).join('');
     }
 
@@ -637,7 +621,7 @@
         <td>${esc(short(row.tool_group, 13))}</td>
         <td class="mono">${fmtNum(row.calls)}</td>
         <td class="${row.failures ? 'bad' : 'ok'} mono">${fmtNum(row.failures)}</td>
-        <td>${bar(row.calls, maxCalls, Number(row.failures || 0) > 0)}</td>
+        <td class="${row.failures ? 'warn' : 'muted'}" title="Calls to this tool compared with the most-used tool.">${fmtNum(row.calls)} calls / max ${fmtNum(maxCalls)}; ${fmtNum(row.failures || 0)} fail</td>
       </tr>`).join('');
     }
 
