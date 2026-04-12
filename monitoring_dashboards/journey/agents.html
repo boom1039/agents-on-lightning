@@ -554,24 +554,25 @@
     }
 
     function renderMetrics() {
-      const summary = state.data.summary || {};
       const ledger = state.data.ledgerSummary || {};
       const publicLedger = ledger.public_ledger || {};
       const capital = ledger.capital || {};
       const agents = Array.isArray(state.data.mcpAgents) ? state.data.mcpAgents : [];
+      const tools = Array.isArray(state.data.tools) ? state.data.tools : [];
       const calls = agents.reduce((sum, row) => sum + Number(row.tool_calls || 0), 0);
       const failures = agents.reduce((sum, row) => sum + Number(row.failed_calls || 0), 0);
+      const uniqueTools = tools.length;
       const funnelValues = (state.data.funnel || []).map((row) => row.agents);
       const milestoneValues = (state.data.milestones || []).map((row) => row.agents);
       $('metrics').innerHTML = [
         metric('mcp agents', fmtNum(agents.length), 'identities seen using MCP tools', funnelValues, '#40d071'),
         metric('mcp calls', fmtNum(calls), `${fmtNum(failures)} failures`, [calls - failures, failures], failures ? '#e7b94f' : '#40d071'),
         metric('success', calls ? `${(((calls - failures) / calls) * 100).toFixed(1)}%` : '-', 'tool success rate', [calls - failures, failures], '#65d8d2'),
+        metric('tools used', fmtNum(uniqueTools), 'unique MCP tools called', tools.map((row) => row.calls), '#65d8d2'),
         metric('ledger rows', fmtNum(publicLedger.total_entries), 'public append-only', (publicLedger.type_counts || []).map((r) => r.count), '#40d071'),
         metric('capital', fmtSats(capital.total_committed_sats), 'available+locked+pending', [capital.available_sats, capital.locked_sats, capital.pending_deposit_sats, capital.pending_close_sats], '#65d8d2'),
         metric('locked', fmtSats(capital.locked_sats), 'channel capital', [capital.locked_sats, capital.available_sats], '#e7b94f'),
         metric('revenue', fmtSats(capital.total_revenue_credited_sats), 'credited sats', milestoneValues, '#40d071'),
-        metric('db events', fmtNum(summary.total_events), `${fmtNum(summary.unique_agents)} unique agents`, [summary.total_events, summary.unique_agents], '#65d8d2'),
       ].join('');
     }
 
@@ -768,7 +769,6 @@
       $('status').textContent = 'loading';
       try {
         const [
-          summary,
           mcpAgents,
           funnel,
           tools,
@@ -778,7 +778,6 @@
           ledgerAgents,
           reconciliation,
         ] = await Promise.all([
-          api('/api/analytics/summary'),
           api('/api/analytics/mcp-agents?limit=100'),
           api('/api/analytics/mcp-funnel'),
           api('/api/analytics/mcp-tool-breakdown'),
@@ -788,7 +787,7 @@
           api('/api/analytics/ledger/agents?limit=100'),
           api('/api/analytics/ledger/reconciliation'),
         ]);
-        state.data = { summary, mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation };
+        state.data = { mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation };
         state.ledgerOffset = 0;
         renderMetrics();
         renderAgents();
