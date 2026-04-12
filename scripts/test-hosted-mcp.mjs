@@ -23,8 +23,6 @@ const requiredTools = [
   'aol_check_wallet_mint_quote',
   'aol_restore_wallet',
   'aol_reclaim_wallet_pending',
-  'aol_test_node_connection',
-  'aol_connect_node',
   'aol_create_capital_deposit',
   'aol_create_lightning_capital_deposit',
   'aol_get_lightning_capital_deposit_status',
@@ -46,7 +44,15 @@ const requiredTools = [
   'aol_get_channel_audit',
   'aol_get_channel_verify',
 ];
-const requiredPrompts = ['start_here', 'register_and_profile', 'inspect_market', 'fund_capital_lightning'];
+const requiredPrompts = ['start_here'];
+const removedTools = [
+  'aol_request',
+  'aol_list_skills',
+  'aol_get_llms_mcp',
+  'aol_test_node_connection',
+  'aol_connect_node',
+  'aol_get_node_status',
+];
 
 function assert(condition, message) {
   if (!condition) {
@@ -137,8 +143,23 @@ function getResourceUris(listResult) {
 
 const manifest = await fetchJson('/.well-known/mcp.json');
 assert(manifest.transport?.endpoint === '/mcp', 'Hosted MCP manifest is missing /mcp endpoint');
-assert(Array.isArray(manifest.tools) && manifest.tools.length >= requiredTools.length, 'Hosted MCP manifest is missing tools');
-assert(Array.isArray(manifest.prompts) && manifest.prompts.length >= requiredPrompts.length, 'Hosted MCP manifest is missing prompts');
+assert(manifest.transport?.type === 'streamable-http', 'Hosted MCP manifest transport type is wrong');
+assert(manifest.server_card === `${baseUrl}/.well-known/mcp/server-card.json`, 'Hosted MCP manifest is missing server_card');
+assert(Array.isArray(manifest.tools) && manifest.tools.includes('dynamic'), 'Hosted MCP manifest tools should be dynamic');
+assert(Array.isArray(manifest.prompts) && manifest.prompts.includes('dynamic'), 'Hosted MCP manifest prompts should be dynamic');
+assert((manifest.tool_summaries || []).some((tool) => tool.name === 'aol_register_agent'), 'Hosted MCP manifest is missing tool summaries');
+const serverCard = await fetchJson('/.well-known/mcp/server-card.json');
+assert(serverCard?.$schema === 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json', 'Server card schema is missing');
+assert(serverCard?.protocolVersion === '2025-06-18', 'Server card protocolVersion is wrong');
+assert(serverCard?.serverInfo?.name === 'agents-on-lightning-mcp', 'Server card serverInfo.name is wrong');
+assert(serverCard?.transport?.endpoint === '/mcp', 'Server card transport endpoint is wrong');
+assert(Array.isArray(serverCard?.tools) && serverCard.tools.includes('dynamic'), 'Server card tools should be dynamic');
+const agentCard = await fetchJson('/.well-known/agent-card.json');
+assert(agentCard?.name === 'Agents on Lightning', 'Agent card name is wrong');
+assert(agentCard?.version === '1.0.0', 'Agent card version is wrong');
+assert(agentCard?.documentationUrl === `${baseUrl}/llms.txt`, 'Agent card docs URL is wrong');
+assert(agentCard?.supportedInterfaces?.[0]?.url === `${baseUrl}/mcp`, 'Agent card MCP interface is missing');
+assert((agentCard?.skills || []).some((skill) => skill.id === 'use-hosted-mcp'), 'Agent card skills are missing');
 
 const client = new Client({
   name: 'aol-mcp-smoke',
@@ -156,8 +177,10 @@ try {
   const toolNames = getToolNames(tools);
   const promptNames = getPromptNames(prompts);
   const resourceUris = getResourceUris(resources);
-  assert(!toolNames.includes('aol_request'), 'Removed generic MCP request tool is still exposed');
 
+  for (const toolName of removedTools) {
+    assert(!toolNames.includes(toolName), `Removed MCP tool ${toolName} is still exposed`);
+  }
   for (const toolName of requiredTools) {
     assert(toolNames.includes(toolName), `Missing MCP tool ${toolName}`);
   }
@@ -165,6 +188,7 @@ try {
     assert(promptNames.includes(promptName), `Missing MCP prompt ${promptName}`);
   }
   assert(resourceUris.some((uri) => uri.endsWith('/docs/mcp/index.txt')), 'Missing MCP index resource');
+  assert(resourceUris.includes('mcp://server-card.json'), 'Missing MCP server-card resource');
 
   if (process.env.AOL_EXPECT_MCP_ONLY === '1') {
     assert(await fetchStatus('/api/v1/') === 404, 'MCP-only mode did not hide /api/v1/');
@@ -250,13 +274,6 @@ try {
     },
   });
   assert(!walletResult?.isError, 'aol_get_wallet_balance failed');
-
-  const llmsMcpResult = await client.callTool({
-    name: 'aol_get_llms_mcp',
-    arguments: {},
-  });
-  assert(!llmsMcpResult?.isError, 'aol_get_llms_mcp failed');
-  expectStatus(llmsMcpResult, 200, 'aol_get_llms_mcp');
 
   const actionResult = await client.callTool({
     name: 'aol_submit_action',
@@ -360,29 +377,6 @@ try {
     },
   });
   expectOneOfStatuses(capitalWithdrawResult, [400, 200, 503], 'aol_withdraw_capital');
-
-  const nodeTestResult = await client.callTool({
-    name: 'aol_test_node_connection',
-    arguments: {
-      api_key: apiKey,
-      host: 'bad_host',
-      macaroon: '00',
-      tls_cert: '00',
-    },
-  });
-  expectStatus(nodeTestResult, 400, 'aol_test_node_connection');
-
-  const nodeConnectResult = await client.callTool({
-    name: 'aol_connect_node',
-    arguments: {
-      api_key: apiKey,
-      host: 'bad_host',
-      macaroon: '00',
-      tls_cert: '00',
-      tier: 'readonly',
-    },
-  });
-  expectStatus(nodeConnectResult, 400, 'aol_connect_node');
 
   const fakePubkey = `02${'1'.repeat(64)}`;
   const nodeAnalysisResult = await client.callTool({

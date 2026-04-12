@@ -42,7 +42,9 @@ const SENSITIVE_FIELD_PATTERNS = [
 ];
 
 const ALLOWED_SENSITIVE_FIELDS = new Map([
-  ['GET /.well-known/mcp.json', new Set(['version'])],
+  ['GET /.well-known/mcp.json', new Set(['version', 'serverInfo.version'])],
+  ['GET /.well-known/mcp/server-card.json', new Set(['version', 'serverInfo.version'])],
+  ['GET /.well-known/agent-card.json', new Set(['version'])],
   ['GET /api/v1/', new Set(['version'])],
   ['GET /api/v1/capabilities', new Set(['tiers.invoice'])],
   ['POST /api/v1/agents/register', new Set(['api_key'])],

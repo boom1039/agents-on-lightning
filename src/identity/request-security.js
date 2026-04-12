@@ -41,10 +41,6 @@ export function areOperatorRoutesEnabled() {
   return process.env.ENABLE_OPERATOR_ROUTES === '1';
 }
 
-export function isMcpOnlyExternalAccessMode(env = process.env) {
-  return String(env.AOL_EXTERNAL_ACCESS_MODE || '').trim().toLowerCase() === 'mcp_only';
-}
-
 export function hasConfiguredOperatorSecret() {
   return typeof process.env.OPERATOR_API_SECRET === 'string' && process.env.OPERATOR_API_SECRET.trim().length > 0;
 }
@@ -97,11 +93,8 @@ export function requireJsonWriteContent(req, res, next) {
 }
 
 export function rejectExternalAgentApiRoute(req, res, {
-  mode = process.env.AOL_EXTERNAL_ACCESS_MODE,
   internalMcpSecret = process.env.AOL_INTERNAL_MCP_SECRET,
 } = {}) {
-  if (!isMcpOnlyExternalAccessMode({ AOL_EXTERNAL_ACCESS_MODE: mode })) return null;
-
   const path = getOriginalPath(req);
   if (!path.startsWith('/api/v1/')) return null;
 
@@ -121,11 +114,7 @@ export function createMcpOnlyApiGuard(options = {}) {
   };
 }
 
-export function rejectExternalDocRoute(req, res, {
-  mode = process.env.AOL_EXTERNAL_ACCESS_MODE,
-} = {}) {
-  if (!isMcpOnlyExternalAccessMode({ AOL_EXTERNAL_ACCESS_MODE: mode })) return null;
-
+export function rejectExternalDocRoute(req, res) {
   const path = getOriginalPath(req);
   if (!path.startsWith('/docs/')) return null;
   if (path.startsWith('/docs/mcp/')) return null;

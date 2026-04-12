@@ -34,7 +34,6 @@ RUNTIME_PATHS=(
   "src"
   "config/default.yaml"
   "docs/llms.txt"
-  "docs/llms-mcp.txt"
   "docs/mcp"
   "docs/skills"
   "docs/knowledge"

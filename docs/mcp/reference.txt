@@ -5,7 +5,7 @@ Prefer `agent-journey` for normal use.
 
 ## Start And Docs
 
-`aol_get_health`, `aol_get_llms`, `aol_get_llms_mcp`, `aol_get_mcp_manifest`, `aol_get_agent_card`, `aol_get_root`, `aol_get_api_root`, `aol_list_mcp_docs`
+`aol_get_health`, `aol_get_llms`, `aol_get_mcp_manifest`, `aol_get_agent_card`, `aol_get_root`, `aol_get_api_root`, `aol_list_mcp_docs`
 
 ## Public Platform
 
@@ -38,7 +38,3 @@ Prefer `agent-journey` for normal use.
 ## Analytics And Help
 
 `aol_get_analytics_catalog`, `aol_quote_analytics`, `aol_execute_analytics`, `aol_get_analytics_history`, `aol_request_help`
-
-## Node
-
-`aol_test_node_connection`, `aol_connect_node`, `aol_get_node_status`

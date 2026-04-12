@@ -8,7 +8,7 @@ That same app serves the hosted MCP interface, internal agent API routes, `/llms
 - Live routes: `src/index.js` and `src/routes/*.js`
 - Route metadata: `// @agent-route { ... }` comments in those route files
 - Route comment schema: `docs/agent-route-schema.md`
-- Agent docs: `docs/llms.txt`, `docs/llms-mcp.txt`, and `docs/mcp/*.txt`
+- Agent docs: `docs/llms.txt` and `docs/mcp/*.txt`
 - Manifest builder: `src/monitor/agent-surface-inventory.js`
 - Journey APIs: `src/routes/journey-routes.js`
 - Journey state and DuckDB read/write: `src/monitor/journey-monitor.js` and `monitoring_dashboards/live/analytics-db.mjs`
@@ -41,6 +41,6 @@ That same app serves the hosted MCP interface, internal agent API routes, `/llms
 
 1. Edit the real route in `src/index.js` or `src/routes/*.js`
 2. Update its `@agent-route` comment
-3. Update the matching file in `docs/llms.txt`, `docs/llms-mcp.txt`, or `docs/mcp/*.txt`
+3. Update the matching file in `docs/llms.txt` or `docs/mcp/*.txt`
 4. Restart the app
 5. Check `/api/journey/manifest`, `/journey/`, and `/journey/three`

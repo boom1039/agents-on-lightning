@@ -29,13 +29,11 @@ async function startApp() {
   app.use(express.json());
   const internalMcpSecret = 'test-internal-mcp-secret';
   app.use(createMcpOnlyApiGuard({
-    mode: 'mcp_only',
     internalMcpSecret,
   }));
   app.get('/', (_req, res) => res.json({ ok: true }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/llms.txt', (_req, res) => res.type('text/plain').send('root llms'));
-  app.get('/llms-mcp.txt', (_req, res) => res.type('text/plain').send('mcp llms'));
   app.get('/api/v1/', (_req, res) => res.json({
     ok: true,
     hint: 'Try GET /api/v1/platform/status next.',
@@ -86,11 +84,47 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert(toolNames.includes('aol_list_mcp_docs'));
     assert(!toolNames.includes('aol_list_skills'));
     assert(!toolNames.includes('aol_request'));
+    assert(!toolNames.includes('aol_get_llms_mcp'));
+    assert(!toolNames.includes('aol_test_node_connection'));
+    assert(!toolNames.includes('aol_connect_node'));
+    assert(!toolNames.includes('aol_get_node_status'));
     const manifest = await (await fetch(new URL('/.well-known/mcp.json', baseUrl))).json();
+    assert.equal(manifest.server_card, `${baseUrl}/.well-known/mcp/server-card.json`);
+    assert.equal(manifest.$schema, 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json');
+    assert.equal(manifest.protocolVersion, '2025-06-18');
+    assert.equal(manifest.serverInfo.name, 'agents-on-lightning-mcp');
+    assert.equal(manifest.transport.type, 'streamable-http');
+    assert.deepEqual(manifest.tools, ['dynamic']);
+    assert.deepEqual(manifest.prompts, ['dynamic']);
+    assert.deepEqual(manifest.resources, ['dynamic']);
     assert.deepEqual(
-      (manifest.resources || []).map((resource) => resource.name),
+      (manifest.resource_summaries || []).map((resource) => resource.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
+    assert((manifest.tool_summaries || []).some((tool) => tool.name === 'aol_register_agent'));
+    const serverCardResponse = await fetch(new URL('/.well-known/mcp/server-card.json', baseUrl));
+    assert.equal(serverCardResponse.status, 200);
+    assert.equal(serverCardResponse.headers.get('access-control-allow-origin'), '*');
+    assert.match(serverCardResponse.headers.get('content-type') || '', /application\/json/);
+    const serverCard = await serverCardResponse.json();
+    assert.equal(serverCard.$schema, 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json');
+    assert.equal(serverCard.protocolVersion, '2025-06-18');
+    assert.equal(serverCard.serverInfo.name, 'agents-on-lightning-mcp');
+    assert.equal(serverCard.transport.endpoint, '/mcp');
+    assert.deepEqual(serverCard.tools, ['dynamic']);
+    assert.deepEqual(serverCard.prompts, ['dynamic']);
+    assert.deepEqual(serverCard.resources, ['dynamic']);
+    const agentCardResponse = await fetch(new URL('/.well-known/agent-card.json', baseUrl));
+    assert.equal(agentCardResponse.status, 200);
+    assert.equal(agentCardResponse.headers.get('access-control-allow-origin'), '*');
+    const agentCard = await agentCardResponse.json();
+    assert.equal(agentCard.name, 'Agents on Lightning');
+    assert.equal(agentCard.version, '1.0.0');
+    assert.equal(agentCard.documentationUrl, `${baseUrl}/llms.txt`);
+    assert.equal(agentCard.supportedInterfaces[0].url, `${baseUrl}/mcp`);
+    assert.equal(agentCard.supportedInterfaces[0].protocolBinding, 'MCP');
+    assert.deepEqual(agentCard.defaultInputModes, ['application/json', 'text/plain']);
+    assert((agentCard.skills || []).some((skill) => skill.id === 'use-hosted-mcp'));
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
@@ -106,6 +140,9 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       docsResult.structuredContent.body.docs.map((doc) => doc.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
+    const resources = await client.listResources();
+    const resourceUris = (resources.resources || []).map((resource) => resource.uri);
+    assert(resourceUris.includes('mcp://server-card.json'));
     const directApi = await fetch(new URL('/api/v1/', baseUrl));
     assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));

@@ -4,7 +4,6 @@ export const SIMPLIFIED_MCP_DOC_NAMES = Object.freeze([
   'money',
   'market',
   'social',
-  'node',
   'reference',
 ]);
 
@@ -40,12 +39,6 @@ export const MCP_DOCS = [
     description: 'Identity, messages, alliances, leaderboard, and tournaments.',
   },
   {
-    name: 'node',
-    file: 'node.txt',
-    title: 'Node',
-    description: 'Connect and inspect an agent-owned Lightning node.',
-  },
-  {
     name: 'reference',
     file: 'reference.txt',
     title: 'Tool Reference',
@@ -62,7 +55,7 @@ export const MCP_TASK_PROMPTS = [
       'Use hosted MCP and named tools only.',
       'Read the agent-journey resource first.',
       'Register with aol_register_agent, save saved_values.api_key and saved_values.agent_id, then follow the workflow that matches the task.',
-      'Use money, market, social, node, and reference only when the journey tells you to branch.',
+      'Use money, market, social, and reference only when the journey tells you to branch.',
       'Stop and report exact blockers instead of inventing ids, funds, signatures, pubkeys, channels, invoices, or payment state.',
     ].join('\n'),
   },

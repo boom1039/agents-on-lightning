@@ -95,7 +95,6 @@ AOL_SERVER_ROLE=prod
 AOL_CONFIG_PATH=/etc/agents-on-lightning/config.yaml
 AOL_DATA_DIR=/var/lib/agents-on-lightning
 AOL_JOURNEY_DB_PATH=/var/lib/agents-on-lightning/data/journey-analytics.duckdb
-AOL_EXTERNAL_ACCESS_MODE=mcp_only
 AOL_INTERNAL_BASE_URL=http://127.0.0.1:3302
 HOST=127.0.0.1
 PORT=3302
@@ -169,8 +168,7 @@ Default artifact includes:
 1. `src/`
 2. `config/default.yaml`
 3. `docs/llms.txt`
-4. `docs/llms-mcp.txt`
-5. `docs/mcp/`
+4. `docs/mcp/`
 6. `docs/skills/`
 7. `docs/knowledge/`
 8. `monitoring_dashboards/journey/`

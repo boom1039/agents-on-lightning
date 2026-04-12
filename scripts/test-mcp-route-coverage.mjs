@@ -112,11 +112,17 @@ try {
   const llms = await callTool('aol_get_llms');
   markResult('GET /llms.txt', 'aol_get_llms', llms, { success: [200] });
 
-  const llmsMcp = await callTool('aol_get_llms_mcp');
-  markResult('GET /llms-mcp.txt', 'aol_get_llms_mcp', llmsMcp, { success: [200] });
-
   const mcpManifest = await callTool('aol_get_mcp_manifest');
   markResult('GET /.well-known/mcp.json', 'aol_get_mcp_manifest', mcpManifest, { success: [200] });
+
+  const serverCard = await fetchJson('/.well-known/mcp/server-card.json');
+  const serverCardRow = rowByKey.get('GET /.well-known/mcp/server-card.json');
+  if (serverCardRow) {
+    serverCardRow.status = serverCard.status == null ? '200' : String(serverCard.status);
+    serverCardRow.kind = 'success';
+    serverCardRow.tool = 'well-known-server-card';
+    serverCardRow.note = serverCard.serverInfo?.name || 'MCP server card';
+  }
 
   const agentCard = await callTool('aol_get_agent_card');
   markResult('GET /.well-known/agent-card.json', 'aol_get_agent_card', agentCard, { success: [200] });

@@ -118,7 +118,6 @@ test('mcp-only api guard hides public api routes', () => {
   const result = rejectExternalAgentApiRoute(mockReq({
     path: '/api/v1/agents/register',
   }), res, {
-    mode: 'mcp_only',
     internalMcpSecret: 'internal-secret',
   });
   assert.equal(result, res);
@@ -133,7 +132,6 @@ test('mcp-only api guard allows loopback api routes with internal mcp secret', (
     path: '/api/v1/agents/me',
     headers: { [INTERNAL_MCP_HEADER_NAME]: 'internal-secret' },
   }), res, {
-    mode: 'mcp_only',
     internalMcpSecret: 'internal-secret',
   });
   assert.equal(result, null);
@@ -146,7 +144,6 @@ test('mcp-only api guard hides loopback api routes without internal mcp secret',
     remoteAddress: '127.0.0.1',
     path: '/api/v1/agents/me',
   }), res, {
-    mode: 'mcp_only',
     internalMcpSecret: 'internal-secret',
   });
   assert.equal(result, res);
@@ -157,14 +154,14 @@ test('mcp-only docs guard keeps mcp docs public and hides legacy docs externally
   const mcpRes = mockRes();
   const mcpResult = rejectExternalDocRoute(mockReq({
     path: '/docs/mcp/index.txt',
-  }), mcpRes, { mode: 'mcp_only' });
+  }), mcpRes);
   assert.equal(mcpResult, null);
   assert.equal(mcpRes.statusCode, 200);
 
   const skillRes = mockRes();
   const skillResult = rejectExternalDocRoute(mockReq({
     path: '/docs/skills/discovery.txt',
-  }), skillRes, { mode: 'mcp_only' });
+  }), skillRes);
   assert.equal(skillResult, skillRes);
   assert.equal(skillRes.statusCode, 404);
 });

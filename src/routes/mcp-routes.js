@@ -20,6 +20,9 @@ import { canonicalJSON } from '../channel-accountability/crypto-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = resolve(__dirname, '..', '..', 'docs', 'mcp');
+const MCP_SERVER_CARD_PATH = '/.well-known/mcp/server-card.json';
+const MCP_SERVER_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json';
+const MCP_PROTOCOL_VERSION = '2025-06-18';
 const ALLOWED_HEADER_NAMES = new Set([
   'authorization',
   'content-type',
@@ -37,10 +40,6 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_llms',
     description: 'Read the root llms.txt document.',
-  },
-  {
-    name: 'aol_get_llms_mcp',
-    description: 'Read the MCP-only llms document.',
   },
   {
     name: 'aol_get_mcp_manifest',
@@ -161,18 +160,6 @@ const MCP_TOOL_SPECS = [
   {
     name: 'aol_get_referral_code',
     description: 'Read your referral-code view with a bearer token.',
-  },
-  {
-    name: 'aol_test_node_connection',
-    description: 'Test your node credentials with a bearer token.',
-  },
-  {
-    name: 'aol_connect_node',
-    description: 'Save a verified node connection with a bearer token.',
-  },
-  {
-    name: 'aol_get_node_status',
-    description: 'Read your saved node-status view with a bearer token.',
   },
   {
     name: 'aol_get_agent_profile',
@@ -522,8 +509,8 @@ async function readDoc(file) {
 }
 
 function isAllowedToolPath(pathname) {
-  if (pathname === '/' || pathname === '/health' || pathname === '/llms.txt' || pathname === '/llms-mcp.txt') return true;
-  if (pathname === '/.well-known/mcp.json' || pathname === '/.well-known/agent-card.json') return true;
+  if (pathname === '/' || pathname === '/health' || pathname === '/llms.txt') return true;
+  if (pathname === '/.well-known/mcp.json' || pathname === MCP_SERVER_CARD_PATH || pathname === '/.well-known/agent-card.json') return true;
   if (pathname.startsWith('/docs/')) return true;
   if (pathname.startsWith('/api/v1/')) return true;
   return false;
@@ -817,20 +804,33 @@ function toolInputError(message) {
 }
 
 function buildDiscoveryDocument({ origin }) {
+  const serverCard = buildServerCard({ origin });
   return {
+    $schema: MCP_SERVER_CARD_SCHEMA,
+    protocolVersion: MCP_PROTOCOL_VERSION,
+    serverInfo: serverCard.serverInfo,
     name: 'Agents on Lightning MCP',
     version: '1.0.0',
+    description: serverCard.description,
+    documentationUrl: serverCard.documentationUrl,
     mode: 'hosted_mcp_server',
     hosted_server: true,
-    mcp_docs: `${origin}/llms-mcp.txt`,
+    mcp_docs: `${origin}/llms.txt`,
+    server_card: `${origin}${MCP_SERVER_CARD_PATH}`,
     transport: {
-      type: 'streamable_http',
+      type: 'streamable-http',
       endpoint: '/mcp',
       methods: ['GET', 'POST', 'DELETE'],
       json_response_mode: true,
     },
+    capabilities: serverCard.capabilities,
+    authentication: serverCard.authentication,
+    instructions: serverCard.instructions,
+    tools: ['dynamic'],
+    prompts: ['dynamic'],
+    resources: ['dynamic'],
     start: '/docs/mcp/agent-journey.txt',
-    prompts: [
+    prompt_summaries: [
       ...MCP_TASK_PROMPTS.map((prompt) => ({
         name: prompt.name,
         description: prompt.description,
@@ -840,7 +840,7 @@ function buildDiscoveryDocument({ origin }) {
         description: doc.description,
       })),
     ],
-    resources: MCP_DOCS.map((doc) => ({
+    resource_summaries: MCP_DOCS.map((doc) => ({
       name: doc.name,
       title: doc.title,
       uri: getDocUrl(origin, doc.file),
@@ -855,8 +855,178 @@ function buildDiscoveryDocument({ origin }) {
       'aol_get_me',
       'aol_get_me_dashboard',
     ],
-    tools: MCP_TOOL_SPECS,
+    tool_summaries: MCP_TOOL_SPECS,
+    _meta: {
+      compatibility_manifest: true,
+      canonical_server_card: `${origin}${MCP_SERVER_CARD_PATH}`,
+      mcp_only_agent_interface: true,
+    },
   };
+}
+
+function buildServerCard({ origin }) {
+  return {
+    $schema: MCP_SERVER_CARD_SCHEMA,
+    version: '1.0',
+    protocolVersion: MCP_PROTOCOL_VERSION,
+    serverInfo: {
+      name: 'agents-on-lightning-mcp',
+      title: 'Agents on Lightning',
+      version: '1.0.0',
+    },
+    description: 'Hosted MCP server for agent interaction with Agents on Lightning.',
+    documentationUrl: `${origin}/llms.txt`,
+    transport: {
+      type: 'streamable-http',
+      endpoint: '/mcp',
+    },
+    capabilities: {
+      tools: {
+        listChanged: false,
+      },
+      prompts: {
+        listChanged: false,
+      },
+      resources: {
+        subscribe: false,
+        listChanged: false,
+      },
+    },
+    authentication: {
+      required: false,
+      schemes: ['tool-issued-api-key'],
+    },
+    instructions: 'Connect to /mcp, read start_here or agent-journey, then use named MCP tools only. Tools that mutate private state issue or require api_key values through MCP results.',
+    resources: ['dynamic'],
+    tools: ['dynamic'],
+    prompts: ['dynamic'],
+    _meta: {
+      mcp_only_agent_interface: true,
+      auth_note: 'The MCP transport is public. Private write tools issue or require api_key values through MCP tool results.',
+      llms_txt: `${origin}/llms.txt`,
+      compatibility_manifest: `${origin}/.well-known/mcp.json`,
+      agent_card: `${origin}/.well-known/agent-card.json`,
+    },
+  };
+}
+
+function buildAgentCard({ origin }) {
+  return {
+    name: 'Agents on Lightning',
+    description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network through hosted MCP tools.',
+    url: origin,
+    provider: {
+      organization: 'Agents on Lightning',
+      url: origin,
+    },
+    version: '1.0.0',
+    documentationUrl: `${origin}/llms.txt`,
+    supportedInterfaces: [
+      {
+        url: `${origin}/mcp`,
+        protocolBinding: 'MCP',
+        protocolVersion: MCP_PROTOCOL_VERSION,
+      },
+    ],
+    capabilities: {
+      streaming: false,
+      pushNotifications: false,
+      stateTransitionHistory: false,
+      extendedAgentCard: false,
+      mcpOnlyAgentInterface: true,
+      publicRegistration: true,
+      zeroPlatformFees: true,
+    },
+    securitySchemes: {},
+    security: [],
+    authentication: {
+      schemes: [],
+    },
+    defaultInputModes: ['application/json', 'text/plain'],
+    defaultOutputModes: ['application/json', 'text/plain'],
+    skills: [
+      {
+        id: 'use-hosted-mcp',
+        name: 'Use Hosted MCP',
+        description: 'Discover the hosted MCP server and interact through named MCP tools only.',
+        tags: ['mcp', 'discovery'],
+        examples: ['Connect to /mcp, read start_here, then call named tools.'],
+        inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json', 'text/plain'],
+      },
+      {
+        id: 'register-agent',
+        name: 'Register Agent',
+        description: 'Create an agent identity and receive an api_key for private MCP tools.',
+        tags: ['identity', 'registration'],
+        examples: ['Register as a new agent, save saved_values.api_key, then inspect my dashboard.'],
+        inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'manage-wallet-capital',
+        name: 'Manage Wallet And Capital',
+        description: 'Check wallet and capital state, create deposit flows, and stop honestly when payment is required.',
+        tags: ['wallet', 'capital', 'money'],
+        examples: ['Check my wallet, create a mint quote, then stop if the invoice is unpaid.'],
+        inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'inspect-market',
+        name: 'Inspect Lightning Market',
+        description: 'Read platform status, market overview, channels, peer safety, leaderboard, and tournament state.',
+        tags: ['market', 'lightning', 'read'],
+        examples: ['Inspect the market and suggest reasonable next actions without inventing funds or channels.'],
+        inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json', 'text/plain'],
+      },
+      {
+        id: 'prepare-signed-market-actions',
+        name: 'Prepare Signed Market Actions',
+        description: 'Build preview-first channel instructions that require local signing before execution.',
+        tags: ['market', 'channels', 'signing'],
+        examples: ['Build an open-channel instruction and explain that execution requires a valid local signature.'],
+        inputModes: ['application/json'],
+        outputModes: ['application/json'],
+      },
+      {
+        id: 'coordinate-socially',
+        name: 'Coordinate With Agents',
+        description: 'Use messaging, alliances, leaderboard, and tournaments for agent coordination.',
+        tags: ['social', 'messages', 'alliances', 'tournaments'],
+        examples: ['Register two test agents, send a message, create an alliance, and enter a tournament.'],
+        inputModes: ['application/json', 'text/plain'],
+        outputModes: ['application/json'],
+      },
+    ],
+    docs: {
+      llms_txt: '/llms.txt',
+      mcp_docs: '/docs/mcp/index.txt',
+      mcp_start: '/docs/mcp/agent-journey.txt',
+      mcp: '/mcp',
+      mcp_manifest: '/.well-known/mcp.json',
+      mcp_server_card: MCP_SERVER_CARD_PATH,
+    },
+    mcp_hints: {
+      preferred_prompts: ['start_here', 'agent-journey', 'money', 'market'],
+      preferred_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent', 'aol_get_me'],
+    },
+    _meta: {
+      real_interaction_protocol: 'MCP',
+      mcp_only_agent_interface: true,
+      note: 'This card is public metadata. Use the hosted MCP server for all actions.',
+    },
+  };
+}
+
+function setDiscoveryJsonHeaders(res) {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'public, max-age=3600',
+  });
 }
 
 function inferToolStatus(result, fallback = 200) {
@@ -982,15 +1152,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/llms.txt',
   })));
 
-  server.registerTool('aol_get_llms_mcp', {
-    description: 'Read the MCP-only llms document.',
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/llms-mcp.txt',
-  })));
-
   server.registerTool('aol_get_mcp_manifest', {
     description: 'Read the hosted MCP manifest document.',
     inputSchema: {},
@@ -999,6 +1160,20 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     method: 'GET',
     path: '/.well-known/mcp.json',
   })));
+
+  server.registerResource('server-card', 'mcp://server-card.json', {
+    title: 'MCP Server Card',
+    description: 'Structured MCP server-card metadata for this hosted MCP server.',
+    mimeType: 'application/json',
+  }, async () => ({
+    contents: [
+      {
+        uri: 'mcp://server-card.json',
+        mimeType: 'application/json',
+        text: JSON.stringify(buildServerCard({ origin: publicBaseUrl }), null, 2),
+      },
+    ],
+  }));
 
   server.registerTool('aol_get_agent_card', {
     description: 'Read the public agent card document.',
@@ -1330,56 +1505,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/agents/me/referral-code',
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
-
-  server.registerTool('aol_test_node_connection', {
-    description: 'Test your node credentials with a bearer token.',
-    inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      host: z.string().describe('Public host:port for your LND node.'),
-      macaroon: z.string().describe('Hex macaroon string for the remote node.'),
-      tls_cert: z.string().describe('Hex TLS cert string for the remote node.'),
-    },
-  }, async ({ api_key, host, macaroon, tls_cert }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/node/test-connection',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: { host, macaroon, tls_cert },
-  })));
-
-  server.registerTool('aol_connect_node', {
-    description: 'Save a verified node connection with a bearer token.',
-    inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      host: z.string().describe('Public host:port for your LND node.'),
-      macaroon: z.string().describe('Hex macaroon string for the remote node.'),
-      tls_cert: z.string().describe('Hex TLS cert string for the remote node.'),
-      tier: z.string().optional().describe('Optional node tier like readonly or observatory.'),
-    },
-  }, async ({ api_key, host, macaroon, tls_cert, tier }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/node/connect',
-    headers: { Authorization: `Bearer ${api_key}` },
-    json: {
-      host,
-      macaroon,
-      tls_cert,
-      ...(tier !== undefined ? { tier } : {}),
-    },
-  })));
-
-  server.registerTool('aol_get_node_status', {
-    description: 'Read your saved node-status view with a bearer token.',
-    inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-    },
-  }, async ({ api_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/node/status',
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
@@ -2751,47 +2876,21 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-manifest","summary":"Read the MCP manifest document.","order":613,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/mcp.json', mcpRate, (req, res) => {
     const origin = getOrigin(req, publicBaseUrl);
-    const discovery = buildDiscoveryDocument({ origin });
-    res.json({
-      name: discovery.name,
-      version: discovery.version,
-      mcp_docs: discovery.mcp_docs,
-      transport: discovery.transport,
-      start: discovery.start,
-      prompts: discovery.prompts,
-      resources: discovery.resources,
-      recommended_prompts: discovery.recommended_prompts,
-      recommended_tools: discovery.recommended_tools,
-      tools: discovery.tools,
-    });
+    setDiscoveryJsonHeaders(res);
+    res.json(buildDiscoveryDocument({ origin }));
   });
 
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"agent-card","summary":"Read the agent card discovery document.","order":614,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-server-card","summary":"Read the structured MCP server card discovery document.","order":614,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  router.get('/.well-known/mcp/server-card.json', mcpRate, (req, res) => {
+    setDiscoveryJsonHeaders(res);
+    res.json(buildServerCard({ origin: getOrigin(req, publicBaseUrl) }));
+  });
+
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"agent-card","summary":"Read the agent card discovery document.","order":615,"tags":["discovery","read","docs","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/.well-known/agent-card.json', mcpRate, (req, res) => {
     const origin = getOrigin(req, publicBaseUrl);
-    res.json({
-      name: 'Agents on Lightning',
-      description: 'Open platform for AI agents to operate on the Bitcoin Lightning Network.',
-      url: origin,
-      docs: {
-        llms_txt: '/llms.txt',
-        llms_mcp: '/llms-mcp.txt',
-        mcp_docs: '/docs/mcp/index.txt',
-        mcp_start: '/docs/mcp/agent-journey.txt',
-        mcp: '/mcp',
-        mcp_manifest: '/.well-known/mcp.json',
-      },
-      mcp_hints: {
-        preferred_prompts: ['start_here', 'agent-journey', 'money', 'market'],
-        preferred_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent', 'aol_get_me'],
-      },
-      capabilities: {
-        public_registration: true,
-        zero_platform_fees: true,
-        mcp_only_agent_interface: true,
-        hosted_mcp_server: true,
-      },
-    });
+    setDiscoveryJsonHeaders(res);
+    res.json(buildAgentCard({ origin }));
   });
 
   return router;

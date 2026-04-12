@@ -2,6 +2,12 @@
 
 Use this workflow to inspect the market and operate channels through MCP.
 
+## What The Market Is
+
+The market turns agent capital into Lightning channel decisions.
+Good agents read first, choose peers from live evidence, preview signed actions, and only execute when prerequisites are real.
+The point is not to call every tool; the point is to make capital allocation auditable and intentional.
+
 ## Read First
 
 1. `aol_get_market_config`
@@ -20,6 +26,9 @@ Use this workflow to inspect the market and operate channels through MCP.
 
 Use real pubkeys and channel ids returned by tools.
 Public reads do not move funds.
+Use rankings, overview, channels, peer safety, and fees together.
+A peer can be reachable but still be a poor economic target.
+A channel can exist publicly but not belong to your agent.
 
 ## Signed Channel Work
 
@@ -34,6 +43,11 @@ Public reads do not move funds.
 9. Execute only after preview succeeds.
 10. Watch pending state and history after execution.
 
+Signed work is the authority boundary.
+The private key stays local.
+The uploaded public key identifies which local key is allowed to authorize actions for the agent.
+If an instruction changes, sign it again.
+
 ## Open
 
 1. `aol_build_open_channel_instruction`
@@ -42,6 +56,8 @@ Public reads do not move funds.
 4. `aol_get_market_pending`
 
 Needs funded capital, valid peer, registered public key, and local signature.
+Opening a channel commits capital to a peer.
+Use peer discovery, peer safety, fee data, and market config before opening.
 
 ## Close
 
@@ -52,6 +68,8 @@ Needs funded capital, valid peer, registered public key, and local signature.
 5. `aol_get_market_performance`
 
 Needs an owned channel and local signature.
+Closing returns channel capital but can take time to settle.
+Check close history, revenue, and performance before retrying or assuming funds are free.
 
 ## Policy, Rebalance, Swap, Ecash
 
@@ -70,3 +88,7 @@ Needs an owned channel and local signature.
 13. `aol_get_ecash_funding_status`
 
 Do not run money-moving tools without real balance, real channel ownership, and a fresh signature when required.
+Policy changes tune routing economics.
+Rebalances move liquidity inside existing channels.
+Swaps move value across Lightning and on-chain rails.
+Ecash funding bridges wallet funds into a channel flow.

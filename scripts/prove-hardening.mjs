@@ -11,6 +11,7 @@ const stamp = now.toISOString().replace(/[:.]/g, '-');
 const reportDir = resolve(rootDir, 'output', 'proof');
 const reportPath = resolve(reportDir, `hardening-proof-${stamp}.json`);
 const args = new Set(process.argv.slice(2));
+const PROOF_INTERNAL_MCP_SECRET = 'proof-internal-mcp-secret';
 
 const options = {
   prod: args.has('--prod') || process.env.AOL_PROOF_PROD === '1',
@@ -153,7 +154,6 @@ async function artifactProof() {
     'package-lock.json',
     'config/default.yaml',
     'docs/llms.txt',
-    'docs/llms-mcp.txt',
     'monitoring_dashboards/journey/index.html',
     'monitoring_dashboards/live/analytics-db.mjs',
   ];
@@ -183,7 +183,7 @@ function isAllowedArtifactEntry(entry) {
   if (entry === 'package-lock.json') return true;
   if (entry === 'src' || entry.startsWith('src/')) return true;
   if (entry === 'config' || entry === 'config/default.yaml') return true;
-  if (entry === 'docs' || entry === 'docs/llms.txt' || entry === 'docs/llms-mcp.txt') return true;
+  if (entry === 'docs' || entry === 'docs/llms.txt') return true;
   if (entry.startsWith('docs/mcp') || entry.startsWith('docs/skills') || entry.startsWith('docs/knowledge')) return true;
   if (entry === 'monitoring_dashboards') return true;
   if (entry === 'monitoring_dashboards/journey' || entry.startsWith('monitoring_dashboards/journey/')) return true;
@@ -229,6 +229,7 @@ async function localLoadProof() {
       NODE_ENV: 'test',
       AOL_INTERNAL_BASE_URL: `http://127.0.0.1:${port}`,
       AOL_PUBLIC_BASE_URL: `http://127.0.0.1:${port}`,
+      AOL_INTERNAL_MCP_SECRET: PROOF_INTERNAL_MCP_SECRET,
     };
 
     serverProcess = spawn(process.execPath, ['src/index.js'], {
@@ -243,9 +244,13 @@ async function localLoadProof() {
     await waitForJson(`http://127.0.0.1:${port}/health`);
 
     const baseUrl = `http://127.0.0.1:${port}`;
+    await requestJson(baseUrl, '/api/v1/', {
+      expect: [404],
+    });
+
     const agent = await requestJson(baseUrl, '/api/v1/agents/register', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { ...internalMcpHeaders('aol_register_agent'), 'content-type': 'application/json' },
       body: JSON.stringify({ name: `proof-${Date.now()}` }),
       expect: [201],
     });
@@ -253,12 +258,12 @@ async function localLoadProof() {
     if (!apiKey) throw new Error('agent registration did not return api_key');
 
     await requestJson(baseUrl, '/api/v1/agents/me', {
-      headers: authHeaders(apiKey),
+      headers: { ...authHeaders(apiKey), ...internalMcpHeaders('aol_get_me') },
       expect: [200],
     });
     await requestJson(baseUrl, '/api/v1/actions/submit', {
       method: 'POST',
-      headers: { ...authHeaders(apiKey), 'content-type': 'application/json' },
+      headers: { ...authHeaders(apiKey), ...internalMcpHeaders('aol_submit_action'), 'content-type': 'application/json' },
       body: JSON.stringify({ action_type: 'inspect_market', description: 'proof action' }),
       expect: [201],
     });
@@ -397,6 +402,7 @@ async function runLoad(baseUrl, apiKey, totalRequests, concurrency, rps, sampleM
     { path: '/api/v1/wallet/balance', headers: authHeaders(apiKey), expect: [200] },
     { path: '/api/v1/capital/balance', headers: authHeaders(apiKey), expect: [200] },
     { path: '/.well-known/mcp.json', expect: [200] },
+    { path: '/.well-known/mcp/server-card.json', expect: [200] },
   ];
   const failures = [];
   let next = 0;
@@ -415,8 +421,11 @@ async function runLoad(baseUrl, apiKey, totalRequests, concurrency, rps, sampleM
       if (waitMs > 0) await sleep(waitMs);
       const route = routes[index % routes.length];
       try {
+        const headers = route.path.startsWith('/api/v1/')
+          ? { ...internalMcpHeaders(route.path), ...(route.headers || {}) }
+          : route.headers || {};
         const result = await requestJson(baseUrl, route.path, {
-          headers: route.headers || {},
+          headers,
           expect: route.expect,
         });
         if (!route.expect.includes(result.status)) {
@@ -479,6 +488,13 @@ async function waitForJson(url) {
 
 function authHeaders(apiKey) {
   return { authorization: `Bearer ${apiKey}` };
+}
+
+function internalMcpHeaders(toolName = 'hardening-proof') {
+  return {
+    'x-aol-internal-mcp': PROOF_INTERNAL_MCP_SECRET,
+    'x-aol-mcp-tool': toolName,
+  };
 }
 
 function buildProofConfig() {

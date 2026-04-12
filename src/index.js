@@ -17,7 +17,6 @@ import {
   createMcpOnlyApiGuard,
   createMcpOnlyDocsGuard,
   handleJsonBodyError,
-  isMcpOnlyExternalAccessMode,
   requireJsonWriteContent,
 } from './identity/request-security.js';
 import { agentGatewayRoutes } from './routes/agent-gateway.js';
@@ -111,7 +110,7 @@ export async function startServer() {
       res.header('Vary', 'Origin');
     }
     if (req.method === 'OPTIONS') {
-      if (isMcpOnlyExternalAccessMode() && req.path.startsWith('/api/v1/')) return next();
+      if (req.path.startsWith('/api/v1/')) return next();
       return res.sendStatus(204);
     }
     next();
@@ -131,7 +130,6 @@ export async function startServer() {
       name: 'Agents on Lightning',
       description: 'AI agent platform for the Lightning Network',
       docs: '/llms.txt',
-      mcp_docs: '/llms-mcp.txt',
       internal_routes: 'implementation details behind MCP tools',
       preferred_machine_interface: '/mcp',
       machine_start: '/mcp',
@@ -139,6 +137,7 @@ export async function startServer() {
       mcp_start: {
         endpoint: '/mcp',
         manifest: '/.well-known/mcp.json',
+        server_card: '/.well-known/mcp/server-card.json',
         primary_doc: '/docs/mcp/agent-journey.txt',
         first_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent'],
         first_prompts: ['start_here', 'agent-journey', 'money', 'market'],
@@ -146,6 +145,7 @@ export async function startServer() {
       links: {
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',
+        mcp_server_card: '/.well-known/mcp/server-card.json',
         agent_card: '/.well-known/agent-card.json',
       },
     });
@@ -156,12 +156,6 @@ export async function startServer() {
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
-  });
-
-  // Serve the MCP-only root agent map document.
-  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms-mcp.txt","summary":"Serve the MCP-only root agent map document.","order":115,"tags":["app-level","read","docs","public","mcp"],"doc":"llms-mcp.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-  app.get('/llms-mcp.txt', (_req, res) => {
-    res.type('text/markdown').sendFile(join(docsDir, 'llms-mcp.txt'));
   });
 
   app.get('/docs/llms.txt', (_req, res) => {

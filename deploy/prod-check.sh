@@ -91,7 +91,15 @@ PORT="$3"
 MAX_RSS_MB="$4"
 
 [[ "$(systemctl is-active "$SERVICE")" == "active" ]]
-curl -fsS --max-time 20 "http://$HOST:$PORT/health" >/dev/null
+for attempt in $(seq 1 30); do
+  if curl -fsS --max-time 5 "http://$HOST:$PORT/health" >/dev/null; then
+    break
+  fi
+  if [[ "$attempt" == "30" ]]; then
+    exit 4
+  fi
+  sleep 1
+done
 
 PID="$(systemctl show -p MainPID --value "$SERVICE")"
 if [[ -z "$PID" || "$PID" == "0" ]]; then
@@ -140,6 +148,7 @@ check_state_paths
 
 check_url "primary /llms.txt" "$PROD_PRIMARY_BASE_URL/llms.txt"
 check_url "primary /.well-known/mcp.json" "$PROD_PRIMARY_BASE_URL/.well-known/mcp.json"
+check_url "primary /.well-known/mcp/server-card.json" "$PROD_PRIMARY_BASE_URL/.well-known/mcp/server-card.json"
 check_url "primary /mcp discovery" "$PROD_PRIMARY_BASE_URL/mcp"
 check_url "primary /docs/mcp/index.txt" "$PROD_PRIMARY_BASE_URL/docs/mcp/index.txt"
 check_url "primary /api/v1 hidden externally" "$PROD_PRIMARY_BASE_URL/api/v1/" "404"
@@ -153,6 +162,7 @@ check_operator_url "primary /api/journey operator auth" "$PROD_PRIMARY_BASE_URL/
 if [[ -n "${PROD_SECONDARY_BASE_URL:-}" ]]; then
   check_url "secondary /llms.txt" "$PROD_SECONDARY_BASE_URL/llms.txt"
   check_url "secondary /.well-known/mcp.json" "$PROD_SECONDARY_BASE_URL/.well-known/mcp.json"
+  check_url "secondary /.well-known/mcp/server-card.json" "$PROD_SECONDARY_BASE_URL/.well-known/mcp/server-card.json"
   check_url "secondary /mcp discovery" "$PROD_SECONDARY_BASE_URL/mcp"
   check_url "secondary /docs/mcp/index.txt" "$PROD_SECONDARY_BASE_URL/docs/mcp/index.txt"
   check_url "secondary /api/v1 hidden externally" "$PROD_SECONDARY_BASE_URL/api/v1/" "404"

@@ -2,6 +2,13 @@
 
 Use this workflow for wallet funds, capital funds, paid analytics, and paid help.
 
+## What Money Means
+
+The wallet is agent spending money.
+Capital is the agent's deployable channel funding.
+Analytics and help are paid services.
+Keep these states separate when deciding what an agent can do next.
+
 ## Wallet
 
 1. `aol_get_wallet_balance`
@@ -18,6 +25,8 @@ Use this workflow for wallet funds, capital funds, paid analytics, and paid help
 12. `aol_reclaim_wallet_pending`
 
 Create a mint quote, pay the returned invoice externally, check the quote, then mint only after payment is confirmed.
+Unpaid invoices are normal blockers, not failures to hide.
+Wallet history is the audit trail for agent spending money.
 
 ## Capital
 
@@ -33,6 +42,9 @@ Create a mint quote, pay the returned invoice externally, check the quote, then 
 Use capital for channel operations.
 Deposits can take time.
 Retry Lightning capital flows only when status says retry is allowed.
+On-chain deposits become useful after confirmation.
+Lightning capital deposits may pass through a bridge provider or wallet fallback before capital becomes available.
+Do not treat invoice paid, bridge pending, or locked funds as spendable capital.
 
 ## Analytics And Help
 
@@ -44,7 +56,9 @@ Retry Lightning capital flows only when status says retry is allowed.
 
 Quote before execute.
 Use paid help only when wallet or capital can pay.
-Do not paste private keys, bearer tokens, or macaroon secrets into paid help.
+Do not paste private keys, bearer tokens, credentials, or seed material into paid help.
+Quotes let agents know the cost before spending.
+History prevents repeated paid work when a prior answer already exists.
 
 ## Stop Conditions
 
