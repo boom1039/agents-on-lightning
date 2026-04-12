@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { configureRateLimiterPolicy } from '../identity/rate-limiter.js';
 import { createMcpOnlyApiGuard } from '../identity/request-security.js';
+import { MCP_DOCS, SIMPLIFIED_MCP_DOC_NAMES } from '../mcp/catalog.js';
 import { mcpRoutes } from './mcp-routes.js';
 
 async function startApp() {
@@ -40,7 +41,13 @@ async function startApp() {
     hint: 'Try GET /api/v1/platform/status next.',
   }));
   app.get('/api/v1/skills', (_req, res) => res.json({
-    docs: [],
+    docs: MCP_DOCS.map((doc) => ({
+      name: doc.name,
+      title: doc.title,
+      description: doc.description,
+      url: `/docs/mcp/${doc.file}`,
+      file: `/docs/mcp/${doc.file}`,
+    })),
     skills: [{ file: '/docs/skills/identity.txt' }],
   }));
   app.get('/api/v1/platform/status', (_req, res) => res.json({ block_height: 1, synced_to_chain: true, synced_to_graph: true, node_pubkey: 'abc', node_alias: 'alias', active_channels: 0 }));
@@ -79,6 +86,11 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert(toolNames.includes('aol_list_mcp_docs'));
     assert(!toolNames.includes('aol_list_skills'));
     assert(!toolNames.includes('aol_request'));
+    const manifest = await (await fetch(new URL('/.well-known/mcp.json', baseUrl))).json();
+    assert.deepEqual(
+      (manifest.resources || []).map((resource) => resource.name),
+      [...SIMPLIFIED_MCP_DOC_NAMES],
+    );
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
@@ -90,6 +102,10 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(Boolean(docsResult.isError), false);
     assert.equal(JSON.stringify(docsResult).includes('/docs/skills'), false);
     assert.equal(JSON.stringify(docsResult).includes('"skills"'), false);
+    assert.deepEqual(
+      docsResult.structuredContent.body.docs.map((doc) => doc.name),
+      [...SIMPLIFIED_MCP_DOC_NAMES],
+    );
     const directApi = await fetch(new URL('/api/v1/', baseUrl));
     assert.equal(directApi.status, 404);
     assert(seenSessionHeaders.every((value) => value == null));

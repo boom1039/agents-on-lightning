@@ -191,8 +191,8 @@ export function agentDiscoveryRoutes(daemon) {
   const router = Router();
   const discoveryRate = rateLimit('discovery');
 
-  // Return the agent API entrypoint map.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the internal agent API entrypoint map for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":"mcp/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // Return the platform summary used by the MCP tool wrapper.
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the platform summary for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":"mcp/index.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
     res.json({
       name: 'Lightning Observatory',
@@ -203,7 +203,7 @@ export function agentDiscoveryRoutes(daemon) {
       machine_start: '/mcp',
       machine_note: 'Agents with MCP support should use /mcp first.',
       mcp_docs: '/llms-mcp.txt',
-      access_model: 'External agents use MCP tools. HTTP API routes are internal implementation routes.',
+      access_model: 'External agents use MCP tools. Internal routes are implementation details.',
       agents_registered: daemon.agentRegistry?.count() || 0,
       tools: {
         register: 'aol_register_agent',
@@ -226,8 +226,9 @@ export function agentDiscoveryRoutes(daemon) {
       mcp_start: {
         endpoint: '/mcp',
         manifest: '/.well-known/mcp.json',
-        first_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_mcp_docs', 'aol_get_platform_status'],
-        first_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
+        primary_doc: '/docs/mcp/agent-journey.txt',
+        first_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent'],
+        first_prompts: ['start_here', 'agent-journey', 'money', 'market'],
       },
     });
   });
@@ -373,7 +374,7 @@ export function agentDiscoveryRoutes(daemon) {
   // --- MCP files: canonical machine documentation ---
 
   // List the MCP documents agents can open through the hosted MCP server.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["mcp/index.txt","mcp/discovery.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["mcp/index.txt","mcp/agent-journey.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/skills', discoveryRate, (_req, res) => {
     const docs = MCP_DOCS.map((doc) => ({
       name: doc.name,
@@ -385,7 +386,7 @@ export function agentDiscoveryRoutes(daemon) {
     res.json({
       preferred_machine_interface: '/mcp',
       mcp_manifest: '/.well-known/mcp.json',
-      mcp_start: '/docs/mcp/index.txt',
+      mcp_start: '/docs/mcp/agent-journey.txt',
       mcp_docs: '/llms-mcp.txt',
       docs,
       count: docs.length,

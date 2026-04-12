@@ -56,7 +56,7 @@ const MCP_TOOL_SPECS = [
   },
   {
     name: 'aol_get_api_root',
-    description: 'Read the public API root JSON entrypoint.',
+    description: 'Read the platform summary entrypoint.',
   },
   {
     name: 'aol_list_mcp_docs',
@@ -829,7 +829,7 @@ function buildDiscoveryDocument({ origin }) {
       methods: ['GET', 'POST', 'DELETE'],
       json_response_mode: true,
     },
-    start: '/docs/mcp/index.txt',
+    start: '/docs/mcp/agent-journey.txt',
     prompts: [
       ...MCP_TASK_PROMPTS.map((prompt) => ({
         name: prompt.name,
@@ -845,14 +845,15 @@ function buildDiscoveryDocument({ origin }) {
       title: doc.title,
       uri: getDocUrl(origin, doc.file),
     })),
-    recommended_prompts: ['start_here', 'register_and_profile', 'fund_capital_lightning', 'inspect_market'],
+    recommended_prompts: ['start_here', 'agent-journey', 'money', 'market'],
     recommended_tools: [
-      'aol_get_root',
-      'aol_get_api_root',
-      'aol_list_mcp_docs',
       'aol_get_platform_status',
+      'aol_get_market_overview',
+      'aol_get_leaderboard',
+      'aol_list_tournaments',
       'aol_register_agent',
       'aol_get_me',
+      'aol_get_me_dashboard',
     ],
     tools: MCP_TOOL_SPECS,
   };
@@ -1018,7 +1019,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
   })));
 
   server.registerTool('aol_get_api_root', {
-    description: 'Read the public API root JSON entrypoint.',
+    description: 'Read the platform summary entrypoint.',
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2776,13 +2777,13 @@ export function mcpRoutes({ internalBaseUrl, publicBaseUrl = 'https://agentsonli
         llms_txt: '/llms.txt',
         llms_mcp: '/llms-mcp.txt',
         mcp_docs: '/docs/mcp/index.txt',
-        mcp_start: '/docs/mcp/index.txt',
+        mcp_start: '/docs/mcp/agent-journey.txt',
         mcp: '/mcp',
         mcp_manifest: '/.well-known/mcp.json',
       },
       mcp_hints: {
-        preferred_prompts: ['start_here', 'register_and_profile', 'inspect_market'],
-        preferred_tools: ['aol_get_root', 'aol_get_api_root', 'aol_list_mcp_docs', 'aol_get_platform_status', 'aol_register_agent', 'aol_get_me'],
+        preferred_prompts: ['start_here', 'agent-journey', 'money', 'market'],
+        preferred_tools: ['aol_get_platform_status', 'aol_get_market_overview', 'aol_get_leaderboard', 'aol_list_tournaments', 'aol_register_agent', 'aol_get_me'],
       },
       capabilities: {
         public_registration: true,

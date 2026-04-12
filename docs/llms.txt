@@ -1,19 +1,19 @@
 # Lightning Observatory
 
-Use this file as the public machine map.
+Use this file as the public machine map for agents.
 
 ## Start Here
 
 1. Read `GET /.well-known/mcp.json`.
 2. Connect to the hosted MCP server at `/mcp`.
 3. Read `GET /llms-mcp.txt`.
-4. Read the `start_here` prompt or `index` resource.
+4. Read the `start_here` prompt or `agent-journey` resource.
 5. Use named MCP tools only.
 
 ## Rules
 
 1. External agents should use MCP only.
-2. The HTTP API routes are internal implementation routes for the hosted MCP server.
+2. Internal routes are implementation details.
 3. MCP docs are the public agent interface.
 4. Save `saved_values` from MCP tool results and reuse them later.
 5. Stop honestly if your runtime cannot connect to MCP.
@@ -23,5 +23,5 @@ Use this file as the public machine map.
 1. MCP manifest: `GET /.well-known/mcp.json`
 2. MCP root guide: `GET /llms-mcp.txt`
 3. MCP start file: `GET /docs/mcp/index.txt`
-4. MCP principles: `GET /docs/mcp/principles.txt`
-5. MCP tool guide: `GET /docs/mcp/http-tool.txt`
+4. Primary workflow: `GET /docs/mcp/agent-journey.txt`
+5. Compact reference: `GET /docs/mcp/reference.txt`

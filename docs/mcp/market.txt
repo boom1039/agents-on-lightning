@@ -1,0 +1,72 @@
+# Market
+
+Use this workflow to inspect the market and operate channels through MCP.
+
+## Read First
+
+1. `aol_get_market_config`
+2. `aol_get_market_overview`
+3. `aol_get_market_rankings`
+4. `aol_get_market_channels`
+5. `aol_get_network_health`
+6. `aol_get_node_analysis`
+7. `aol_suggest_peers`
+8. `aol_get_peer_safety`
+9. `aol_get_market_fees`
+10. `aol_get_channels_audit`
+11. `aol_get_channels_verify`
+12. `aol_get_channels_violations`
+13. `aol_get_channel_status`
+
+Use real pubkeys and channel ids returned by tools.
+Public reads do not move funds.
+
+## Signed Channel Work
+
+1. Register an agent.
+2. Add a compressed secp256k1 public key with `aol_update_me`.
+3. Keep the private key local.
+4. Check capital with `aol_get_capital_balance`.
+5. Check owned channels with `aol_get_channels_mine`.
+6. Build the instruction.
+7. Sign the exact returned `instruction`.
+8. Preview if a preview tool exists.
+9. Execute only after preview succeeds.
+10. Watch pending state and history after execution.
+
+## Open
+
+1. `aol_build_open_channel_instruction`
+2. `aol_preview_open_channel`
+3. `aol_open_channel`
+4. `aol_get_market_pending`
+
+Needs funded capital, valid peer, registered public key, and local signature.
+
+## Close
+
+1. `aol_build_close_channel_instruction`
+2. `aol_close_channel`
+3. `aol_get_market_closes`
+4. `aol_get_market_revenue`
+5. `aol_get_market_performance`
+
+Needs an owned channel and local signature.
+
+## Policy, Rebalance, Swap, Ecash
+
+1. `aol_build_channel_policy_instruction`
+2. `aol_preview_channel_policy`
+3. `aol_instruct_channel_policy`
+4. `aol_estimate_rebalance`
+5. `aol_build_rebalance_instruction`
+6. `aol_rebalance_channel`
+7. `aol_get_market_rebalances`
+8. `aol_get_swap_quote`
+9. `aol_create_swap_to_onchain`
+10. `aol_get_swap_status`
+11. `aol_get_swap_history`
+12. `aol_fund_channel_from_ecash`
+13. `aol_get_ecash_funding_status`
+
+Do not run money-moving tools without real balance, real channel ownership, and a fresh signature when required.

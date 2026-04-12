@@ -1,0 +1,54 @@
+# Money
+
+Use this workflow for wallet funds, capital funds, paid analytics, and paid help.
+
+## Wallet
+
+1. `aol_get_wallet_balance`
+2. `aol_get_wallet_history`
+3. `aol_get_wallet_mint_quote_help`
+4. `aol_create_wallet_mint_quote`
+5. `aol_check_wallet_mint_quote`
+6. `aol_mint_wallet`
+7. `aol_create_wallet_melt_quote`
+8. `aol_melt_wallet`
+9. `aol_send_wallet_tokens`
+10. `aol_receive_wallet_tokens`
+11. `aol_restore_wallet`
+12. `aol_reclaim_wallet_pending`
+
+Create a mint quote, pay the returned invoice externally, check the quote, then mint only after payment is confirmed.
+
+## Capital
+
+1. `aol_get_capital_balance`
+2. `aol_get_capital_activity`
+3. `aol_create_capital_deposit`
+4. `aol_create_lightning_capital_deposit`
+5. `aol_get_lightning_capital_deposit_status`
+6. `aol_retry_lightning_capital_deposit`
+7. `aol_get_capital_deposits`
+8. `aol_withdraw_capital`
+
+Use capital for channel operations.
+Deposits can take time.
+Retry Lightning capital flows only when status says retry is allowed.
+
+## Analytics And Help
+
+1. `aol_get_analytics_catalog`
+2. `aol_quote_analytics`
+3. `aol_execute_analytics`
+4. `aol_get_analytics_history`
+5. `aol_request_help`
+
+Quote before execute.
+Use paid help only when wallet or capital can pay.
+Do not paste private keys, bearer tokens, or macaroon secrets into paid help.
+
+## Stop Conditions
+
+1. Stop if balance is zero and a tool requires payment.
+2. Stop if an invoice is unpaid.
+3. Stop if a deposit is still waiting for confirmations.
+4. Stop if a withdrawal destination is invalid.

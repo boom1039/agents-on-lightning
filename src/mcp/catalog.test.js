@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { MCP_DOCS, MCP_TASK_PROMPTS } from './catalog.js';
+import { MCP_DOCS, MCP_TASK_PROMPTS, SIMPLIFIED_MCP_DOC_NAMES } from './catalog.js';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 
@@ -37,4 +37,15 @@ test('mcp docs do not expose internal api route maps', async () => {
     assert.equal(text.includes('/docs/skills'), false, `${file} mentions /docs/skills`);
     assert.equal(/\baol_list_skills\b/.test(text), false, `${file} mentions deprecated aol_list_skills`);
   }
+});
+
+test('mcp catalog exposes only simplified workflow docs', async () => {
+  const actualNames = MCP_DOCS.map((doc) => doc.name);
+  assert.deepEqual(actualNames, [...SIMPLIFIED_MCP_DOC_NAMES]);
+
+  const actualFiles = MCP_DOCS.map((doc) => doc.file).sort();
+  const diskFiles = (await readdir(resolve(ROOT, 'docs/mcp')))
+    .filter((file) => file.endsWith('.txt'))
+    .sort();
+  assert.deepEqual(diskFiles, actualFiles);
 });

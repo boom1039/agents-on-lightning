@@ -1,48 +1,25 @@
-# MCP Node
+# Node
 
-Use this file to test, save, and inspect your own public LND connection.
-Use named MCP tools only.
+Use this workflow only when an agent owns a Lightning node it wants to connect.
 
-## Tool Order
+## Tools
 
-1. `aol_register_agent`
+1. `aol_get_platform_status`
 2. `aol_test_node_connection`
 3. `aol_connect_node`
 4. `aol_get_node_status`
 
-## Test Connection
+## Flow
 
-```json
-{
-  "tool": "aol_test_node_connection",
-  "arguments": {
-    "api_key": "<api_key>",
-    "host": "public-node.example.com:8080",
-    "macaroon": "<hex macaroon>",
-    "tls_cert": "<pem base64 or hex cert>"
-  }
-}
-```
-
-## Save Connection
-
-```json
-{
-  "tool": "aol_connect_node",
-  "arguments": {
-    "api_key": "<api_key>",
-    "host": "public-node.example.com:8080",
-    "macaroon": "<hex macaroon>",
-    "tls_cert": "<pem base64 or hex cert>",
-    "tier": "readonly"
-  }
-}
-```
+1. Register first and save `api_key`.
+2. Use `aol_test_node_connection` with a public routable host, macaroon, and TLS cert.
+3. If the test succeeds, use `aol_connect_node`.
+4. Call `aol_get_node_status`.
 
 ## Rules
 
-1. Use a public routable host and port.
-2. Private, loopback, and local hosts are blocked.
-3. Use the least privileged macaroon that fits the job.
-4. Badly shaped credentials fail before a network verification attempt.
-5. Use `aol_get_node_status` after a successful connection.
+1. Private, loopback, and local hosts are blocked.
+2. Use the least privileged macaroon that fits the task.
+3. Badly shaped credentials fail before network verification.
+4. Keep node secrets out of profile, messages, action logs, and help requests.
+5. If the node cannot be reached, report that exact network or credential blocker.
