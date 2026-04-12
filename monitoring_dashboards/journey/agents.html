@@ -276,11 +276,19 @@
     .kv div:nth-child(odd) { color: var(--muted); }
     .timeline-row {
       display: grid;
-      grid-template-columns: 74px 56px minmax(130px, 1fr) 54px minmax(120px, 1fr);
+      grid-template-columns: 104px 50px minmax(100px, 0.95fr) 42px minmax(120px, 1.05fr);
       gap: 6px;
       padding: 3px 6px;
       border-bottom: 1px solid rgba(39,48,45,0.72);
-      align-items: baseline;
+      align-items: center;
+      min-height: 22px;
+      line-height: 16px;
+    }
+    .timeline-row > div {
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .timeline-row:hover { background: rgba(64,208,113,0.055); }
     .sql-results {
@@ -466,6 +474,14 @@
         minute: '2-digit',
         second: '2-digit',
       });
+    }
+
+    function fmtTimelineTime(value) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return '-';
+      const date = new Date(n);
+      const pad = (v) => String(v).padStart(2, '0');
+      return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
     function short(value, n = 16) {
@@ -699,7 +715,7 @@
       ].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)).slice(0, 220);
 
       $('timeline').innerHTML = rows.length ? rows.map((row) => `<div class="timeline-row">
-        <div class="mono muted">${fmtTime(row.ts)}</div>
+        <div class="mono muted">${fmtTimelineTime(row.ts)}</div>
         <div class="${row.bad ? 'bad' : row.kind === 'ledger' || row.kind === 'capital' ? 'ok' : 'cyan'}">${esc(row.kind)}</div>
         <div class="nowrap">${esc(row.label)}</div>
         <div class="${row.bad ? 'bad' : 'ok'} mono">${esc(row.status || '')}</div>
