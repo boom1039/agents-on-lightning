@@ -246,6 +246,7 @@
     th[data-col] {
       cursor: pointer;
       user-select: none;
+      position: relative;
     }
     th[data-col].dragging {
       opacity: 0.5;
@@ -258,6 +259,23 @@
     th .sort-indicator {
       color: var(--green);
       margin-left: 3px;
+    }
+    .col-resize {
+      position: absolute;
+      top: 0;
+      right: -3px;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 3;
+    }
+    .col-resize:hover,
+    .col-resize.resizing {
+      background: rgba(101,216,210,0.22);
+    }
+    body.resizing-column {
+      cursor: col-resize;
+      user-select: none;
     }
     .scroll { overflow: auto; min-height: 0; }
     .ledger-pane {
@@ -502,14 +520,15 @@
     const TABLE_IDS = ['agents', 'funnel', 'tools', 'ledger'];
     const tableState = {};
     const defaultTableState = {
-      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'capital', 'ledger', 'note'], sortBy: null, sortDir: 'desc' },
-      funnel: { order: ['stage', 'agents', 'calls', 'note'], sortBy: null, sortDir: 'desc' },
-      tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], sortBy: null, sortDir: 'desc' },
-      ledger: { order: ['time', 'agent', 'type', 'amount', 'source', 'details', 'ledgerId'], sortBy: null, sortDir: 'desc' },
+      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      funnel: { order: ['stage', 'agents', 'calls', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      ledger: { order: ['time', 'agent', 'type', 'amount', 'source', 'details', 'ledgerId'], widths: {}, sortBy: null, sortDir: 'desc' },
     };
     let panelOrder = loadJson('panels', PANEL_IDS);
     let draggedPanelId = null;
     let draggedColumn = null;
+    let resizingColumn = null;
     let suppressHeaderClickUntil = 0;
     const dashboardSource = new URLSearchParams(window.location.search).get('source');
 
@@ -547,6 +566,7 @@
       const saved = loadJson(`table:${tableId}`, {});
       return {
         order: normalizedOrder(saved.order, defaults.order),
+        widths: saved.widths && typeof saved.widths === 'object' ? saved.widths : {},
         sortBy: defaults.order.includes(saved.sortBy) ? saved.sortBy : defaults.sortBy,
         sortDir: saved.sortDir === 'asc' ? 'asc' : 'desc',
       };
@@ -765,17 +785,26 @@
       return rows.slice().sort((a, b) => compareValues(column.sort(a, context), column.sort(b, context)) * direction);
     }
 
+    function columnWidth(tableId, column) {
+      const stored = Number(tableState[tableId]?.widths?.[column.id]);
+      const fallback = Number(column.width || 140);
+      const width = Number.isFinite(stored) && stored > 0 ? stored : fallback;
+      return Math.max(34, Math.min(720, Math.round(width)));
+    }
+
     function renderTableHead(tableId) {
       const head = $(`${tableId}-head`);
       const stateForTable = tableState[tableId];
       head.innerHTML = `<tr>${orderedColumns(tableId).map((column) => {
-        const style = column.width ? ` style="width:${column.width}px"` : '';
+        const width = columnWidth(tableId, column);
+        const style = ` style="width:${width}px"`;
         const indicator = stateForTable.sortBy === column.id
           ? `<span class="sort-indicator">${stateForTable.sortDir === 'asc' ? 'up' : 'down'}</span>`
           : '';
-        return `<th data-table="${tableId}" data-col="${column.id}" draggable="true"${style} title="Click to sort. Drag left or right to reorder.">${esc(column.label)}${indicator}</th>`;
+        return `<th data-table="${tableId}" data-col="${column.id}" draggable="true"${style} title="Click to sort. Drag header left/right to reorder. Drag right edge to resize.">${esc(column.label)}${indicator}<span class="col-resize" data-table="${tableId}" data-col="${column.id}" title="Drag to resize column"></span></th>`;
       }).join('')}</tr>`;
       setupColumnDrag(tableId);
+      setupColumnResize(tableId);
     }
 
     function renderConfiguredTable(tableId, rows, options = {}) {
@@ -791,7 +820,8 @@
         return `<tr${classAttr}${rowAttrs ? ` ${rowAttrs}` : ''}>${columns.map((column) => {
           const className = typeof column.className === 'function' ? column.className(row, context) : column.className;
           const title = typeof column.title === 'function' ? column.title(row, context) : column.title;
-          return `<td${className ? ` class="${esc(className)}"` : ''}${title ? ` title="${esc(title)}"` : ''}>${column.html(row, context)}</td>`;
+          const width = columnWidth(tableId, column);
+          return `<td style="width:${width}px"${className ? ` class="${esc(className)}"` : ''}${title ? ` title="${esc(title)}"` : ''}>${column.html(row, context)}</td>`;
         }).join('')}</tr>`;
       }).join('');
     }
@@ -868,6 +898,54 @@
         });
       }
     }
+
+    function setupColumnResize(tableId) {
+      for (const handle of document.querySelectorAll(`.col-resize[data-table="${tableId}"][data-col]`)) {
+        handle.addEventListener('pointerdown', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const th = handle.closest('th');
+          resizingColumn = {
+            tableId,
+            colId: handle.dataset.col,
+            startX: event.clientX,
+            startWidth: th ? th.getBoundingClientRect().width : columnWidth(tableId, { id: handle.dataset.col }),
+          };
+          suppressHeaderClickUntil = Date.now() + 800;
+          handle.classList.add('resizing');
+          document.body.classList.add('resizing-column');
+          handle.setPointerCapture?.(event.pointerId);
+        });
+      }
+    }
+
+    window.addEventListener('pointermove', (event) => {
+      if (!resizingColumn) return;
+      event.preventDefault();
+      const stateForTable = tableState[resizingColumn.tableId];
+      const nextWidth = Math.max(34, Math.min(720, resizingColumn.startWidth + event.clientX - resizingColumn.startX));
+      stateForTable.widths = stateForTable.widths || {};
+      stateForTable.widths[resizingColumn.colId] = Math.round(nextWidth);
+      renderTableHead(resizingColumn.tableId);
+      const columns = orderedColumns(resizingColumn.tableId);
+      const colIndex = columns.findIndex((column) => column.id === resizingColumn.colId);
+      if (colIndex >= 0) {
+        const width = Math.round(nextWidth);
+        for (const row of document.querySelectorAll(`#${resizingColumn.tableId}-body tr`)) {
+          const cell = row.children[colIndex];
+          if (cell) cell.style.width = `${width}px`;
+        }
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (!resizingColumn) return;
+      persistTableState(resizingColumn.tableId);
+      suppressHeaderClickUntil = Date.now() + 800;
+      resizingColumn = null;
+      document.body.classList.remove('resizing-column');
+      document.querySelectorAll('.col-resize.resizing').forEach((node) => node.classList.remove('resizing'));
+    });
 
     function applyPanelLayout() {
       panelOrder = normalizedOrder(panelOrder, PANEL_IDS);
