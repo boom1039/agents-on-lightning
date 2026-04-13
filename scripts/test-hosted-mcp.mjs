@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { canonicalJSON } from '../src/channel-accountability/crypto-utils.js';
-import { MCP_TOOL_NAMES, PUBLIC_MCP_DOC_PATHS } from '../src/mcp/catalog.js';
+import { MCP_TOOL_NAMES, MCP_TOOL_SPECS, PUBLIC_MCP_DOC_PATHS } from '../src/mcp/catalog.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'http://127.0.0.1:3302';
 const requiredPrompts = ['start_here'];
@@ -99,7 +99,10 @@ assert(manifest.transport?.type === 'streamable-http', 'Hosted MCP manifest tran
 assert(manifest.server_card === `${baseUrl}/.well-known/mcp/server-card.json`, 'Hosted MCP manifest is missing server_card');
 assert(Array.isArray(manifest.tools) && manifest.tools.includes('dynamic'), 'Hosted MCP manifest tools should be dynamic');
 assert(Array.isArray(manifest.prompts) && manifest.prompts.includes('dynamic'), 'Hosted MCP manifest prompts should be dynamic');
-assert((manifest.tool_summaries || []).some((tool) => tool.name === 'aol_register_agent'), 'Hosted MCP manifest is missing tool summaries');
+assert(
+  JSON.stringify(manifest.tool_summaries || []) === JSON.stringify(MCP_TOOL_SPECS),
+  'Hosted MCP manifest tool summaries do not match catalog.js',
+);
 const serverCard = await fetchJson('/.well-known/mcp/server-card.json');
 assert(serverCard?.$schema == null || /^https:\/\//.test(serverCard.$schema), 'Server card schema must be absent or a valid HTTPS URL');
 assert(serverCard?.protocolVersion === '2025-06-18', 'Server card protocolVersion is wrong');
@@ -139,6 +142,10 @@ try {
   );
   for (const toolName of MCP_TOOL_NAMES) {
     assert(toolNames.includes(toolName), `Missing MCP tool ${toolName}`);
+  }
+  const toolsByName = new Map((tools.tools || []).map((tool) => [tool.name, tool]));
+  for (const spec of MCP_TOOL_SPECS) {
+    assert(toolsByName.get(spec.name)?.description === spec.description, `MCP tool ${spec.name} description does not match catalog.js`);
   }
   for (const promptName of requiredPrompts) {
     assert(promptNames.includes(promptName), `Missing MCP prompt ${promptName}`);
@@ -309,22 +316,22 @@ try {
   assert(!dashboardResult?.isError, 'aol_get_me_dashboard failed');
 
   const capitalDepositResult = await client.callTool({
-    name: 'aol_create_capital_deposit',
+    name: 'aol_create_onchain_capital_deposit',
     arguments: {
       api_key: apiKey,
     },
   });
-  assert(!capitalDepositResult?.isError, 'aol_create_capital_deposit failed');
+  assert(!capitalDepositResult?.isError, 'aol_create_onchain_capital_deposit failed');
   if (baseUrl.startsWith('http://127.0.0.1')) {
     const depositStatus = getStructuredStatus(capitalDepositResult);
     if (depositStatus === 200) {
-      expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
+      expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_onchain_capital_deposit');
     } else {
-      expectCapitalDepositBoundary(capitalDepositResult, 'aol_create_capital_deposit');
+      expectCapitalDepositBoundary(capitalDepositResult, 'aol_create_onchain_capital_deposit');
     }
   } else {
-    expectStatus(capitalDepositResult, 200, 'aol_create_capital_deposit');
-    expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_capital_deposit');
+    expectStatus(capitalDepositResult, 200, 'aol_create_onchain_capital_deposit');
+    expectSavedValue(capitalDepositResult, 'onchain_address', 'aol_create_onchain_capital_deposit');
   }
   const capitalWithdrawAddress = getSavedValues(capitalDepositResult).onchain_address || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 

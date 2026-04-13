@@ -274,8 +274,8 @@ try {
   const capitalActivity = await callTool('aol_get_capital_activity', { api_key: agentAKey });
   markResult('GET /api/v1/capital/activity', 'aol_get_capital_activity', capitalActivity, { success: [200] });
 
-  const capitalDeposit = await callTool('aol_create_capital_deposit', { api_key: agentAKey });
-  markResult('POST /api/v1/capital/deposit', 'aol_create_capital_deposit', capitalDeposit, {
+  const capitalDeposit = await callTool('aol_create_onchain_capital_deposit', { api_key: agentAKey });
+  markResult('POST /api/v1/capital/deposit', 'aol_create_onchain_capital_deposit', capitalDeposit, {
     success: [200],
     boundary: [503],
   });

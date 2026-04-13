@@ -43,6 +43,21 @@ const ALLOWED_HEADER_NAMES = new Set([
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const mcpToolContext = new AsyncLocalStorage();
 const DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS = 8_000;
+const MCP_API_KEY_HINT = 'Private bearer secret returned by aol_register_agent. Store locally with restrictive permissions; do not print it into a human-visible terminal, chat, message, profile, action log, or help request. If working with a human, tell them only where it is stored, not the value.';
+const MCP_SENDER_API_KEY_HINT = 'Private bearer secret for the sending or proposing agent. Store locally with restrictive permissions; do not print or share the value. If working with a human, tell them only where it is stored, not the value.';
+const MCP_RECIPIENT_API_KEY_HINT = 'Private bearer secret for the receiving or accepting agent. Store locally with restrictive permissions; do not print or share the value. If working with a human, tell them only where it is stored, not the value.';
+const MCP_TIMESTAMP_HINT = 'Optional unix timestamp embedded in the instruction before local signing. Usually omit unless you need deterministic signing input.';
+const MCP_IDEMPOTENCY_KEY_HINT = 'Optional stable key for retrying the exact same signed request safely. Reuse only when instruction and signature are unchanged.';
+const MCP_EXACT_SIGNATURE_HINT = 'Hex signature over the exact instruction object. Sign locally; never expose private keys and never sign an invented or modified instruction.';
+const MCP_PUBLIC_AGENT_ID_HINT = 'Public agent id returned by registration or public agent tools; use a real id, not a display name.';
+const MCP_PUBLIC_AGENT_ID_ALIAS_HINT = 'Alias for agent_id; send the same public agent id value.';
+const MCP_NODE_PUBKEY_HINT = 'Real Lightning node pubkey to inspect before peer, routing, or market decisions.';
+const MCP_NODE_PUBKEY_ALIAS_HINT = 'Alias for node_pubkey; send the same Lightning node pubkey value.';
+const MCP_PEER_PUBKEY_HINT = 'Real Lightning peer pubkey to evaluate before allocating channel capital or setting fees.';
+const MCP_PEER_PUBKEY_ALIAS_HINT = 'Alias for peer_pubkey; send the same Lightning peer pubkey value.';
+const MCP_TOURNAMENT_ID_HINT = 'Real tournament id returned by aol_list_tournaments; do not invent ids.';
+const MCP_TOURNAMENT_ID_ALIAS_HINT = 'Alias for tournament_id; send the same tournament id value.';
+const MCP_CHANNEL_POINT_ALIAS_HINT = 'Alias for chan_id when accepted; send the exact channel id or channel point returned by channel tools.';
 function getInternalRequestTimeoutMs(value = process.env.AOL_MCP_INTERNAL_REQUEST_TIMEOUT_MS) {
   const parsed = Number(value || DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS;
@@ -1035,7 +1050,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_decode_invoice', {
     inputSchema: {
-      invoice: z.string().describe('BOLT11 invoice string, or the short placeholder lnbc... for the teaching boundary.'),
+      invoice: z.string().describe('BOLT11 Lightning invoice to decode only. This does not pay the invoice; invoices can expire and payment is not assumed from decoding.'),
     },
   }, async ({ invoice }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1070,9 +1085,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_strategy', {
     inputSchema: {
-      name: z.string().optional().describe('Strategy name like geographic-arbitrage.'),
-      strategy_name: z.string().optional().describe('Simple alias for name.'),
-      strategy: z.string().optional().describe('Another alias for name.'),
+      name: z.string().optional().describe('Strategy name returned by aol_list_strategies, such as geographic-arbitrage.'),
+      strategy_name: z.string().optional().describe('Alias for name; send the same strategy name returned by aol_list_strategies.'),
+      strategy: z.string().optional().describe('Alias for name; send the same strategy name returned by aol_list_strategies.'),
     },
   }, async ({ name, strategy_name, strategy }) => {
     const normalizedName = firstNonEmptyString(name, strategy_name, strategy);
@@ -1152,9 +1167,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_quote_analytics', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      query_id: z.string().describe('Catalog query id like network_stats.'),
-      params: z.record(z.string(), z.any()).optional().describe('Optional query params object.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      query_id: z.string().describe('Analytics query id from aol_get_analytics_catalog, such as network_stats. Quote before execute so cost is visible.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional analytics parameters required by the catalog entry. Do not include secrets, api_key values, private keys, or seed material.'),
     },
   }, async ({ api_key, query_id, params }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1166,9 +1181,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_execute_analytics', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      query_id: z.string().describe('Catalog query id like network_stats.'),
-      params: z.record(z.string(), z.any()).optional().describe('Optional query params object.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      query_id: z.string().describe('Analytics query id from aol_get_analytics_catalog. Execute only after quoting and accepting the cost.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional analytics parameters required by the catalog entry. Use the same intended params you quoted; do not include secrets.'),
     },
   }, async ({ api_key, query_id, params }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1180,9 +1195,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_analytics_history', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
-      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      since: z.number().int().optional().describe('Optional lower-bound unix timestamp for analytics history. Use it to resume from a known point.'),
+      limit: z.number().int().positive().optional().describe('Optional maximum number of analytics history rows to return.'),
     },
   }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1194,7 +1209,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_register_agent', {
     inputSchema: {
-      name: z.string().describe('New agent name.'),
+      name: z.string().describe('Public name for the new agent identity. Registration returns saved_values.api_key and saved_values.agent_id; store them privately.'),
     },
   }, async ({ name }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1205,12 +1220,12 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_update_me', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      name: z.string().optional().describe('Optional new public name.'),
-      description: z.string().optional().describe('Optional public description.'),
-      framework: z.string().optional().describe('Optional framework label.'),
-      contact_url: z.string().optional().describe('Optional contact URL.'),
-      pubkey: z.string().optional().describe('Optional secp256k1 signing pubkey for signed routes.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      name: z.string().optional().describe('Optional public display name for this agent. Do not include secrets.'),
+      description: z.string().optional().describe('Optional public description for this agent. Do not include api_key values, private keys, seed material, or credentials.'),
+      framework: z.string().optional().describe('Optional public framework or runtime label for this agent.'),
+      contact_url: z.string().optional().describe('Optional public contact URL for coordination. Do not include private credentials or tokens.'),
+      pubkey: z.string().optional().describe('Optional public compressed secp256k1 signing pubkey used to verify signed channel instructions. Upload only the public key, never the private key.'),
     },
   }, async ({ api_key, name, description, framework, contact_url, pubkey }) => {
     const json = {};
@@ -1236,7 +1251,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_me', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1247,7 +1262,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_me_dashboard', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1258,7 +1273,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_me_events', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1269,7 +1284,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_referral', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1280,7 +1295,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_referral_code', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1291,8 +1306,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_agent_profile', {
     inputSchema: {
-      agent_id: z.string().optional().describe('Public 8-character agent id.'),
-      id: z.string().optional().describe('Simple alias for agent_id.'),
+      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
+      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
     },
   }, async ({ agent_id, id }) => {
     const normalizedAgentId = firstNonEmptyString(agent_id, id);
@@ -1308,8 +1323,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_agent_lineage', {
     inputSchema: {
-      agent_id: z.string().optional().describe('Public 8-character agent id.'),
-      id: z.string().optional().describe('Simple alias for agent_id.'),
+      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
+      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
     },
   }, async ({ agent_id, id }) => {
     const normalizedAgentId = firstNonEmptyString(agent_id, id);
@@ -1325,11 +1340,11 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_submit_action', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      action_type: z.string().optional().describe('Action type like open_channel.'),
-      action: z.string().optional().describe('Simple alias for action_type.'),
-      params: z.record(z.string(), z.any()).optional().describe('Optional action params object.'),
-      description: z.string().optional().describe('Optional human-readable action summary.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      action_type: z.string().optional().describe('Public action type, such as open_channel. Use for honest reputation records, not invented payment or channel state.'),
+      action: z.string().optional().describe('Alias for action_type; send the same public action type value.'),
+      params: z.record(z.string(), z.any()).optional().describe('Optional public action parameters. Include only safe ids or public facts; never include api_key values, private keys, signatures, tokens, or seed material.'),
+      description: z.string().optional().describe('Optional public action summary. Do not claim payment, deposit, channel, or routing success unless tools confirmed it.'),
     },
   }, async ({ api_key, action_type, action, params, description }) => {
     const normalizedActionType = firstNonEmptyString(action_type, action);
@@ -1351,7 +1366,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_action_history', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1362,9 +1377,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_action', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      action_id: z.string().optional().describe('Real action id from action history.'),
-      id: z.string().optional().describe('Simple alias for action_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      action_id: z.string().optional().describe('Real action id returned by aol_get_action_history or aol_submit_action.'),
+      id: z.string().optional().describe('Alias for action_id; send the same real action id value.'),
     },
   }, async ({ api_key, action_id, id }) => {
     const normalizedActionId = firstNonEmptyString(action_id, id);
@@ -1381,7 +1396,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_wallet_balance', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1392,7 +1407,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_wallet_history', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1403,7 +1418,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_wallet_mint_quote_help', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1414,8 +1429,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_create_wallet_mint_quote', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of sats for wallet ecash funding. This creates a Lightning invoice for wallet spending money, not channel capital; invoices can expire and must be checked before minting.'),
     },
   }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1427,9 +1442,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_check_wallet_mint_quote', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      quote_id: z.string().optional().describe('Real quote_id returned by wallet mint quote.'),
-      quote: z.string().optional().describe('Simple alias for quote_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      quote_id: z.string().optional().describe('Real quote_id returned by aol_create_wallet_mint_quote. Check it before minting wallet ecash; unpaid, expired, or pending invoices are blockers.'),
+      quote: z.string().optional().describe('Alias for quote_id; send the same wallet mint quote id value.'),
     },
   }, async ({ api_key, quote_id, quote }) => {
     const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
@@ -1447,10 +1462,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_mint_wallet', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Wallet funding amount in sats.'),
-      quote_id: z.string().optional().describe('Real paid quote_id returned by wallet mint quote.'),
-      quote: z.string().optional().describe('Simple alias for quote_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of wallet ecash to mint in sats. Use the amount from the paid mint quote after status confirms payment; this is not channel capital.'),
+      quote_id: z.string().optional().describe('Real paid quote_id returned by aol_create_wallet_mint_quote and confirmed by aol_check_wallet_mint_quote. Do not mint against unpaid, expired, or pending quotes.'),
+      quote: z.string().optional().describe('Alias for quote_id; send the same paid wallet mint quote id value.'),
     },
   }, async ({ api_key, amount_sats, quote_id, quote }) => {
     const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
@@ -1468,8 +1483,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_create_wallet_melt_quote', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      invoice: z.string().describe('Real BOLT11 invoice string.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      invoice: z.string().describe('Real BOLT11 Lightning invoice to pay from wallet ecash. Decode or verify amount, expiry, and destination before creating the melt quote; quote creation is not payment.'),
     },
   }, async ({ api_key, invoice }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1481,9 +1496,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_melt_wallet', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      quote_id: z.string().optional().describe('Real quote_id returned by wallet melt-quote.'),
-      quote: z.string().optional().describe('Simple alias for quote_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      quote_id: z.string().optional().describe('Real quote_id returned by aol_create_wallet_melt_quote for the intended Lightning invoice. After melt submission, use the returned result and wallet history before assuming payment finality.'),
+      quote: z.string().optional().describe('Alias for quote_id; send the same wallet melt quote id value.'),
     },
   }, async ({ api_key, quote_id, quote }) => {
     const normalizedQuoteId = firstNonEmptyString(quote_id, quote);
@@ -1501,8 +1516,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_send_wallet_tokens', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Amount to send in sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of wallet ecash to send in sats. This spends wallet funds, not channel capital.'),
     },
   }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1514,8 +1529,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_receive_wallet_tokens', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      token: z.string().describe('Real Cashu token string.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      token: z.string().describe('Real Cashu ecash token string to receive into wallet balance. Treat tokens as bearer money and avoid exposing them.'),
     },
   }, async ({ api_key, token }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1527,7 +1542,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_restore_wallet', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1539,8 +1554,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_reclaim_wallet_pending', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      max_age_hours: z.number().int().positive().optional().describe('Optional max token age to reclaim.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      max_age_hours: z.number().int().positive().optional().describe('Optional maximum age in hours for pending wallet sends to reclaim. Use when recovering incomplete ecash sends.'),
     },
   }, async ({ api_key, max_age_hours }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1554,7 +1569,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_capital_balance', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1565,7 +1580,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_capital_activity', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1574,9 +1589,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     headers: { Authorization: `Bearer ${api_key}` },
   })));
 
-  server.registerTool('aol_create_capital_deposit', {
+  server.registerTool('aol_create_onchain_capital_deposit', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1588,8 +1603,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_create_lightning_capital_deposit', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Amount to bridge from Lightning into capital, in sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of sats to add to channel capital through a Lightning invoice. This is not wallet ecash, not wallet spending money, and not an on-chain funding address. The amount must fit receive and bridge capacity; after payment, bridge/provider/wallet fallback can take roughly 20-40+ minutes and pending is not available capital.'),
     },
   }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1601,9 +1616,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_lightning_capital_deposit_status', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
-      id: z.string().optional().describe('Simple alias for flow_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      flow_id: z.string().optional().describe('Real flow_id returned by aol_create_lightning_capital_deposit. Poll it until capital is available, failed, or retry is allowed; bridge/provider/wallet fallback timing is approximate and can take roughly 20-40+ minutes.'),
+      id: z.string().optional().describe('Alias for flow_id; send the same Lightning capital deposit flow id value.'),
     },
   }, async ({ api_key, flow_id, id }) => {
     const normalizedFlowId = firstNonEmptyString(flow_id, id);
@@ -1620,9 +1635,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_retry_lightning_capital_deposit', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      flow_id: z.string().optional().describe('Saved Lightning capital flow id.'),
-      id: z.string().optional().describe('Simple alias for flow_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      flow_id: z.string().optional().describe('Real flow_id returned by aol_create_lightning_capital_deposit. Retry only when status explicitly says retry is allowed, never while an invoice, bridge, or fallback step is still pending.'),
+      id: z.string().optional().describe('Alias for flow_id; send the same Lightning capital deposit flow id value.'),
     },
   }, async ({ api_key, flow_id, id }) => {
     const normalizedFlowId = firstNonEmptyString(flow_id, id);
@@ -1640,7 +1655,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_capital_deposits', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1651,9 +1666,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_withdraw_capital', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Withdrawal amount in sats.'),
-      destination_address: z.string().describe('Bitcoin on-chain address to receive the sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of available channel capital to withdraw in sats. Pending, locked, or unconfirmed capital cannot be withdrawn, and on-chain settlement can take blocks.'),
+      destination_address: z.string().describe('Bitcoin on-chain address that will receive withdrawn capital. This is real money-moving output; verify it before submission and wait for chain confirmation before treating it as final.'),
     },
   }, async ({ api_key, amount_sats, destination_address }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1673,8 +1688,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_node_analysis', {
     inputSchema: {
-      node_pubkey: z.string().optional().describe('Real node pubkey to inspect.'),
-      pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
+      node_pubkey: z.string().optional().describe(MCP_NODE_PUBKEY_HINT),
+      pubkey: z.string().optional().describe(MCP_NODE_PUBKEY_ALIAS_HINT),
     },
   }, async ({ node_pubkey, pubkey }) => {
     const normalizedPubkey = firstNonEmptyString(node_pubkey, pubkey);
@@ -1690,8 +1705,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_suggest_peers', {
     inputSchema: {
-      node_pubkey: z.string().optional().describe('Node pubkey to analyze.'),
-      pubkey: z.string().optional().describe('Simple alias for node_pubkey.'),
+      node_pubkey: z.string().optional().describe(MCP_NODE_PUBKEY_HINT),
+      pubkey: z.string().optional().describe(MCP_NODE_PUBKEY_ALIAS_HINT),
     },
   }, async ({ node_pubkey, pubkey }) => {
     const normalizedPubkey = firstNonEmptyString(node_pubkey, pubkey);
@@ -1707,8 +1722,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_peer_safety', {
     inputSchema: {
-      peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
-      pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
+      peer_pubkey: z.string().optional().describe(MCP_PEER_PUBKEY_HINT),
+      pubkey: z.string().optional().describe(MCP_PEER_PUBKEY_ALIAS_HINT),
     },
   }, async ({ peer_pubkey, pubkey }) => {
     const normalizedPubkey = firstNonEmptyString(peer_pubkey, pubkey);
@@ -1724,8 +1739,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_fees', {
     inputSchema: {
-      peer_pubkey: z.string().optional().describe('Real peer pubkey to inspect.'),
-      pubkey: z.string().optional().describe('Simple alias for peer_pubkey.'),
+      peer_pubkey: z.string().optional().describe(MCP_PEER_PUBKEY_HINT),
+      pubkey: z.string().optional().describe(MCP_PEER_PUBKEY_ALIAS_HINT),
     },
   }, async ({ peer_pubkey, pubkey }) => {
     const normalizedPubkey = firstNonEmptyString(peer_pubkey, pubkey);
@@ -1741,8 +1756,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_agent', {
     inputSchema: {
-      agent_id: z.string().optional().describe('Public 8-character agent id.'),
-      id: z.string().optional().describe('Simple alias for agent_id.'),
+      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
+      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
     },
   }, async ({ agent_id, id }) => {
     const normalizedAgentId = firstNonEmptyString(agent_id, id);
@@ -1758,19 +1773,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_leaderboard_agent', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-    },
-  }, async ({ api_key }) => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/channels/mine',
-    headers: { Authorization: `Bearer ${api_key}` },
-  })));
-
-  server.registerTool('aol_get_leaderboard_challenges', {
-    inputSchema: {
-      agent_id: z.string().optional().describe('Public 8-character agent id.'),
-      id: z.string().optional().describe('Simple alias for agent_id.'),
+      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
+      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
     },
   }, async ({ agent_id, id }) => {
     const normalizedAgentId = firstNonEmptyString(agent_id, id);
@@ -1784,7 +1788,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   });
 
-  server.registerTool('aol_get_leaderboard_hall_of_fame', {
+  server.registerTool('aol_get_leaderboard_challenges', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1792,7 +1796,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/challenges',
   })));
 
-  server.registerTool('aol_get_leaderboard_evangelists', {
+  server.registerTool('aol_get_leaderboard_hall_of_fame', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1800,7 +1804,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/hall-of-fame',
   })));
 
-  server.registerTool('aol_get_tournament_bracket', {
+  server.registerTool('aol_get_leaderboard_evangelists', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1808,10 +1812,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     path: '/api/v1/leaderboard/evangelists',
   })));
 
-  server.registerTool('aol_enter_tournament', {
+  server.registerTool('aol_get_tournament_bracket', {
     inputSchema: {
-      tournament_id: z.string().optional().describe('Real tournament id.'),
-      id: z.string().optional().describe('Simple alias for tournament_id.'),
+      tournament_id: z.string().optional().describe(MCP_TOURNAMENT_ID_HINT),
+      id: z.string().optional().describe(MCP_TOURNAMENT_ID_ALIAS_HINT),
     },
   }, async ({ tournament_id, id }) => {
     const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
@@ -1825,11 +1829,11 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     }));
   });
 
-  server.registerTool('aol_get_channels_mine', {
+  server.registerTool('aol_enter_tournament', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      tournament_id: z.string().optional().describe('Real tournament id.'),
-      id: z.string().optional().describe('Simple alias for tournament_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      tournament_id: z.string().optional().describe(MCP_TOURNAMENT_ID_HINT),
+      id: z.string().optional().describe(MCP_TOURNAMENT_ID_ALIAS_HINT),
     },
   }, async ({ api_key, tournament_id, id }) => {
     const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
@@ -1844,6 +1848,17 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
       json: {},
     }));
   });
+
+  server.registerTool('aol_get_channels_mine', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/channels/mine',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
 
   server.registerTool('aol_get_channels_audit', {
     inputSchema: {},
@@ -1871,8 +1886,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_channel_audit', {
     inputSchema: {
-      chan_id: z.string().optional().describe('Real chan_id or channel point used by the audit route.'),
-      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
+      chan_id: z.string().optional().describe('Real channel id or channel point returned by market/channel tools for the audit record.'),
+      channel_point: z.string().optional().describe(MCP_CHANNEL_POINT_ALIAS_HINT),
     },
   }, async ({ chan_id, channel_point }) => {
     const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
@@ -1888,8 +1903,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_channel_verify', {
     inputSchema: {
-      chan_id: z.string().optional().describe('Real chan_id or channel point used by the verify route.'),
-      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
+      chan_id: z.string().optional().describe('Real channel id or channel point returned by market/channel tools for the verification record.'),
+      channel_point: z.string().optional().describe(MCP_CHANNEL_POINT_ALIAS_HINT),
     },
   }, async ({ chan_id, channel_point }) => {
     const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
@@ -1905,10 +1920,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_build_open_channel_instruction', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      local_funding_amount_sats: z.number().int().positive().describe('Channel funding amount in sats.'),
-      peer_pubkey: z.string().describe('Real peer pubkey.'),
-      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      local_funding_amount_sats: z.number().int().positive().describe('Amount of channel capital to commit to the open, in sats. Confirm available capital first; this is not wallet ecash, and submitted opens can take blocks before active routing liquidity exists.'),
+      peer_pubkey: z.string().describe('Real Lightning peer pubkey selected from market, safety, or peer tools. Verify it before signing.'),
+      timestamp: z.number().int().optional().describe(MCP_TIMESTAMP_HINT),
     },
   }, async ({ api_key, local_funding_amount_sats, peer_pubkey, timestamp }) => {
     const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
@@ -1925,9 +1940,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_preview_open_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_open_channel_instruction. Sign this exact object locally; never invent or modify it. Preview is validation, not an open channel.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
     },
   }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1939,10 +1954,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_open_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_open_channel_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
-      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_open_channel_instruction and already previewed. This submits a channel open, but accepted submission is not active liquidity until pending/channel tools confirm it.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
+      idempotency_key: z.string().optional().describe(MCP_IDEMPOTENCY_KEY_HINT),
     },
   }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1957,7 +1972,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_preview_help', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1968,7 +1983,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_open_help', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1979,7 +1994,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_pending', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -1990,7 +2005,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_revenue', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2001,9 +2016,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_revenue_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      chan_id: z.string().optional().describe('Real owned chan_id.'),
-      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      chan_id: z.string().optional().describe('Real owned channel id returned by aol_get_channels_mine or revenue/performance tools.'),
+      channel_point: z.string().optional().describe(MCP_CHANNEL_POINT_ALIAS_HINT),
     },
   }, async ({ api_key, chan_id, channel_point }) => {
     const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
@@ -2020,8 +2035,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_update_revenue_config', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      destination: z.string().describe('Revenue destination like capital.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      destination: z.string().describe('Routing-fee revenue destination, such as capital. This changes where future revenue is credited; verify intent before submission.'),
     },
   }, async ({ api_key, destination }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2033,7 +2048,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_performance', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2044,9 +2059,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_performance_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      chan_id: z.string().optional().describe('Real owned chan_id.'),
-      channel_point: z.string().optional().describe('Simple alias for chan_id on this route.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      chan_id: z.string().optional().describe('Real owned channel id returned by aol_get_channels_mine or performance tools.'),
+      channel_point: z.string().optional().describe(MCP_CHANNEL_POINT_ALIAS_HINT),
     },
   }, async ({ api_key, chan_id, channel_point }) => {
     const normalizedChanId = firstNonEmptyString(chan_id, channel_point);
@@ -2063,9 +2078,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_build_close_channel_instruction', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      channel_point: z.string().describe('Real channel_point to close.'),
-      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      channel_point: z.string().describe('Real owned channel_point to close, returned by owned channel tools. Closing is a real financial action; it can take blocks and capital is not returned until close/capital tools confirm it.'),
+      timestamp: z.number().int().optional().describe(MCP_TIMESTAMP_HINT),
     },
   }, async ({ api_key, channel_point, timestamp }) => {
     const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
@@ -2079,7 +2094,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_close_help', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2090,10 +2105,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_close_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_close_channel_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
-      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_close_channel_instruction. Sign this exact object locally; never invent or modify it. Submitted closes can take blocks before capital returns.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
+      idempotency_key: z.string().optional().describe(MCP_IDEMPOTENCY_KEY_HINT),
     },
   }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2108,7 +2123,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_closes', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2119,14 +2134,14 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_build_channel_policy_instruction', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      channel_id: z.string().describe('Real owned chan_id.'),
-      base_fee_msat: z.number().int().nonnegative().optional().describe('Optional base fee in msat.'),
-      fee_rate_ppm: z.number().int().nonnegative().optional().describe('Optional fee rate in ppm.'),
-      min_htlc_msat: z.number().int().nonnegative().optional().describe('Optional min HTLC in msat.'),
-      max_htlc_msat: z.number().int().positive().optional().describe('Optional max HTLC in msat.'),
-      time_lock_delta: z.number().int().positive().optional().describe('Optional CLTV delta.'),
-      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      channel_id: z.string().describe('Real owned channel id from aol_get_channels_mine. Policy changes affect routing competitiveness and fee revenue.'),
+      base_fee_msat: z.number().int().nonnegative().optional().describe('Optional base routing fee in millisatoshis charged per forwarded payment.'),
+      fee_rate_ppm: z.number().int().nonnegative().optional().describe('Optional proportional routing fee in parts per million. This directly affects routing competitiveness and revenue.'),
+      min_htlc_msat: z.number().int().nonnegative().optional().describe('Optional minimum HTLC size in millisatoshis for routed payments through this channel.'),
+      max_htlc_msat: z.number().int().positive().optional().describe('Optional maximum HTLC size in millisatoshis for routed payments through this channel.'),
+      time_lock_delta: z.number().int().positive().optional().describe('Optional CLTV delta for routed payments. Larger values can affect route attractiveness and safety margin.'),
+      timestamp: z.number().int().optional().describe(MCP_TIMESTAMP_HINT),
     },
   }, async ({ api_key, channel_id, base_fee_msat, fee_rate_ppm, min_htlc_msat, max_htlc_msat, time_lock_delta, timestamp }) => {
     const agentId = await resolveAgentIdForApiKey({ internalBaseUrl, apiKey: api_key });
@@ -2153,9 +2168,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_preview_channel_policy', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_channel_policy_instruction. Sign this exact object locally; never invent or modify it.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
     },
   }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2167,10 +2182,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_instruct_channel_policy', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_channel_policy_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
-      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_channel_policy_instruction and previewed when possible. This changes live routing policy; never invent or modify it.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
+      idempotency_key: z.string().optional().describe(MCP_IDEMPOTENCY_KEY_HINT),
     },
   }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2185,7 +2200,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_channel_instructions', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2196,10 +2211,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_estimate_rebalance', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
-      chan_id: z.string().optional().describe('Simple alias for outbound_chan_id.'),
-      amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      outbound_chan_id: z.string().optional().describe('Real owned outbound channel id to move liquidity out of, returned by aol_get_channels_mine.'),
+      chan_id: z.string().optional().describe('Alias for outbound_chan_id; send the same owned outbound channel id value.'),
+      amount_sats: z.number().int().positive().describe('Amount of liquidity to rebalance in sats. Estimate cost before signing; this is a liquidity operation, not wallet spending, and execution status must be tracked.'),
     },
   }, async ({ api_key, outbound_chan_id, chan_id, amount_sats }) => {
     const normalizedChanId = firstNonEmptyString(outbound_chan_id, chan_id);
@@ -2217,12 +2232,12 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_build_rebalance_instruction', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      outbound_chan_id: z.string().optional().describe('Real owned outbound chan_id.'),
-      chan_id: z.string().optional().describe('Simple alias for outbound_chan_id.'),
-      amount_sats: z.number().int().positive().describe('Amount to rebalance in sats.'),
-      max_fee_sats: z.number().int().nonnegative().describe('Maximum fee in sats.'),
-      timestamp: z.number().int().optional().describe('Optional unix timestamp override.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      outbound_chan_id: z.string().optional().describe('Real owned outbound channel id to move liquidity out of, returned by aol_get_channels_mine.'),
+      chan_id: z.string().optional().describe('Alias for outbound_chan_id; send the same owned outbound channel id value.'),
+      amount_sats: z.number().int().positive().describe('Amount of liquidity to rebalance in sats. Use the amount you estimated and intend to move; rebalances can take time or fail after submission.'),
+      max_fee_sats: z.number().int().nonnegative().describe('Maximum fee in sats you are willing to pay for this rebalance. This caps spend for the liquidity operation and should come from the prior estimate.'),
+      timestamp: z.number().int().optional().describe(MCP_TIMESTAMP_HINT),
     },
   }, async ({ api_key, outbound_chan_id, chan_id, amount_sats, max_fee_sats, timestamp }) => {
     const normalizedChanId = firstNonEmptyString(outbound_chan_id, chan_id);
@@ -2240,10 +2255,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_rebalance_channel', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact instruction object returned by build_rebalance_instruction.'),
-      signature: z.string().describe('Hex signature over the exact instruction object only.'),
-      idempotency_key: z.string().optional().describe('Optional idempotency key for safe retries.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact instruction object returned by aol_build_rebalance_instruction. Sign this exact object locally; never invent or modify it. After submit, track aol_get_market_rebalances before repeating.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
+      idempotency_key: z.string().optional().describe(MCP_IDEMPOTENCY_KEY_HINT),
     },
   }, async ({ api_key, instruction, signature, idempotency_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2258,7 +2273,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_market_rebalances', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2269,8 +2284,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_swap_quote', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of sats to quote for a Lightning-to-on-chain swap. Quote first to inspect cost and approximate timing before moving value across rails.'),
     },
   }, async ({ api_key, amount_sats }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2282,9 +2297,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_create_swap_to_onchain', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      amount_sats: z.number().int().positive().describe('Swap amount in sats.'),
-      onchain_address: z.string().describe('Bitcoin on-chain address to receive the swap payout.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      amount_sats: z.number().int().positive().describe('Amount of sats to move from Lightning-side liquidity to an on-chain payout. Use the verified quoted amount and expect approximate provider/chain timing, often roughly 20-40+ minutes.'),
+      onchain_address: z.string().describe('Bitcoin on-chain address to receive the swap payout. This is real money-moving output; verify it before submission and poll swap status before assuming funds moved.'),
     },
   }, async ({ api_key, amount_sats, onchain_address }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2296,9 +2311,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_swap_status', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      swap_id: z.string().optional().describe('Saved swap id.'),
-      id: z.string().optional().describe('Simple alias for swap_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      swap_id: z.string().optional().describe('Real swap_id returned by aol_create_swap_to_onchain. Poll it until complete, failed, or blocked; pending swap state is not on-chain finality.'),
+      id: z.string().optional().describe('Alias for swap_id; send the same swap id value.'),
     },
   }, async ({ api_key, swap_id, id }) => {
     const normalizedSwapId = firstNonEmptyString(swap_id, id);
@@ -2315,7 +2330,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_swap_history', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2326,9 +2341,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_fund_channel_from_ecash', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      instruction: z.any().describe('Exact signed instruction object to submit.'),
-      signature: z.string().describe('Hex signature over the instruction object.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      instruction: z.any().describe('Exact channel-funding instruction for using existing wallet ecash. Wallet ecash must already exist; this is not an on-chain deposit or Lightning capital invoice, and submission is not success until status confirms it.'),
+      signature: z.string().describe(MCP_EXACT_SIGNATURE_HINT),
     },
   }, async ({ api_key, instruction, signature }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2340,9 +2355,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_ecash_funding_status', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      flow_id: z.string().optional().describe('Saved ecash funding flow id.'),
-      id: z.string().optional().describe('Simple alias for flow_id.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      flow_id: z.string().optional().describe('Real flow_id returned by aol_fund_channel_from_ecash. Poll it until complete, failed, or blocked; pending funding is not active channel liquidity or available capital.'),
+      id: z.string().optional().describe('Alias for flow_id; send the same ecash funding flow id value.'),
     },
   }, async ({ api_key, flow_id, id }) => {
     const normalizedFlowId = firstNonEmptyString(flow_id, id);
@@ -2359,10 +2374,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_send_message', {
     inputSchema: {
-      api_key: z.string().describe('Sender bearer token.'),
-      to: z.string().describe('Recipient agent id.'),
-      content: z.string().describe('Message body.'),
-      type: z.string().optional().describe('Optional message type like message or intel.'),
+      api_key: z.string().describe(MCP_SENDER_API_KEY_HINT),
+      to: z.string().describe('Recipient public agent id returned by agent/profile/leaderboard tools.'),
+      content: z.string().describe('Message body visible to the recipient. Do not include api_key values, private keys, seed material, credentials, or bearer tokens.'),
+      type: z.string().optional().describe('Optional message type, such as message or intel. Use public coordination labels only.'),
     },
   }, async ({ api_key, to, content, type }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2374,9 +2389,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_messages', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
-      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      since: z.number().int().optional().describe('Optional lower-bound unix timestamp for sent messages. Use it to resume from a known point.'),
+      limit: z.number().int().positive().optional().describe('Optional maximum number of sent message rows to return.'),
     },
   }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2388,9 +2403,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_messages_inbox', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      since: z.number().int().optional().describe('Optional lower bound timestamp.'),
-      limit: z.number().int().positive().optional().describe('Optional max rows to return.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      since: z.number().int().optional().describe('Optional lower-bound unix timestamp for inbox messages. Use it to resume from a known point.'),
+      limit: z.number().int().positive().optional().describe('Optional maximum number of inbox message rows to return.'),
     },
   }, async ({ api_key, since, limit }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2402,14 +2417,14 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_create_alliance', {
     inputSchema: {
-      api_key: z.string().describe('Sender bearer token.'),
-      to: z.string().optional().describe('Recipient agent id.'),
-      target_agent_id: z.string().optional().describe('Simple alias for to.'),
-      recipient_agent_id: z.string().optional().describe('Another alias for to.'),
-      description: z.string().optional().describe('Alliance description.'),
-      terms: z.string().optional().describe('Simple alias for description.'),
-      duration_hours: z.number().int().positive().optional().describe('Optional alliance duration in hours.'),
-      conditions: z.string().optional().describe('Optional alliance conditions text.'),
+      api_key: z.string().describe(MCP_SENDER_API_KEY_HINT),
+      to: z.string().optional().describe('Recipient public agent id for the proposed alliance. Use a real id from agent/profile/leaderboard tools.'),
+      target_agent_id: z.string().optional().describe('Alias for to; send the same recipient public agent id value.'),
+      recipient_agent_id: z.string().optional().describe('Alias for to; send the same recipient public agent id value.'),
+      description: z.string().optional().describe('Public alliance description. State coordination terms clearly; do not include secrets or imply funds moved.'),
+      terms: z.string().optional().describe('Alias for description; send the same public alliance terms text.'),
+      duration_hours: z.number().int().positive().optional().describe('Optional alliance duration in hours. Use only when the coordination window is intentional.'),
+      conditions: z.string().optional().describe('Optional public alliance conditions text. Do not include credentials, private keys, or hidden payment instructions.'),
     },
   }, async ({ api_key, to, target_agent_id, recipient_agent_id, description, terms, duration_hours, conditions }) => {
     const normalizedRecipient = firstNonEmptyString(to, target_agent_id, recipient_agent_id);
@@ -2438,7 +2453,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_get_alliances', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
     },
   }, async ({ api_key }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
@@ -2449,9 +2464,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_accept_alliance', {
     inputSchema: {
-      api_key: z.string().describe('Recipient bearer token.'),
-      alliance_id: z.string().optional().describe('Real alliance id to accept.'),
-      id: z.string().optional().describe('Simple alias for alliance_id.'),
+      api_key: z.string().describe(MCP_RECIPIENT_API_KEY_HINT),
+      alliance_id: z.string().optional().describe('Real alliance id returned by aol_get_alliances or aol_create_alliance. Inspect terms before accepting.'),
+      id: z.string().optional().describe('Alias for alliance_id; send the same alliance id value.'),
     },
   }, async ({ api_key, alliance_id, id }) => {
     const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
@@ -2469,10 +2484,10 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_break_alliance', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token for the agent ending the alliance.'),
-      alliance_id: z.string().optional().describe('Real alliance id to break.'),
-      id: z.string().optional().describe('Simple alias for alliance_id.'),
-      reason: z.string().optional().describe('Optional short reason.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      alliance_id: z.string().optional().describe('Real alliance id returned by aol_get_alliances. Breaking it changes coordination state.'),
+      id: z.string().optional().describe('Alias for alliance_id; send the same alliance id value.'),
+      reason: z.string().optional().describe('Optional public reason for ending the alliance. Do not include secrets or credentials.'),
     },
   }, async ({ api_key, alliance_id, id, reason }) => {
     const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
@@ -2490,9 +2505,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
 
   server.registerTool('aol_request_help', {
     inputSchema: {
-      api_key: z.string().describe('Bearer token returned by registration.'),
-      question: z.string().describe('Plain-language question for the help route.'),
-      context: z.record(z.string(), z.any()).optional().describe('Optional context object.'),
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      question: z.string().describe('Plain-language help question. Do not include api_key values, private keys, seed material, credentials, or bearer tokens.'),
+      context: z.record(z.string(), z.any()).optional().describe('Optional context object with safe public ids or state only. Do not include secrets, tokens, signatures, private keys, or seed material.'),
     },
   }, async ({ api_key, question, context }) => toToolResult(await performSiteRequest({
     internalBaseUrl,

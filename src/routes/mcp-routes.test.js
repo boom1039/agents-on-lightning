@@ -15,6 +15,7 @@ import {
   MCP_RECOMMENDED_PROMPTS,
   MCP_RECOMMENDED_TOOLS,
   MCP_TOOL_NAMES,
+  MCP_TOOL_SPECS,
   PUBLIC_MCP_DOC_PATHS,
   SIMPLIFIED_MCP_DOC_NAMES,
 } from '../mcp/catalog.js';
@@ -39,9 +40,16 @@ async function startApp() {
   const app = express();
   app.use(express.json());
   const internalMcpSecret = 'test-internal-mcp-secret';
+  const apiRequests = [];
   app.use(createMcpOnlyApiGuard({
     internalMcpSecret,
   }));
+  app.use((req, _res, next) => {
+    if (req.path.startsWith('/api/v1')) {
+      apiRequests.push({ method: req.method, path: req.path });
+    }
+    next();
+  });
   app.get('/', (_req, res) => res.json({ ok: true }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/llms.txt', (_req, res) => res.type('text/plain').send('root llms'));
@@ -67,12 +75,12 @@ async function startApp() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   app.use(mcpRoutes({ internalBaseUrl: baseUrl, publicBaseUrl: baseUrl, internalMcpSecret }));
-  return { server, baseUrl };
+  return { server, baseUrl, apiRequests };
 }
 
 test('hosted MCP works in stateless mode without mcp-session-id headers', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'aol-mcp-routes-'));
-  const { server, baseUrl } = await startApp();
+  const { server, baseUrl, apiRequests } = await startApp();
   const seenSessionHeaders = [];
   const fetchWithHeaderCapture = async (input, init) => {
     const response = await fetch(input, init);
@@ -97,6 +105,10 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const tools = await client.listTools();
     const toolNames = (tools.tools || []).map((tool) => tool.name);
     assert.deepEqual([...toolNames].sort(), [...MCP_TOOL_NAMES].sort());
+    const toolsByName = new Map((tools.tools || []).map((tool) => [tool.name, tool]));
+    for (const spec of MCP_TOOL_SPECS) {
+      assert.equal(toolsByName.get(spec.name)?.description, spec.description);
+    }
     const manifest = await (await fetch(new URL('/.well-known/mcp.json', baseUrl))).json();
     assert.equal(manifest.server_card, `${baseUrl}/.well-known/mcp/server-card.json`);
     assert.equal(manifest.$schema, undefined);
@@ -113,6 +125,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.deepEqual(manifest.recommended_tools, [...MCP_RECOMMENDED_TOOLS]);
     assert((manifest.workflow_summaries || []).some((workflow) => workflow.name === 'earn-and-monitor'));
     assert((manifest.tool_groups || []).some((group) => group.name === 'signed-channel-work'));
+    assert.deepEqual(manifest.tool_summaries, MCP_TOOL_SPECS);
     assert.equal(manifest._meta?.zero_platform_fees, true);
     assert.equal(manifest._meta?.zero_commissions, true);
     assert.equal(manifest._meta?.routing_fee_opportunity, true);
@@ -124,7 +137,6 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       (manifest.resource_summaries || []).map((resource) => resource.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
-    assert((manifest.tool_summaries || []).some((tool) => tool.name === 'aol_register_agent'));
     const serverCardResponse = await fetch(new URL('/.well-known/mcp/server-card.json', baseUrl));
     assert.equal(serverCardResponse.status, 200);
     assert.equal(serverCardResponse.headers.get('access-control-allow-origin'), '*');
@@ -179,6 +191,23 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       docsResult.structuredContent.body.docs.map((doc) => doc.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
+    apiRequests.length = 0;
+    await client.callTool({ name: 'aol_get_channels_mine', arguments: { api_key: 'test-api-key' } });
+    await client.callTool({ name: 'aol_get_leaderboard_agent', arguments: { id: 'agent1234' } });
+    await client.callTool({ name: 'aol_get_leaderboard_challenges', arguments: {} });
+    await client.callTool({ name: 'aol_get_leaderboard_hall_of_fame', arguments: {} });
+    await client.callTool({ name: 'aol_get_leaderboard_evangelists', arguments: {} });
+    await client.callTool({ name: 'aol_get_tournament_bracket', arguments: { id: 'daily' } });
+    await client.callTool({ name: 'aol_enter_tournament', arguments: { api_key: 'test-api-key', id: 'daily' } });
+    assert.deepEqual(apiRequests, [
+      { method: 'GET', path: '/api/v1/channels/mine' },
+      { method: 'GET', path: '/api/v1/leaderboard/agent/agent1234' },
+      { method: 'GET', path: '/api/v1/leaderboard/challenges' },
+      { method: 'GET', path: '/api/v1/leaderboard/hall-of-fame' },
+      { method: 'GET', path: '/api/v1/leaderboard/evangelists' },
+      { method: 'GET', path: '/api/v1/tournaments/daily/bracket' },
+      { method: 'POST', path: '/api/v1/tournaments/daily/enter' },
+    ]);
     const resources = await client.listResources();
     const resourceUris = (resources.resources || []).map((resource) => resource.uri);
     assert(resourceUris.includes('mcp://server-card.json'));

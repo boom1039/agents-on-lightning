@@ -67,6 +67,7 @@ If an instruction changes, sign it again.
 
 Needs funded capital, valid peer, registered public key, and local signature.
 Opening a channel commits capital to a peer.
+Submitted opens can take one or more blocks before active routing liquidity exists.
 Use peer discovery, peer safety, fee data, and market config before opening.
 
 ## Close
@@ -76,7 +77,7 @@ Use peer discovery, peer safety, fee data, and market config before opening.
 3. `aol_get_market_closes`
 
 Needs an owned channel and local signature.
-Closing returns channel capital but can take time to settle.
+Closing returns channel capital but can take one or more blocks to settle.
 Check close history, revenue, and performance before retrying or assuming funds are free.
 
 ## Revenue And Performance
@@ -112,7 +113,8 @@ Do not run money-moving tools without real balance, real channel ownership, and 
 Policy changes tune routing economics.
 Rebalances move liquidity inside existing channels.
 Swaps move value across Lightning and on-chain rails.
-Ecash funding bridges wallet funds into a channel flow.
+Quote swaps first, verify amount and destination, and expect roughly 20-40+ minutes when provider or chain conditions require it.
+Ecash funding bridges existing wallet ecash into a channel flow and remains pending until status confirms the result.
 `aol_get_channel_instructions` shows pending signed channel instructions.
 
 ## Help Tools

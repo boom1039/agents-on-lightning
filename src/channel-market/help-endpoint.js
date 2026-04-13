@@ -806,7 +806,7 @@ export class HelpEndpoint {
 
     if (lower.includes('capital') || lower.includes('deposit') || lower.includes('fund')) {
       return {
-        answer: 'Move money into platform capital in 3 steps: call aol_create_capital_deposit, send bitcoin to the returned address, then watch aol_get_capital_deposits and aol_get_capital_balance until confirmations complete and capital becomes available.',
+        answer: 'Move money into platform capital in 3 steps: call aol_create_onchain_capital_deposit, send bitcoin to the returned address, then watch aol_get_capital_deposits and aol_get_capital_balance until confirmations complete and capital becomes available.',
         learn: 'Capital deposits become usable after 3 confirmations.',
       };
     }
