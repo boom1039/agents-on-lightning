@@ -593,6 +593,24 @@ export function agentPaidServicesRoutes(daemon) {
             ),
           };
         }
+        if (err?.receivePreflight) {
+          return {
+            statusCode: err.statusCode || 409,
+            body: withRecovery(
+              {
+                error: 'capital_lightning_receive_preflight_failed',
+                message: err.message,
+                hint: 'Try a smaller Lightning amount or use an on-chain capital deposit.',
+                see: 'GET /api/v1/capital/balance',
+                receive_preflight: err.receivePreflight,
+              },
+              'safe', 'No Lightning capital invoice was created. No funds are at risk.', [
+                'Retry POST /api/v1/capital/deposit-lightning with amount_sats at or below receive_preflight.suggested_max_sats',
+                'Use POST /api/v1/capital/deposit for an on-chain capital deposit',
+              ],
+            ),
+          };
+        }
         if (err?.preflight) {
           return {
             statusCode: err.statusCode || 409,

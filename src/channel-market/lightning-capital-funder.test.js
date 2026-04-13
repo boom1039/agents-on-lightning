@@ -42,6 +42,20 @@ function createDepositTracker() {
   };
 }
 
+function mockNodeManagerWithInbound(clientOverrides = {}, receivableSats = 1_000_000) {
+  return mockNodeManager({
+    listChannels: async () => ({
+      channels: [{
+        active: true,
+        remote_balance: String(receivableSats + 2_000),
+        unsettled_balance: '0',
+        remote_constraints: { chan_reserve_sat: '1000' },
+      }],
+    }),
+    ...clientOverrides,
+  });
+}
+
 test('createFlow creates invoice, tracked address, and lightning funding event', async () => {
   const dataLayer = mockDataLayer();
   const depositTracker = createDepositTracker();
@@ -57,7 +71,7 @@ test('createFlow creates invoice, tracked address, and lightning funding event',
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-1',
@@ -87,6 +101,50 @@ test('createFlow creates invoice, tracked address, and lightning funding event',
   assert.equal(capitalLedger.fundingEvents[1].type, 'lightning_invoice_created');
 });
 
+test('createFlow rejects before invoice when single-channel inbound capacity is too low', async () => {
+  const dataLayer = mockDataLayer();
+  const depositTracker = createDepositTracker();
+  const capitalLedger = mockCapitalLedger();
+  let addInvoiceCalled = false;
+  let quoteCalled = false;
+  const funder = new LightningCapitalFunder({
+    nodeManager: mockNodeManagerWithInbound({
+      addInvoice: async () => {
+        addInvoiceCalled = true;
+        return { payment_request: 'lnbc_should_not_exist', r_hash: 'hash-low-inbound', add_index: '1' };
+      },
+    }, 50_000),
+    depositTracker,
+    capitalLedger,
+    dataLayer,
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    loopClient: {
+      async quoteOut() {
+        quoteCalled = true;
+        return { stdout: 'quote ok', stderr: '' };
+      },
+    },
+    config: { boltzApiBase: TEST_BOLTZ_API_BASE },
+  });
+
+  await funder.load();
+  await assert.rejects(
+    () => funder.createFlow('agent-lightning', 250_000),
+    (err) => {
+      assert.equal(err.name, 'ReceivePreflightError');
+      assert.equal(err.statusCode, 409);
+      assert.equal(err.receivePreflight.can_receive, false);
+      assert.equal(err.receivePreflight.suggested_max_sats, 50_000);
+      return true;
+    },
+  );
+
+  assert.equal(addInvoiceCalled, false);
+  assert.equal(quoteCalled, false);
+  assert.equal(capitalLedger.fundingEvents[0].type, 'lightning_receive_preflight_rejected');
+});
+
 test('createFlow retries a transient Loop quote failure once before falling back', async () => {
   const dataLayer = mockDataLayer();
   const depositTracker = createDepositTracker();
@@ -105,7 +163,7 @@ test('createFlow retries a transient Loop quote failure once before falling back
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-loop-retry',
@@ -149,7 +207,7 @@ test('polling advances invoice -> loop out -> onchain pending -> confirmed', asy
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-2',
@@ -250,7 +308,7 @@ test('polling retries offchain loop swap failures before giving up', async () =>
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-3',
@@ -330,7 +388,7 @@ test('polling marks failed loop swaps as loop_out_failed after retry limit', asy
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-4',
@@ -396,7 +454,7 @@ test('load revives retryable offchain failures back into invoice_paid', async ()
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager(),
+    nodeManager: mockNodeManagerWithInbound(),
     depositTracker: createDepositTracker(),
     capitalLedger: mockCapitalLedger(),
     dataLayer,
@@ -438,7 +496,7 @@ test('createFlow rejects when no bridge provider is ready', async () => {
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       walletBalance: async () => ({ confirmed_balance: '0' }),
     }),
     depositTracker,
@@ -466,7 +524,7 @@ test('createFlow can prefer wallet fallback when Loop is not configured', async 
   const depositTracker = createDepositTracker();
   const capitalLedger = mockCapitalLedger();
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       walletBalance: async () => ({ confirmed_balance: '300000' }),
     }),
     depositTracker,
@@ -518,7 +576,7 @@ test('falls back to wallet bridge after route failure and then confirms', async 
     },
   };
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-5',
@@ -618,6 +676,16 @@ test('wallet fallback preflight uses a balance-capable client even when withdraw
       add_index: '61',
     }),
   };
+  const readClient = {
+    listChannels: async () => ({
+      channels: [{
+        active: true,
+        remote_balance: '300000',
+        unsettled_balance: '0',
+        remote_constraints: { chan_reserve_sat: '1000' },
+      }],
+    }),
+  };
   const funder = new LightningCapitalFunder({
     nodeManager: {
       getDefaultNodeOrNull: () => invoiceClient,
@@ -625,7 +693,7 @@ test('wallet fallback preflight uses a balance-capable client even when withdraw
         if (role === 'withdraw') return withdrawClient;
         if (role === 'wallet') return walletClient;
         if (role === 'invoice') return invoiceClient;
-        if (role === 'read') return null;
+        if (role === 'read') return readClient;
         return invoiceClient;
       },
     },
@@ -687,7 +755,7 @@ test('falls back to Boltz after a Loop route failure and publishes a claim tx', 
   };
 
   const funder = new LightningCapitalFunder({
-    nodeManager: mockNodeManager({
+    nodeManager: mockNodeManagerWithInbound({
       addInvoice: async (value) => ({
         payment_request: `lnbc${value}mock`,
         r_hash: 'hash-boltz',

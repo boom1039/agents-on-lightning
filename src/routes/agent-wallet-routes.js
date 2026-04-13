@@ -9,6 +9,7 @@ import { requireAuth } from '../identity/auth.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import { validateAmount } from '../identity/validators.js';
 import { err400Validation, err400MissingField, err500Internal, agentError, buildRecovery } from '../identity/agent-friendly-errors.js';
+import { buildSingleChannelReceivePreflight } from '../lnd/receive-preflight.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -16,6 +17,22 @@ function shortenOpaqueId(value) {
   if (typeof value !== 'string') return value;
   if (!UUID_RE.test(value.trim())) return value;
   return `${value.slice(0, 8)}...`;
+}
+
+function getReadClient(daemon) {
+  const nodeManager = daemon?.nodeManager;
+  if (!nodeManager) return null;
+  return nodeManager.getScopedDefaultNodeOrNull?.('read')
+    || nodeManager.getDefaultNodeOrNull?.()
+    || null;
+}
+
+function getReceiveSafetyBufferSats(daemon) {
+  const cashuBuffer = daemon?.config?.cashu?.receiveSafetyBufferSats;
+  if (Number.isInteger(cashuBuffer)) return Math.max(0, cashuBuffer);
+  const loopBuffer = daemon?.config?.loop?.receiveSafetyBufferSats;
+  if (Number.isInteger(loopBuffer)) return Math.max(0, loopBuffer);
+  return 1000;
 }
 
 export function sanitizePublicLedgerEntry(entry) {
@@ -76,6 +93,24 @@ export function agentWalletRoutes(daemon) {
       if (!amtCheck.valid) return err400Validation(res, amtCheck.reason, {
         hint: 'amount_sats must be an integer between 1 and 10,000,000.',
       });
+
+      const receivePreflight = await buildSingleChannelReceivePreflight(getReadClient(daemon), parsed, {
+        safetyBufferSats: getReceiveSafetyBufferSats(daemon),
+      });
+      if (!receivePreflight.can_receive) {
+        return agentError(res, 409, {
+          error: 'wallet_mint_receive_preflight_failed',
+          message: 'No single inbound Lightning channel can receive this wallet funding amount.',
+          hint: 'Try a smaller wallet funding amount or wait for more inbound liquidity.',
+          see: 'GET /api/v1/wallet/balance',
+          extra: {
+            receive_preflight: receivePreflight,
+            recovery: buildRecovery('safe', 'No wallet invoice was created. No sats were deducted.', [
+              'Retry POST /api/v1/wallet/mint-quote with amount_sats at or below receive_preflight.suggested_max_sats',
+            ]),
+          },
+        });
+      }
 
       const result = await daemon.agentCashuWallet.mintQuote(req.agentId, parsed);
       res.json({

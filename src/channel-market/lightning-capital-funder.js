@@ -4,6 +4,7 @@ import * as ecc from 'tiny-secp256k1';
 import { address as btcAddress, initEccLib, networks as btcNetworks } from 'bitcoinjs-lib';
 import { Musig, OutputType, SwapTreeSerializer, TaprootUtils, constructClaimTransaction, targetFee } from 'boltz-core';
 import { SigHash, Transaction as RawTransaction } from '@scure/btc-signer';
+import { ReceivePreflightError, buildSingleChannelReceivePreflight } from '../lnd/receive-preflight.js';
 
 const STATE_PATH = 'data/channel-market/lightning-capital-flows.json';
 const BOLTZ_API_BASE = 'https://api.boltz.exchange/v2';
@@ -172,6 +173,7 @@ export class LightningCapitalFunder {
         ? config.providerProbePubkeys
         : {},
       routeProbeFeeLimitSats: Number.isInteger(config.routeProbeFeeLimitSats) ? config.routeProbeFeeLimitSats : 100,
+      receiveSafetyBufferSats: Number.isInteger(config.receiveSafetyBufferSats) ? Math.max(0, config.receiveSafetyBufferSats) : 1000,
     };
   }
 
@@ -243,6 +245,25 @@ export class LightningCapitalFunder {
     }
 
     const flowId = randomUUID();
+    const receiveClient =
+      this._nodeManager.getScopedDefaultNodeOrNull('read')
+      || this._nodeManager.getDefaultNodeOrNull()
+      || invoiceClient;
+    const receivePreflight = await buildSingleChannelReceivePreflight(receiveClient, amountSats, {
+      safetyBufferSats: this.config.receiveSafetyBufferSats,
+    });
+    if (!receivePreflight.can_receive) {
+      await this._capitalLedger.recordFundingEvent(agentId, 'lightning_receive_preflight_rejected', {
+        amount_sats: amountSats,
+        source: 'lightning_receive_preflight',
+        status: 'rejected',
+        flow_id: flowId,
+        receive_preflight: receivePreflight,
+        reference: flowId,
+      });
+      throw new ReceivePreflightError('No single inbound Lightning channel can receive this capital deposit amount.', receivePreflight);
+    }
+
     const bridgePreflight = await this._buildBridgePreflight(amountSats);
     if (!bridgePreflight.any_available) {
       await this._capitalLedger.recordFundingEvent(agentId, 'lightning_bridge_preflight_rejected', {
@@ -305,6 +326,7 @@ export class LightningCapitalFunder {
         boltz_claim_tx_hex: null,
         boltz_claim_txid: null,
         boltz_claim_broadcast_at: null,
+        receive_preflight: receivePreflight,
         bridge_preflight: bridgePreflight,
       };
 
@@ -1391,6 +1413,7 @@ export class LightningCapitalFunder {
       loop_out_swap_id: flow.loop_out_swap_id,
       boltz_swap_id: flow.boltz_swap_id || null,
       onchain_txid: deposit?.txid || flow.wallet_bridge_txid || flow.boltz_claim_txid || null,
+      receive_preflight: flow.receive_preflight || null,
       bridge_preflight: flow.bridge_preflight || null,
       confirmations: deposit?.confirmations || 0,
       required_confirmations: deposit?.confirmations_required || this._depositTracker._confirmationsRequired,
