@@ -79,7 +79,7 @@
     tr:hover td { background: rgba(64,208,113,0.055); }
     .app {
       display: grid;
-      grid-template-rows: auto auto 1fr 250px;
+      grid-template-rows: auto auto 1fr;
       height: 100vh;
       gap: 6px;
       padding: 8px;
@@ -147,8 +147,29 @@
     .main {
       display: grid;
       grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1.35fr) minmax(350px, 0.9fr);
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr) 250px;
+      grid-template-areas:
+        "slot0 slot1 slot2"
+        "slot0 slot1 slot3"
+        "slot0 slot1 slot4"
+        "slot5 slot5 slot5";
       gap: 6px;
       min-height: 0;
+    }
+    .panel-slot {
+      min-height: 0;
+      display: flex;
+      overflow: hidden;
+    }
+    .panel-slot[data-slot-index="0"] { grid-area: slot0; }
+    .panel-slot[data-slot-index="1"] { grid-area: slot1; }
+    .panel-slot[data-slot-index="2"] { grid-area: slot2; }
+    .panel-slot[data-slot-index="3"] { grid-area: slot3; }
+    .panel-slot[data-slot-index="4"] { grid-area: slot4; }
+    .panel-slot[data-slot-index="5"] { grid-area: slot5; }
+    .panel-slot.drag-over {
+      outline: 1px dashed var(--cyan);
+      outline-offset: -2px;
     }
     .pane {
       min-height: 0;
@@ -157,6 +178,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      width: 100%;
     }
     .pane-head {
       display: flex;
@@ -185,12 +207,6 @@
       min-height: 0;
       flex: 1;
     }
-    .right-stack {
-      display: grid;
-      grid-template-rows: 1fr 1fr 1.15fr;
-      min-height: 0;
-      gap: 6px;
-    }
     .subpane {
       min-height: 0;
       border: 1px solid var(--line);
@@ -198,6 +214,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      width: 100%;
     }
     .subhead {
       padding: 5px 7px;
@@ -208,6 +225,40 @@
       letter-spacing: 1px;
       font-size: 10px;
     }
+    .subhead {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+    }
+    .subhead .grow { flex: 1; }
+    .panel-drag {
+      cursor: grab;
+      color: var(--muted);
+      padding: 1px 5px;
+    }
+    .panel-drag:active { cursor: grabbing; }
+    [data-panel].dragging {
+      opacity: 0.55;
+      outline: 1px dashed var(--green);
+      outline-offset: -2px;
+    }
+    th[data-col] {
+      cursor: pointer;
+      user-select: none;
+    }
+    th[data-col].dragging {
+      opacity: 0.5;
+      color: var(--green);
+    }
+    th[data-col].drop-target {
+      color: var(--cyan);
+      box-shadow: inset 2px 0 0 var(--cyan);
+    }
+    th .sort-indicator {
+      color: var(--green);
+      margin-left: 3px;
+    }
     .scroll { overflow: auto; min-height: 0; }
     .ledger-pane {
       border: 1px solid var(--line);
@@ -216,6 +267,7 @@
       min-height: 0;
       flex-direction: column;
       overflow: hidden;
+      width: 100%;
     }
     .filters {
       display: flex;
@@ -285,11 +337,20 @@
     .nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     @media (max-width: 1280px) {
       body { overflow: auto; }
-      .app { height: auto; min-height: 100vh; grid-template-rows: auto auto auto 320px; }
+      .app { height: auto; min-height: 100vh; grid-template-rows: auto auto auto; }
       .metrics { grid-template-columns: repeat(4, 1fr); }
-      .main { grid-template-columns: 1fr; }
-      .pane, .subpane { min-height: 320px; }
-      .right-stack { grid-template-rows: repeat(3, 260px); }
+      .main {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(6, minmax(320px, auto));
+        grid-template-areas:
+          "slot0"
+          "slot1"
+          "slot2"
+          "slot3"
+          "slot4"
+          "slot5";
+      }
+      .pane, .subpane, .ledger-pane { min-height: 320px; }
     }
   </style>
 </head>
@@ -297,79 +358,93 @@
   <div class="app">
     <header class="topline">
       <div class="brand">AOL MCP LEDGER CONSOLE</div>
-      <div class="muted">intent + backend + economic truth</div>
+      <div class="muted">click headers to sort; drag headers or move handles to rearrange</div>
       <div class="nav">
         <a href="/journey">route-grid</a>
         <a href="/journey/three">3d</a>
         <a href="/llms.txt">llms</a>
+        <button id="reset-layout" title="Reset saved panel, column, and sort state">reset layout</button>
       </div>
       <div class="status" id="status">loading</div>
     </header>
 
     <section class="metrics" id="metrics"></section>
 
-    <main class="main">
-      <section class="pane">
+    <main class="main" id="panel-grid">
+      <div class="panel-slot" data-slot-index="0">
+      <section class="pane" data-panel="agents">
         <div class="pane-head">
           <h2>Agent Index</h2>
           <span class="muted">MCP + ledger identities</span>
           <span class="grow"></span>
           <input id="agent-filter" placeholder="agent id">
           <button id="refresh">refresh</button>
+          <button class="panel-drag" draggable="true" data-panel-drag="agents" title="Drag section">move</button>
         </div>
         <div class="pane-body">
           <table>
-            <thead>
-              <tr>
-                <th style="width:82px">agent</th>
-                <th style="width:44px">calls</th>
-                <th style="width:38px">fail</th>
-                <th style="width:86px">stage</th>
-                <th>last tool</th>
-                <th style="width:88px">capital</th>
-                <th style="width:78px">ledger</th>
-                <th style="width:132px">activity note</th>
-              </tr>
-            </thead>
+            <thead id="agents-head"></thead>
             <tbody id="agents-body"></tbody>
           </table>
         </div>
       </section>
+      </div>
 
-      <section class="pane">
+      <div class="panel-slot" data-slot-index="1">
+      <section class="pane" data-panel="timeline">
         <div class="pane-head">
           <h2>Agent Timeline</h2>
           <span id="selected-agent" class="cyan">none selected</span>
           <span class="grow"></span>
           <button id="clear-agent">clear</button>
+          <button class="panel-drag" draggable="true" data-panel-drag="timeline" title="Drag section">move</button>
         </div>
         <div class="split-body">
           <div class="scroll" id="timeline"></div>
           <div class="scroll" id="agent-detail"></div>
         </div>
       </section>
+      </div>
 
-      <aside class="right-stack">
-        <section class="subpane">
-          <div class="subhead">Funnel</div>
+      <div class="panel-slot" data-slot-index="2">
+        <section class="subpane" data-panel="funnel">
+          <div class="subhead">
+            <span>Funnel</span>
+            <span class="grow"></span>
+            <button class="panel-drag" draggable="true" data-panel-drag="funnel" title="Drag section">move</button>
+          </div>
           <div class="scroll">
             <table>
-              <thead><tr><th>stage</th><th style="width:52px">agents</th><th style="width:72px">calls</th><th style="width:134px">stage note</th></tr></thead>
+              <thead id="funnel-head"></thead>
               <tbody id="funnel-body"></tbody>
             </table>
           </div>
         </section>
-        <section class="subpane">
-          <div class="subhead">Tools + Failures</div>
+      </div>
+
+      <div class="panel-slot" data-slot-index="3">
+        <section class="subpane" data-panel="tools">
+          <div class="subhead">
+            <span>Tools + Failures</span>
+            <span class="grow"></span>
+            <button class="panel-drag" draggable="true" data-panel-drag="tools" title="Drag section">move</button>
+          </div>
           <div class="scroll">
             <table>
-              <thead><tr><th>tool</th><th style="width:72px">group</th><th style="width:44px">calls</th><th style="width:44px">fail</th><th style="width:128px">usage note</th></tr></thead>
+              <thead id="tools-head"></thead>
               <tbody id="tools-body"></tbody>
             </table>
           </div>
         </section>
-        <section class="subpane">
-          <div class="subhead">SQL Explorer</div>
+      </div>
+
+      <div class="panel-slot" data-slot-index="4">
+        <section class="subpane" data-panel="sql">
+          <div class="subhead">
+            <span>SQL Explorer</span>
+            <span class="grow"></span>
+            <button class="panel-drag" draggable="true" data-panel-drag="sql" title="Drag section">move</button>
+          </div>
           <div class="scroll" style="padding:6px">
             <div class="filters" style="margin-bottom:5px">
               <button data-sql="SELECT agent_id, COUNT(*) AS calls, SUM(CASE WHEN success = false OR status >= 400 THEN 1 ELSE 0 END) AS failures FROM mcp_tool_events GROUP BY agent_id ORDER BY calls DESC LIMIT 25">agents</button>
@@ -384,40 +459,33 @@
             <div class="sql-results" id="sql-results"></div>
           </div>
         </section>
-      </aside>
-    </main>
+      </div>
 
-    <section class="ledger-pane">
-      <div class="pane-head">
-        <h2>Ledger Stream</h2>
-        <span class="muted">latest 100 public entries by default</span>
-        <span class="grow"></span>
-        <div class="filters">
-          <input id="ledger-agent" placeholder="agent id">
-          <input id="ledger-type" placeholder="type">
-          <button id="ledger-prev">prev</button>
-          <button id="ledger-next">next</button>
-          <button id="ledger-apply">apply</button>
-          <span id="ledger-page" class="muted"></span>
-        </div>
+      <div class="panel-slot" data-slot-index="5">
+        <section class="ledger-pane" data-panel="ledger">
+          <div class="pane-head">
+            <h2>Ledger Stream</h2>
+            <span class="muted">latest 100 public entries by default</span>
+            <span class="grow"></span>
+            <div class="filters">
+              <input id="ledger-agent" placeholder="agent id">
+              <input id="ledger-type" placeholder="type">
+              <button id="ledger-prev">prev</button>
+              <button id="ledger-next">next</button>
+              <button id="ledger-apply">apply</button>
+              <span id="ledger-page" class="muted"></span>
+            </div>
+            <button class="panel-drag" draggable="true" data-panel-drag="ledger" title="Drag section">move</button>
+          </div>
+          <div class="pane-body">
+            <table>
+              <thead id="ledger-head"></thead>
+              <tbody id="ledger-body"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
-      <div class="pane-body">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:118px">time</th>
-              <th style="width:92px">agent</th>
-              <th style="width:142px">type</th>
-              <th style="width:94px">amount</th>
-              <th style="width:88px">source</th>
-              <th>reference / details</th>
-              <th style="width:100px">ledger id</th>
-            </tr>
-          </thead>
-          <tbody id="ledger-body"></tbody>
-        </table>
-      </div>
-    </section>
+    </main>
   </div>
 
   <script>
@@ -429,7 +497,64 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    const STORAGE_PREFIX = 'aol:mcp-ledger-console:v1';
+    const PANEL_IDS = ['agents', 'timeline', 'funnel', 'tools', 'sql', 'ledger'];
+    const TABLE_IDS = ['agents', 'funnel', 'tools', 'ledger'];
+    const tableState = {};
+    const defaultTableState = {
+      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'capital', 'ledger', 'note'], sortBy: null, sortDir: 'desc' },
+      funnel: { order: ['stage', 'agents', 'calls', 'note'], sortBy: null, sortDir: 'desc' },
+      tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], sortBy: null, sortDir: 'desc' },
+      ledger: { order: ['time', 'agent', 'type', 'amount', 'source', 'details', 'ledgerId'], sortBy: null, sortDir: 'desc' },
+    };
+    let panelOrder = loadJson('panels', PANEL_IDS);
+    let draggedPanelId = null;
+    let draggedColumn = null;
+    let suppressHeaderClickUntil = 0;
     const dashboardSource = new URLSearchParams(window.location.search).get('source');
+
+    function storageKey(name) {
+      return `${STORAGE_PREFIX}:${name}`;
+    }
+
+    function loadJson(name, fallback) {
+      try {
+        const raw = localStorage.getItem(storageKey(name));
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function saveJson(name, value) {
+      try {
+        localStorage.setItem(storageKey(name), JSON.stringify(value));
+      } catch {}
+    }
+
+    function normalizedOrder(savedOrder, defaultOrder) {
+      const saved = Array.isArray(savedOrder) ? savedOrder : [];
+      return [
+        ...saved.filter((id) => defaultOrder.includes(id)),
+        ...defaultOrder.filter((id) => !saved.includes(id)),
+      ];
+    }
+
+    panelOrder = normalizedOrder(panelOrder, PANEL_IDS);
+
+    function loadTableState(tableId) {
+      const defaults = defaultTableState[tableId];
+      const saved = loadJson(`table:${tableId}`, {});
+      return {
+        order: normalizedOrder(saved.order, defaults.order),
+        sortBy: defaults.order.includes(saved.sortBy) ? saved.sortBy : defaults.sortBy,
+        sortDir: saved.sortDir === 'asc' ? 'asc' : 'desc',
+      };
+    }
+
+    for (const tableId of TABLE_IDS) {
+      tableState[tableId] = loadTableState(tableId);
+    }
     const esc = (value) => String(value ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -538,6 +663,266 @@
       return parts.join(' ');
     }
 
+    function agentCapital(row) {
+      return Number(row.capital_available_sats || 0)
+        + Number(row.capital_locked_sats || 0)
+        + Number(row.capital_pending_deposit_sats || 0)
+        + Number(row.capital_pending_close_sats || 0);
+    }
+
+    function compareValues(a, b) {
+      const an = Number(a);
+      const bn = Number(b);
+      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      return String(a ?? '').localeCompare(String(b ?? ''));
+    }
+
+    function noteClass(hasFailure) {
+      return hasFailure ? 'warn' : 'muted';
+    }
+
+    const tableColumns = {
+      agents: [
+        { id: 'agent', label: 'agent', width: 82, className: 'cyan', html: (row) => esc(short(row.agent_id, 12)), sort: (row) => row.agent_id || '' },
+        { id: 'calls', label: 'calls', width: 44, className: 'mono', html: (row) => fmtNum(row.tool_calls), sort: (row) => Number(row.tool_calls || 0) },
+        { id: 'fail', label: 'fail', width: 38, className: (row) => `${Number(row.failed_calls || 0) ? 'bad' : 'ok'} mono`, html: (row) => fmtNum(row.failed_calls), sort: (row) => Number(row.failed_calls || 0) },
+        { id: 'stage', label: 'stage', width: 86, html: (row) => esc(short(row.last_workflow_stage || '-', 14)), sort: (row) => row.last_workflow_stage || '' },
+        { id: 'lastTool', label: 'last tool', html: (row) => esc(short(row.last_tool || '-', 28)), sort: (row) => row.last_tool || '' },
+        { id: 'capital', label: 'capital', width: 88, className: 'mono', html: (row) => fmtSats(agentCapital(row)), sort: (row) => agentCapital(row) },
+        { id: 'ledger', label: 'ledger', width: 78, className: 'mono', html: (row) => fmtNum(row.public_ledger_entries || 0), sort: (row) => Number(row.public_ledger_entries || 0) },
+        {
+          id: 'note',
+          label: 'activity note',
+          width: 132,
+          className: (row) => noteClass(Number(row.failed_calls || 0) > 0),
+          title: () => 'MCP calls for this agent compared with the most active MCP agent. Ledger-only means this ID appears in ledger data but not MCP telemetry.',
+          html: (row, context) => {
+            const calls = Number(row.tool_calls || 0);
+            const fail = Number(row.failed_calls || 0);
+            return esc(calls > 0
+              ? `${fmtNum(calls)} calls / max ${fmtNum(context.maxCalls)}; ${fmtNum(fail)} fail`
+              : 'ledger-only; 0 MCP calls');
+          },
+          sort: (row) => Number(row.tool_calls || 0),
+        },
+      ],
+      funnel: [
+        { id: 'stage', label: 'stage', html: (row) => esc(row.workflow_stage), sort: (row) => row.workflow_stage || '' },
+        { id: 'agents', label: 'agents', width: 52, className: 'mono', html: (row) => fmtNum(row.agents), sort: (row) => Number(row.agents || 0) },
+        { id: 'calls', label: 'calls', width: 72, className: 'mono', html: (row) => fmtNum(row.tool_calls), sort: (row) => Number(row.tool_calls || 0) },
+        {
+          id: 'note',
+          label: 'stage note',
+          width: 134,
+          className: 'muted',
+          title: () => 'Agents that reached this workflow stage compared with the largest stage.',
+          html: (row, context) => `${fmtNum(row.agents)} agents / max ${fmtNum(context.maxAgents)}`,
+          sort: (row) => Number(row.agents || 0),
+        },
+      ],
+      tools: [
+        { id: 'tool', label: 'tool', html: (row) => esc(short(row.tool_name, 34)), sort: (row) => row.tool_name || '' },
+        { id: 'group', label: 'group', width: 72, html: (row) => esc(short(row.tool_group, 13)), sort: (row) => row.tool_group || '' },
+        { id: 'calls', label: 'calls', width: 44, className: 'mono', html: (row) => fmtNum(row.calls), sort: (row) => Number(row.calls || 0) },
+        { id: 'fail', label: 'fail', width: 44, className: (row) => `${Number(row.failures || 0) ? 'bad' : 'ok'} mono`, html: (row) => fmtNum(row.failures), sort: (row) => Number(row.failures || 0) },
+        {
+          id: 'note',
+          label: 'usage note',
+          width: 128,
+          className: (row) => noteClass(Number(row.failures || 0) > 0),
+          title: () => 'Calls to this tool compared with the most-used tool.',
+          html: (row, context) => `${fmtNum(row.calls)} calls / max ${fmtNum(context.maxCalls)}; ${fmtNum(row.failures || 0)} fail`,
+          sort: (row) => Number(row.calls || 0),
+        },
+      ],
+      ledger: [
+        { id: 'time', label: 'time', width: 118, html: (row) => fmtTime(tsOf(row)), sort: (row) => tsOf(row) },
+        { id: 'agent', label: 'agent', width: 92, className: 'cyan', html: (row) => esc(short(eventAgent(row) || '-', 14)), sort: (row) => eventAgent(row) || '' },
+        { id: 'type', label: 'type', width: 142, html: (row) => esc(short(row.type || '-', 24)), sort: (row) => row.type || '' },
+        { id: 'amount', label: 'amount', width: 94, className: 'mono', html: (row) => fmtSats(row.amount_sats), sort: (row) => Number(row.amount_sats || 0) },
+        { id: 'source', label: 'source', width: 88, html: (row) => esc(short(row.source || '-', 14)), sort: (row) => row.source || '' },
+        { id: 'details', label: 'reference / details', html: (row) => esc(short(detailText(row), 96)), sort: (row) => detailText(row) },
+        { id: 'ledgerId', label: 'ledger id', width: 100, className: 'dim', html: (row) => esc(short(row.ledger_id || '-', 14)), sort: (row) => row.ledger_id || '' },
+      ],
+    };
+
+    function orderedColumns(tableId) {
+      const columns = tableColumns[tableId] || [];
+      const defaultOrder = columns.map((col) => col.id);
+      const stateForTable = tableState[tableId];
+      stateForTable.order = normalizedOrder(stateForTable.order, defaultOrder);
+      return stateForTable.order
+        .map((id) => columns.find((col) => col.id === id))
+        .filter(Boolean);
+    }
+
+    function sortRows(tableId, rows, context = {}) {
+      const stateForTable = tableState[tableId];
+      if (!stateForTable?.sortBy) return rows;
+      const column = (tableColumns[tableId] || []).find((col) => col.id === stateForTable.sortBy);
+      if (!column?.sort) return rows;
+      const direction = stateForTable.sortDir === 'asc' ? 1 : -1;
+      return rows.slice().sort((a, b) => compareValues(column.sort(a, context), column.sort(b, context)) * direction);
+    }
+
+    function renderTableHead(tableId) {
+      const head = $(`${tableId}-head`);
+      const stateForTable = tableState[tableId];
+      head.innerHTML = `<tr>${orderedColumns(tableId).map((column) => {
+        const style = column.width ? ` style="width:${column.width}px"` : '';
+        const indicator = stateForTable.sortBy === column.id
+          ? `<span class="sort-indicator">${stateForTable.sortDir === 'asc' ? 'up' : 'down'}</span>`
+          : '';
+        return `<th data-table="${tableId}" data-col="${column.id}" draggable="true"${style} title="Click to sort. Drag left or right to reorder.">${esc(column.label)}${indicator}</th>`;
+      }).join('')}</tr>`;
+      setupColumnDrag(tableId);
+    }
+
+    function renderConfiguredTable(tableId, rows, options = {}) {
+      const context = options.context || {};
+      const sortedRows = sortRows(tableId, rows.slice(), context);
+      renderTableHead(tableId);
+      const columns = orderedColumns(tableId);
+      const body = $(`${tableId}-body`);
+      body.innerHTML = sortedRows.map((row) => {
+        const rowClass = options.rowClass ? options.rowClass(row) : '';
+        const rowAttrs = options.rowAttrs ? options.rowAttrs(row) : '';
+        const classAttr = rowClass ? ` class="${esc(rowClass)}"` : '';
+        return `<tr${classAttr}${rowAttrs ? ` ${rowAttrs}` : ''}>${columns.map((column) => {
+          const className = typeof column.className === 'function' ? column.className(row, context) : column.className;
+          const title = typeof column.title === 'function' ? column.title(row, context) : column.title;
+          return `<td${className ? ` class="${esc(className)}"` : ''}${title ? ` title="${esc(title)}"` : ''}>${column.html(row, context)}</td>`;
+        }).join('')}</tr>`;
+      }).join('');
+    }
+
+    function persistTableState(tableId) {
+      saveJson(`table:${tableId}`, tableState[tableId]);
+    }
+
+    function rerenderTable(tableId) {
+      if (tableId === 'agents') renderAgents();
+      if (tableId === 'funnel') renderFunnel();
+      if (tableId === 'tools') renderTools();
+      if (tableId === 'ledger') renderLedger();
+    }
+
+    function moveColumn(tableId, fromCol, toCol) {
+      if (!fromCol || !toCol || fromCol === toCol) return;
+      const stateForTable = tableState[tableId];
+      const next = stateForTable.order.filter((id) => id !== fromCol);
+      const targetIndex = next.indexOf(toCol);
+      next.splice(targetIndex < 0 ? next.length : targetIndex, 0, fromCol);
+      stateForTable.order = next;
+      persistTableState(tableId);
+      rerenderTable(tableId);
+    }
+
+    function toggleColumnSort(tableId, colId) {
+      const stateForTable = tableState[tableId];
+      if (stateForTable.sortBy === colId) {
+        stateForTable.sortDir = stateForTable.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        stateForTable.sortBy = colId;
+        stateForTable.sortDir = 'desc';
+      }
+      persistTableState(tableId);
+      rerenderTable(tableId);
+    }
+
+    function setupColumnDrag(tableId) {
+      for (const th of document.querySelectorAll(`th[data-table="${tableId}"][data-col]`)) {
+        th.addEventListener('click', () => {
+          if (Date.now() < suppressHeaderClickUntil) return;
+          toggleColumnSort(tableId, th.dataset.col);
+        });
+        th.addEventListener('dragstart', (event) => {
+          draggedColumn = { tableId, colId: th.dataset.col };
+          suppressHeaderClickUntil = Date.now() + 500;
+          th.classList.add('dragging');
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', `${tableId}:${th.dataset.col}`);
+        });
+        th.addEventListener('dragend', () => {
+          suppressHeaderClickUntil = Date.now() + 500;
+          draggedColumn = null;
+          th.classList.remove('dragging');
+          document.querySelectorAll('th.drop-target').forEach((node) => node.classList.remove('drop-target'));
+        });
+        th.addEventListener('dragover', (event) => {
+          if (!draggedColumn || draggedColumn.tableId !== tableId) return;
+          event.preventDefault();
+          th.classList.add('drop-target');
+        });
+        th.addEventListener('dragleave', () => {
+          th.classList.remove('drop-target');
+        });
+        th.addEventListener('drop', (event) => {
+          if (!draggedColumn || draggedColumn.tableId !== tableId) return;
+          event.preventDefault();
+          const fromCol = draggedColumn.colId;
+          const toCol = th.dataset.col;
+          suppressHeaderClickUntil = Date.now() + 500;
+          th.classList.remove('drop-target');
+          moveColumn(tableId, fromCol, toCol);
+        });
+      }
+    }
+
+    function applyPanelLayout() {
+      panelOrder = normalizedOrder(panelOrder, PANEL_IDS);
+      panelOrder.forEach((panelId, index) => {
+        const panel = document.querySelector(`[data-panel="${panelId}"]`);
+        const slot = document.querySelector(`[data-slot-index="${index}"]`);
+        if (panel && slot && panel.parentElement !== slot) slot.appendChild(panel);
+      });
+    }
+
+    function movePanel(fromPanel, toPanel) {
+      if (!fromPanel || !toPanel || fromPanel === toPanel) return;
+      const next = panelOrder.filter((id) => id !== fromPanel);
+      const targetIndex = next.indexOf(toPanel);
+      next.splice(targetIndex < 0 ? next.length : targetIndex, 0, fromPanel);
+      panelOrder = normalizedOrder(next, PANEL_IDS);
+      saveJson('panels', panelOrder);
+      applyPanelLayout();
+    }
+
+    function setupPanelDrag() {
+      for (const handle of document.querySelectorAll('[data-panel-drag]')) {
+        handle.addEventListener('dragstart', (event) => {
+          draggedPanelId = handle.dataset.panelDrag;
+          const panel = document.querySelector(`[data-panel="${draggedPanelId}"]`);
+          panel?.classList.add('dragging');
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', draggedPanelId);
+        });
+        handle.addEventListener('dragend', () => {
+          document.querySelectorAll('[data-panel].dragging').forEach((node) => node.classList.remove('dragging'));
+          document.querySelectorAll('.panel-slot.drag-over').forEach((node) => node.classList.remove('drag-over'));
+          draggedPanelId = null;
+        });
+      }
+
+      for (const slot of document.querySelectorAll('.panel-slot')) {
+        slot.addEventListener('dragover', (event) => {
+          if (!draggedPanelId) return;
+          event.preventDefault();
+          slot.classList.add('drag-over');
+        });
+        slot.addEventListener('dragleave', () => {
+          slot.classList.remove('drag-over');
+        });
+        slot.addEventListener('drop', (event) => {
+          if (!draggedPanelId) return;
+          event.preventDefault();
+          slot.classList.remove('drag-over');
+          const targetPanel = slot.querySelector('[data-panel]')?.dataset.panel;
+          if (targetPanel) movePanel(draggedPanelId, targetPanel);
+        });
+      }
+    }
+
     function combineAgents() {
       const mcpAgents = Array.isArray(state.data.mcpAgents) ? state.data.mcpAgents : [];
       const ledgerRows = Array.isArray(state.data.ledgerAgents?.entries) ? state.data.ledgerAgents.entries : [];
@@ -579,25 +964,11 @@
     function renderAgents() {
       const rows = combineAgents();
       const maxCalls = Math.max(...rows.map((r) => Number(r.tool_calls || 0)), 1);
-      $('agents-body').innerHTML = rows.map((row) => {
-        const fail = Number(row.failed_calls || 0);
-        const calls = Number(row.tool_calls || 0);
-        const selected = row.agent_id === state.selectedAgent ? ' class="selected"' : '';
-        const capital = Number(row.capital_available_sats || 0) + Number(row.capital_locked_sats || 0) + Number(row.capital_pending_deposit_sats || 0) + Number(row.capital_pending_close_sats || 0);
-        const activityNote = calls > 0
-          ? `${fmtNum(calls)} calls / max ${fmtNum(maxCalls)}; ${fmtNum(fail)} fail`
-          : 'ledger-only; 0 MCP calls';
-        return `<tr${selected} data-agent="${esc(row.agent_id)}">
-          <td class="cyan">${esc(short(row.agent_id, 12))}</td>
-          <td class="mono">${fmtNum(calls)}</td>
-          <td class="${fail ? 'bad' : 'ok'} mono">${fmtNum(fail)}</td>
-          <td>${esc(short(row.last_workflow_stage || '-', 14))}</td>
-          <td>${esc(short(row.last_tool || '-', 28))}</td>
-          <td class="mono">${fmtSats(capital)}</td>
-          <td class="mono">${fmtNum(row.public_ledger_entries || 0)}</td>
-          <td class="${fail ? 'warn' : 'muted'}" title="MCP calls for this agent compared with the most active MCP agent. Ledger-only means this ID appears in ledger data but not MCP telemetry.">${esc(activityNote)}</td>
-        </tr>`;
-      }).join('');
+      renderConfiguredTable('agents', rows, {
+        context: { maxCalls },
+        rowClass: (row) => row.agent_id === state.selectedAgent ? 'selected' : '',
+        rowAttrs: (row) => `data-agent="${esc(row.agent_id)}"`,
+      });
       for (const tr of $('agents-body').querySelectorAll('tr[data-agent]')) {
         tr.addEventListener('click', () => selectAgent(tr.dataset.agent));
       }
@@ -606,41 +977,21 @@
     function renderFunnel() {
       const rows = Array.isArray(state.data.funnel) ? state.data.funnel : [];
       const maxAgents = Math.max(...rows.map((r) => Number(r.agents || 0)), 1);
-      $('funnel-body').innerHTML = rows.map((row) => `<tr>
-        <td>${esc(row.workflow_stage)}</td>
-        <td class="mono">${fmtNum(row.agents)}</td>
-        <td class="mono">${fmtNum(row.tool_calls)}</td>
-        <td class="muted" title="Agents that reached this workflow stage compared with the largest stage.">${fmtNum(row.agents)} agents / max ${fmtNum(maxAgents)}</td>
-      </tr>`).join('');
+      renderConfiguredTable('funnel', rows, { context: { maxAgents } });
     }
 
     function renderTools() {
       const rows = (Array.isArray(state.data.tools) ? state.data.tools : []).slice(0, 42);
       const maxCalls = Math.max(...rows.map((r) => Number(r.calls || 0)), 1);
-      $('tools-body').innerHTML = rows.map((row) => `<tr>
-        <td>${esc(short(row.tool_name, 34))}</td>
-        <td>${esc(short(row.tool_group, 13))}</td>
-        <td class="mono">${fmtNum(row.calls)}</td>
-        <td class="${row.failures ? 'bad' : 'ok'} mono">${fmtNum(row.failures)}</td>
-        <td class="${row.failures ? 'warn' : 'muted'}" title="Calls to this tool compared with the most-used tool.">${fmtNum(row.calls)} calls / max ${fmtNum(maxCalls)}; ${fmtNum(row.failures || 0)} fail</td>
-      </tr>`).join('');
+      renderConfiguredTable('tools', rows, { context: { maxCalls } });
     }
 
     function renderLedger() {
       const payload = state.data.ledgerRecent || { entries: [], total: 0, limit: state.ledgerLimit, offset: state.ledgerOffset };
       $('ledger-page').textContent = `${fmtNum(payload.offset || 0)}-${fmtNum((payload.offset || 0) + (payload.entries || []).length)} / ${fmtNum(payload.total || 0)}`;
-      $('ledger-body').innerHTML = (payload.entries || []).map((entry) => {
-        const agent = eventAgent(entry);
-        return `<tr data-agent="${esc(agent)}">
-          <td>${fmtTime(tsOf(entry))}</td>
-          <td class="cyan">${esc(short(agent || '-', 14))}</td>
-          <td>${esc(short(entry.type || '-', 24))}</td>
-          <td class="mono">${fmtSats(entry.amount_sats)}</td>
-          <td>${esc(short(entry.source || '-', 14))}</td>
-          <td>${esc(short(detailText(entry), 96))}</td>
-          <td class="dim">${esc(short(entry.ledger_id || '-', 14))}</td>
-        </tr>`;
-      }).join('');
+      renderConfiguredTable('ledger', payload.entries || [], {
+        rowAttrs: (entry) => `data-agent="${esc(eventAgent(entry))}"`,
+      });
       for (const tr of $('ledger-body').querySelectorAll('tr[data-agent]')) {
         if (tr.dataset.agent) tr.addEventListener('click', () => selectAgent(tr.dataset.agent));
       }
@@ -802,6 +1153,11 @@
     }
 
     $('refresh').addEventListener('click', refreshAll);
+    $('reset-layout').addEventListener('click', () => {
+      localStorage.removeItem(storageKey('panels'));
+      for (const tableId of TABLE_IDS) localStorage.removeItem(storageKey(`table:${tableId}`));
+      window.location.reload();
+    });
     $('agent-filter').addEventListener('input', renderAgents);
     $('clear-agent').addEventListener('click', () => {
       state.selectedAgent = null;
@@ -830,6 +1186,9 @@
       });
     }
 
+    applyPanelLayout();
+    setupPanelDrag();
+    for (const tableId of TABLE_IDS) renderTableHead(tableId);
     refreshAll();
     setInterval(refreshAll, 30_000);
   </script>
