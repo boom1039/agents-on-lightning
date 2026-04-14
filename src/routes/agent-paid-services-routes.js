@@ -4,7 +4,7 @@
  * Paid analytics gateway, capital ledger, help concierge.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { requireAuth } from '../identity/auth.js';
 import { checkAndIncrement, rateLimit } from '../identity/rate-limiter.js';
@@ -22,6 +22,103 @@ function depositExplorerLinks(address) {
     explorers: {
       mempool: `https://mempool.space/address/${address}`,
       blockstream: `https://blockstream.info/address/${address}`,
+    },
+  };
+}
+
+function sha256Hex(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+function capitalProofContext({ endpoint, mode }) {
+  const rail = mode === 'lightning'
+    ? 'Lightning-funded capital deposit'
+    : 'on-chain capital deposit';
+  return {
+    source_of_truth: 'proof_ledger',
+    endpoint,
+    rail,
+    promise: 'Capital deposit lifecycle events are signed into the Proof Ledger when proof_ledger is enabled.',
+    timing: mode === 'lightning'
+      ? 'Lightning payment, bridge, on-chain confirmation, or wallet fallback may take roughly 20-40+ minutes; pending bridge state is not available channel capital.'
+      : 'On-chain deposits become available capital only after the required confirmations; block timing is approximate.',
+    proof_meaning: 'proof_id identifies the signed Proof Ledger row. proof_hash links that row into the global proof chain.',
+  };
+}
+
+function summarizeCapitalProof(entry) {
+  if (!entry || typeof entry !== 'object' || !entry.proof_id) return null;
+  return {
+    proof_id: entry.proof_id,
+    proof_hash: entry.proof_hash || null,
+    type: entry.type || null,
+    status: entry.status || null,
+    amount_sats: entry.amount_sats ?? null,
+    created_at_ms: entry._ts || entry.created_at_ms || null,
+    public_safe_refs: entry.public_safe_refs || {},
+  };
+}
+
+async function readCapitalProofEvents(daemon, agentId) {
+  if (!daemon?.capitalLedger?.readActivity) return [];
+  try {
+    const result = await daemon.capitalLedger.readActivity({ agentId, limit: 500, offset: 0 });
+    return Array.isArray(result?.entries)
+      ? result.entries.map(summarizeCapitalProof).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function proofsForDeposit(deposit, proofEvents) {
+  const addressHash = deposit?.address ? sha256Hex(deposit.address) : null;
+  const flowHash = deposit?.flow_id ? sha256Hex(deposit.flow_id) : null;
+  const txid = deposit?.txid || null;
+  return proofEvents.filter((proof) => {
+    const refs = proof.public_safe_refs || {};
+    return Boolean(
+      (txid && refs.txid === txid)
+      || (addressHash && refs.address_hash === addressHash)
+      || (flowHash && refs.flow_hash === flowHash)
+    );
+  });
+}
+
+function attachDepositProofs(deposit, proofEvents) {
+  const proofs = proofsForDeposit(deposit, proofEvents);
+  const latest = proofs[0] || null;
+  return {
+    ...deposit,
+    proof_chain: {
+      source_of_truth: 'proof_ledger',
+      proof_count: proofs.length,
+      latest_proof_id: latest?.proof_id || null,
+      latest_proof_hash: latest?.proof_hash || null,
+      proofs,
+    },
+  };
+}
+
+function attachFlowProofs(flow, proofEvents) {
+  const flowHash = flow?.flow_id ? sha256Hex(flow.flow_id) : null;
+  const txid = flow?.onchain_txid || null;
+  const proofs = proofEvents.filter((proof) => {
+    const refs = proof.public_safe_refs || {};
+    return Boolean(
+      (flowHash && refs.flow_hash === flowHash)
+      || (txid && refs.txid === txid)
+    );
+  });
+  const latest = proofs[0] || null;
+  return {
+    ...flow,
+    proof_chain: {
+      source_of_truth: 'proof_ledger',
+      proof_count: proofs.length,
+      latest_proof_id: latest?.proof_id || null,
+      latest_proof_hash: latest?.proof_hash || null,
+      proofs,
     },
   };
 }
@@ -508,13 +605,17 @@ export function agentPaidServicesRoutes(daemon) {
       store: idempotencyStore,
       scope: 'capital:deposit',
       handler: async () => {
-        const { address } = await daemon.depositTracker.generateAddress(req.agentId);
+        const generated = await daemon.depositTracker.generateAddress(req.agentId);
+        const { address } = generated;
         const explorerLinks = depositExplorerLinks(address);
         return {
           statusCode: 200,
           body: {
             agent_id: req.agentId,
             address,
+            proof_id: generated.proof_id || null,
+            proof_hash: generated.proof_hash || null,
+            source_of_truth: generated.source_of_truth || null,
             ...explorerLinks,
             minimum_deposit_sats: 546,
             confirmations_required: daemon.depositTracker._confirmationsRequired,
@@ -526,6 +627,10 @@ export function agentPaidServicesRoutes(daemon) {
               dust: 'Deposits below 10,000 sats are credited but not economical to return on-chain.',
               reuse: 'Each address is single-use. Call this endpoint again for a fresh address for each deposit.',
             },
+            proof_context: capitalProofContext({
+              endpoint: 'POST /api/v1/capital/deposit',
+              mode: 'onchain',
+            }),
             cost_summary: { action: 'deposit', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' },
           },
         };
@@ -588,11 +693,16 @@ export function agentPaidServicesRoutes(daemon) {
           };
         }
         const flow = await daemon.lightningCapitalFunder.createFlow(req.agentId, amount_sats);
+        const proofEvents = await readCapitalProofEvents(daemon, req.agentId);
         return {
           statusCode: 200,
           body: {
-            ...flow,
+            ...attachFlowProofs(flow, proofEvents),
             instructions: 'Pay the returned Lightning invoice outside the site, then poll the status_url until the deposit is confirmed.',
+            proof_context: capitalProofContext({
+              endpoint: 'POST /api/v1/capital/deposit-lightning',
+              mode: 'lightning',
+            }),
             cost_summary: { action: 'deposit_lightning', amount_sats: 0, fee_sats: 0, total_sats: 0, unit: 'sat' },
           },
         };
@@ -672,7 +782,14 @@ export function agentPaidServicesRoutes(daemon) {
           see: 'POST /api/v1/capital/deposit-lightning',
         });
       }
-      return res.json(flow);
+      const proofEvents = await readCapitalProofEvents(daemon, req.agentId);
+      return res.json({
+        ...attachFlowProofs(flow, proofEvents),
+        proof_context: capitalProofContext({
+          endpoint: 'GET /api/v1/capital/deposit-lightning/:flowId',
+          mode: 'lightning',
+        }),
+      });
     } catch (err) {
       console.error(`[Gateway] ${req.path}: ${err.message}`);
       return err500Internal(res, 'reading Lightning capital deposit status');
@@ -708,11 +825,16 @@ export function agentPaidServicesRoutes(daemon) {
               },
             };
           }
+          const proofEvents = await readCapitalProofEvents(daemon, req.agentId);
           return {
             statusCode: 200,
             body: {
-              ...flow,
+              ...attachFlowProofs(flow, proofEvents),
               message: 'Retry requested. The site will try the bridge again.',
+              proof_context: capitalProofContext({
+                endpoint: 'POST /api/v1/capital/deposit-lightning/:flowId/retry',
+                mode: 'lightning',
+              }),
             },
           };
         } catch (err) {
@@ -750,9 +872,14 @@ export function agentPaidServicesRoutes(daemon) {
       const deposits = daemon.lightningCapitalFunder
         ? daemon.lightningCapitalFunder.annotateDeposits(req.agentId, rawDeposits)
         : rawDeposits;
+      const proofEvents = await readCapitalProofEvents(daemon, req.agentId);
       res.json({
         agent_id: req.agentId,
-        deposits,
+        deposits: deposits.map((deposit) => attachDepositProofs(deposit, proofEvents)),
+        proof_context: capitalProofContext({
+          endpoint: 'GET /api/v1/capital/deposits',
+          mode: 'onchain',
+        }),
         learn: {
           statuses: {
             watching: 'Address generated, waiting for incoming transaction.',

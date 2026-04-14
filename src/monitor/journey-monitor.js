@@ -11,6 +11,7 @@ import {
   ledgerRecent,
   ledgerReconciliation,
   ledgerSummary,
+  proofLedgerSummary,
 } from './ledger-analytics.js';
 
 const LIVE_STATE_EVENT_TYPES = new Set([
@@ -643,6 +644,10 @@ class JourneyMonitor {
 
   async ledgerReconciliation() {
     return ledgerReconciliation(this.daemon);
+  }
+
+  async proofLedgerSummary() {
+    return proofLedgerSummary(this.daemon);
   }
 
   async query(sql, params = []) {

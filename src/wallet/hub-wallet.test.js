@@ -76,6 +76,33 @@ async function withProofHubWallet(node, fn) {
   }
 }
 
+test('proof-backed hub wallet returns proof id when creating deposit invoice', async () => {
+  const node = {
+    request: async (method, path, body) => {
+      assert.equal(method, 'POST');
+      assert.equal(path, '/v1/invoices');
+      assert.equal(body.value, '1500');
+      return {
+        r_hash: 'invoice-hash-1',
+        payment_request: 'lnbc1500n1test',
+      };
+    },
+  };
+
+  await withProofHubWallet(node, async ({ hubWallet, proofLedger }) => {
+    const invoice = await hubWallet.generateDepositInvoice('agent-a', 1500, 'test deposit');
+    assert.match(invoice.proof_id, /^proof-/);
+    assert.match(invoice.proof_group_id, /^hub-deposit:/);
+
+    const proofs = proofLedger.listProofs({ agentId: 'agent-a', limit: 10 });
+    assert.equal(proofs.length, 1);
+    assert.equal(proofs[0].proof_id, invoice.proof_id);
+    assert.equal(proofs[0].proof_group_id, invoice.proof_group_id);
+    assert.equal(proofs[0].money_event_type, 'hub_deposit_invoice_created');
+    assert.equal(proofs[0].primary_amount_sats, 1500);
+  });
+});
+
 test('proof-backed hub wallet credits settled deposits once and syncs state cache', async () => {
   const node = {
     request: async (method, path) => {

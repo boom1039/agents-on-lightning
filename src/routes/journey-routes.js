@@ -432,6 +432,10 @@ export function journeyRoutes() {
     getJourneyMonitor().ledgerReconciliation()
   ));
 
+  router.get('/api/analytics/proof-ledger/summary', analyticsHandler(() =>
+    getJourneyMonitor().proofLedgerSummary()
+  ));
+
   router.post('/api/analytics/query', async (req, res) => {
     const rejection = rejectUnauthorizedAnalyticsQueryRoute(req, res);
     if (rejection) return rejection;

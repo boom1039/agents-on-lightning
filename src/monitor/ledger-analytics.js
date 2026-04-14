@@ -179,6 +179,100 @@ function summarizeCapitalBalances(balances = {}) {
   return totals;
 }
 
+function proofRowSummary(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    proof_id: row.proof_id,
+    global_sequence: row.global_sequence,
+    proof_group_id: row.proof_group_id || null,
+    proof_record_type: row.proof_record_type,
+    money_event_type: row.money_event_type,
+    money_event_status: row.money_event_status,
+    agent_id: row.agent_id || null,
+    agent_proof_sequence: row.agent_proof_sequence || null,
+    event_source: row.event_source,
+    authorization_method: row.authorization_method,
+    primary_amount_sats: row.primary_amount_sats,
+    proof_hash: row.proof_hash,
+    previous_global_proof_hash: row.previous_global_proof_hash,
+    previous_agent_proof_hash: row.previous_agent_proof_hash,
+    signing_key_id: row.signing_key_id,
+    created_at_ms: row.created_at_ms,
+    public_safe_refs: row.public_safe_refs || {},
+  };
+}
+
+function proofBalanceFields(balance) {
+  const safe = balance && typeof balance === 'object' ? balance : {};
+  return {
+    wallet_ecash_sats: Number(safe.wallet_ecash_sats || 0),
+    wallet_hub_sats: Number(safe.wallet_hub_sats || 0),
+    capital_available_sats: Number(safe.capital_available_sats || 0),
+    capital_locked_sats: Number(safe.capital_locked_sats || 0),
+    capital_pending_deposit_sats: Number(safe.capital_pending_deposit_sats || 0),
+    capital_pending_close_sats: Number(safe.capital_pending_close_sats || 0),
+    capital_service_spent_sats: Number(safe.capital_service_spent_sats || 0),
+    routing_pnl_sats: Number(safe.routing_pnl_sats || 0),
+    total_tracked_sats: Number(safe.total_tracked_sats || 0),
+  };
+}
+
+export async function proofLedgerSummary(daemon) {
+  const proofLedger = daemon?.proofLedger;
+  if (!proofLedger) {
+    return {
+      source_of_truth: 'proof_ledger',
+      available: false,
+      status: 'unavailable',
+      explanation: 'Proof Ledger is not enabled for this runtime.',
+    };
+  }
+
+  const latestGlobal = proofLedger.getLatestGlobalProof();
+  const latestLiabilityCheckpoint = proofLedger.getLatestProofByRecordType('liability_checkpoint');
+  const latestReserveSnapshot = proofLedger.getLatestProofByRecordType('reserve_snapshot');
+  const liabilityTotals = proofBalanceFields(proofLedger.getLiabilityTotals());
+  const reserveRefs = latestReserveSnapshot?.public_safe_refs || {};
+  const reserveTotal = Number(reserveRefs.total_reserve_sats || 0);
+  const liabilityTotal = Number(liabilityTotals.total_tracked_sats || 0);
+  const reserveSurplus = reserveTotal - liabilityTotal;
+
+  return {
+    source_of_truth: 'proof_ledger',
+    available: true,
+    status: latestGlobal ? 'live' : 'not_started',
+    latest_global_proof: proofRowSummary(latestGlobal),
+    proof_rows: {
+      total: proofLedger.countProofs(),
+      agent_count: proofLedger.listAgentIds().length,
+    },
+    proof_of_liabilities: {
+      live_derived_liability_totals: liabilityTotals,
+      total_liability_sats: liabilityTotal,
+      latest_signed_liability_checkpoint: proofRowSummary(latestLiabilityCheckpoint),
+    },
+    proof_of_reserves: {
+      status: latestReserveSnapshot ? 'operator_attested_snapshot_available' : 'not_yet_published',
+      latest_reserve_snapshot: proofRowSummary(latestReserveSnapshot),
+      total_reserve_sats: reserveTotal,
+      reserve_sufficient: reserveRefs.reserve_sufficient ?? null,
+      reserve_surplus_sats: reserveSurplus,
+      reserve_coverage_ratio: liabilityTotal > 0 ? reserveTotal / liabilityTotal : null,
+      reserve_totals_by_source: Array.isArray(reserveRefs.reserve_totals_by_source)
+        ? reserveRefs.reserve_totals_by_source
+        : [],
+      limitation: 'Reserve snapshots are operator-attested until stronger external reserve evidence is added.',
+    },
+    global_chain: proofLedger.verifyChain(),
+    public_key: proofLedger.getPublicKeyInfo(),
+    panel_sources: {
+      route: '/api/analytics/proof-ledger/summary',
+      store: 'SQLite proof_ledger',
+      meaning: 'Proof Ledger explains signed money state; DuckDB MCP telemetry explains agent behavior.',
+    },
+  };
+}
+
 async function readCapitalBalances(daemon) {
   if (daemon?.proofLedger?.getAllCapitalBalances) {
     return daemon.proofLedger.getAllCapitalBalances();
@@ -269,6 +363,13 @@ export async function ledgerAgents(daemon, options = {}) {
         wallet_withdrawal_sats: 0,
         transfer_sats: 0,
         capital_ledger_entries: 0,
+        proof_rows: 0,
+        proof_total_tracked_sats: 0,
+        wallet_ecash_sats: 0,
+        wallet_hub_sats: 0,
+        latest_proof_id: null,
+        latest_proof_hash: null,
+        latest_proof_sequence: null,
         last_ledger_at: null,
         capital_available_sats: 0,
         capital_locked_sats: 0,
@@ -311,6 +412,22 @@ export async function ledgerAgents(daemon, options = {}) {
     row.total_routing_pnl_sats = Number(balance.total_routing_pnl || 0);
   }
 
+  if (daemon?.proofLedger?.listAgentIds) {
+    for (const agentId of daemon.proofLedger.listAgentIds()) {
+      const row = ensure(agentId);
+      const balance = proofBalanceFields(daemon.proofLedger.getAgentBalance(agentId));
+      const latest = daemon.proofLedger.getLatestAgentProof(agentId);
+      row.proof_rows = daemon.proofLedger.countProofs({ agentId });
+      row.proof_total_tracked_sats = balance.total_tracked_sats;
+      row.wallet_ecash_sats = balance.wallet_ecash_sats;
+      row.wallet_hub_sats = balance.wallet_hub_sats;
+      row.latest_proof_id = latest?.proof_id || null;
+      row.latest_proof_hash = latest?.proof_hash || null;
+      row.latest_proof_sequence = latest?.global_sequence || null;
+      row.last_ledger_at = Math.max(row.last_ledger_at || 0, Number(latest?.created_at_ms || 0)) || row.last_ledger_at;
+    }
+  }
+
   const filteredAgent = typeof options.agentId === 'string' && options.agentId.trim()
     ? options.agentId.trim()
     : null;
@@ -348,6 +465,15 @@ export async function ledgerAgent(daemon, agentId, options = {}) {
       offset: normalizeOffset(options.capitalOffset),
     }),
   ]);
+  const proofLedger = daemon?.proofLedger || null;
+  const proofBalance = proofLedger ? proofBalanceFields(proofLedger.getAgentBalance(normalizedAgent)) : null;
+  const latestAgentProof = proofLedger ? proofLedger.getLatestAgentProof(normalizedAgent) : null;
+  const latestCheckpoint = proofLedger ? proofLedger.getLatestProofByRecordType('liability_checkpoint') : null;
+  const checkpointSequence = Number(
+    latestCheckpoint?.public_safe_refs?.checkpointed_through_global_sequence
+      || latestCheckpoint?.global_sequence
+      || 0,
+  );
 
   const publicEntries = recent.entries || [];
   const capitalEntries = (capitalActivity.entries || []).map(sanitizeLedgerEntry);
@@ -363,6 +489,14 @@ export async function ledgerAgent(daemon, agentId, options = {}) {
     capital_activity: capitalEntries,
     capital_activity_total: capitalActivity.total,
     capital_balance: capitalBalances?.[normalizedAgent] || null,
+    proof_balance: proofBalance,
+    proof_total: proofLedger ? proofLedger.countProofs({ agentId: normalizedAgent }) : 0,
+    latest_agent_proof: proofRowSummary(latestAgentProof),
+    agent_chain: proofLedger ? proofLedger.verifyChain({ agentId: normalizedAgent }) : null,
+    included_in_latest_liability_checkpoint: latestAgentProof
+      ? checkpointSequence >= Number(latestAgentProof.global_sequence || 0)
+      : false,
+    latest_liability_checkpoint: proofRowSummary(latestCheckpoint),
     timeline,
   };
 }

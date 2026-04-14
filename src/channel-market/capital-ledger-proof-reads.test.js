@@ -165,7 +165,7 @@ test('capital ledger write methods append signed proof rows for money transition
     await capitalLedger.refundServiceSpend('agent-write', 40, 'svc-ref-2', 'analytics', 'partial_refund');
     await capitalLedger.creditRevenue('agent-write', 25, 'forward:1713021600000:12345');
     await capitalLedger.creditEcashFunding('agent-write', 30, 'ecash-fund:flow-1');
-    await capitalLedger.recordLifecycleProof('agent-write', {
+    const lifecycleProof = await capitalLedger.recordLifecycleProof('agent-write', {
       moneyEventType: 'capital_withdrawal_broadcast',
       moneyEventStatus: 'submitted',
       eventSource: 'capital_withdrawal',
@@ -173,6 +173,17 @@ test('capital ledger write methods append signed proof rows for money transition
       reference: 'withdraw-broadcast-ref',
       publicSafeRefs: { txid: 'tx-broadcast-1', amount_sats: 10 },
     });
+    const fundingActivity = await capitalLedger.recordFundingEvent('agent-write', 'lightning_invoice_created', {
+      amount_sats: 500,
+      source: 'lightning_boltz_reverse',
+      status: 'invoice_created',
+      flow_id: 'flow-write-proof',
+      reference: 'flow-write-proof',
+    });
+
+    assert.match(lifecycleProof.proof_id, /^proof-/);
+    assert.equal(fundingActivity.source_of_truth, 'proof_ledger');
+    assert.match(fundingActivity.proof_id, /^proof-/);
 
     const proofs = proofLedger.listProofs({ agentId: 'agent-write', limit: 20 }).reverse();
     assert.deepEqual(
@@ -188,6 +199,7 @@ test('capital ledger write methods append signed proof rows for money transition
         'routing_revenue_credited',
         'capital_ecash_funding_credited',
         'capital_withdrawal_broadcast',
+        'lightning_capital_invoice_created',
       ],
     );
     assert(proofs.every((proof) => proofLedger.verifyProof(proof).valid));

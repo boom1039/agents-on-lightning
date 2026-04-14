@@ -130,10 +130,11 @@ export class DepositTracker {
       flow_id: metadata.flow_id || null,
     };
 
+    let proof = null;
     if (this._proofLedger?.appendProof) {
       const source = metadata.source || 'onchain';
       const addressHash = sha256Hex(address);
-      await this._proofLedger.appendProof({
+      proof = await this._proofLedger.appendProof({
         idempotency_key: `capital-deposit-address-created:${agentId}:${addressHash}`,
         proof_record_type: 'money_lifecycle',
         money_event_type: 'capital_deposit_address_created',
@@ -154,7 +155,12 @@ export class DepositTracker {
     await this._persist();
     console.log(`[DepositTracker] Generated address ${address} for agent ${agentId}`);
 
-    return { address };
+    return {
+      address,
+      proof_id: proof?.proof_id || null,
+      proof_hash: proof?.proof_hash || null,
+      source_of_truth: proof ? 'proof_ledger' : null,
+    };
   }
 
   // ---------------------------------------------------------------------------

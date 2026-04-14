@@ -47,6 +47,62 @@ function fakeDaemon() {
         total: agentId === 'agent-route' || !agentId ? 1 : 0,
       }),
     },
+    proofLedger: {
+      getLatestGlobalProof: () => ({
+        proof_id: 'proof-route-1',
+        global_sequence: 1,
+        proof_record_type: 'money_event',
+        money_event_type: 'hub_deposit_settled',
+        money_event_status: 'settled',
+        agent_id: 'agent-route',
+        event_source: 'hub_wallet',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: 1000,
+        proof_hash: 'hash-route-1',
+        created_at_ms: 2000,
+        public_safe_refs: { amount_sats: 1000, status: 'settled' },
+      }),
+      getLatestProofByRecordType: () => null,
+      getLiabilityTotals: () => ({
+        wallet_ecash_sats: 0,
+        wallet_hub_sats: 1000,
+        capital_available_sats: 0,
+        capital_locked_sats: 0,
+        capital_pending_deposit_sats: 0,
+        capital_pending_close_sats: 0,
+        capital_service_spent_sats: 0,
+        routing_pnl_sats: 0,
+        total_tracked_sats: 1000,
+      }),
+      countProofs: () => 1,
+      listAgentIds: () => ['agent-route'],
+      getAgentBalance: () => ({
+        wallet_ecash_sats: 0,
+        wallet_hub_sats: 1000,
+        capital_available_sats: 0,
+        capital_locked_sats: 0,
+        capital_pending_deposit_sats: 0,
+        capital_pending_close_sats: 0,
+        capital_service_spent_sats: 0,
+        routing_pnl_sats: 0,
+        total_tracked_sats: 1000,
+      }),
+      getLatestAgentProof: () => ({
+        proof_id: 'proof-route-1',
+        global_sequence: 1,
+        proof_record_type: 'money_event',
+        money_event_type: 'hub_deposit_settled',
+        money_event_status: 'settled',
+        agent_id: 'agent-route',
+        event_source: 'hub_wallet',
+        authorization_method: 'system_settlement',
+        proof_hash: 'hash-route-1',
+        created_at_ms: 2000,
+        public_safe_refs: { amount_sats: 1000, status: 'settled' },
+      }),
+      verifyChain: () => ({ valid: true, checked: 1, latest_hash: 'hash-route-1', errors: [] }),
+      getPublicKeyInfo: () => ({ signing_key_id: 'ed25519:route-test' }),
+    },
   };
 }
 
@@ -104,6 +160,18 @@ test('journey agents dashboard and ledger analytics require operator auth remote
     assert.equal(ledgerJson.entries[0].payment_request, undefined);
     assert.equal(ledgerJson.entries[0].address, undefined);
     assert.equal(ledgerJson.entries[0].address_hint, '...eaddress');
+
+    const proofSummary = await fetch(new URL('/api/analytics/proof-ledger/summary', baseUrl), {
+      headers: {
+        'x-forwarded-for': '203.0.113.10',
+        authorization: auth,
+      },
+    });
+    assert.equal(proofSummary.status, 200);
+    const proofJson = await proofSummary.json();
+    assert.equal(proofJson.source_of_truth, 'proof_ledger');
+    assert.equal(proofJson.proof_of_liabilities.total_liability_sats, 1000);
+    assert.equal(proofJson.global_chain.valid, true);
   } finally {
     await stopJourneyMonitor();
     await new Promise((resolve) => server.close(resolve));

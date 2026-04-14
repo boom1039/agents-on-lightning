@@ -7,6 +7,7 @@ import {
   ledgerRecent,
   ledgerReconciliation,
   ledgerSummary,
+  proofLedgerSummary,
 } from './ledger-analytics.js';
 
 function fakeDaemon({ publicEntries = [], capitalBalances = {}, capitalActivity = [] } = {}) {
@@ -184,6 +185,84 @@ test('ledger analytics prefers proof ledger projections when available', async (
   assert.equal(agents.total, 1);
   assert.equal(agents.entries[0].agent_id, 'agent-proof');
   assert.equal(agents.entries[0].capital_available_sats, 250);
+});
+
+test('proof ledger summary exposes chain, liabilities, reserves, and source context', async () => {
+  const daemon = {
+    proofLedger: {
+      getLatestGlobalProof: () => ({
+        proof_id: 'proof-3',
+        global_sequence: 3,
+        proof_record_type: 'reserve_snapshot',
+        money_event_type: 'reserve_snapshot_created',
+        money_event_status: 'confirmed',
+        event_source: 'proof_ledger',
+        authorization_method: 'reserve_attestation',
+        proof_hash: 'hash-3',
+        created_at_ms: 3000,
+        public_safe_refs: {},
+      }),
+      getLatestProofByRecordType: (type) => {
+        if (type === 'liability_checkpoint') {
+          return {
+            proof_id: 'proof-2',
+            global_sequence: 2,
+            proof_record_type: 'liability_checkpoint',
+            money_event_type: 'liability_checkpoint_created',
+            money_event_status: 'confirmed',
+            event_source: 'proof_ledger',
+            authorization_method: 'liability_checkpoint',
+            proof_hash: 'hash-2',
+            created_at_ms: 2000,
+            public_safe_refs: { checkpointed_through_global_sequence: 1 },
+          };
+        }
+        if (type === 'reserve_snapshot') {
+          return {
+            proof_id: 'proof-3',
+            global_sequence: 3,
+            proof_record_type: 'reserve_snapshot',
+            money_event_type: 'reserve_snapshot_created',
+            money_event_status: 'confirmed',
+            event_source: 'proof_ledger',
+            authorization_method: 'reserve_attestation',
+            proof_hash: 'hash-3',
+            created_at_ms: 3000,
+            public_safe_refs: {
+              total_reserve_sats: 5000,
+              reserve_sufficient: true,
+              reserve_totals_by_source: [{ reserve_source_name: 'node', amount_sats: 5000 }],
+            },
+          };
+        }
+        return null;
+      },
+      getLiabilityTotals: () => ({
+        wallet_ecash_sats: 0,
+        wallet_hub_sats: 1000,
+        capital_available_sats: 1500,
+        capital_locked_sats: 0,
+        capital_pending_deposit_sats: 0,
+        capital_pending_close_sats: 0,
+        capital_service_spent_sats: 0,
+        routing_pnl_sats: 0,
+        total_tracked_sats: 2500,
+      }),
+      countProofs: () => 3,
+      listAgentIds: () => ['agent-proof'],
+      verifyChain: () => ({ valid: true, checked: 3, latest_hash: 'hash-3', errors: [] }),
+      getPublicKeyInfo: () => ({ signing_key_id: 'ed25519:test-key' }),
+    },
+  };
+
+  const summary = await proofLedgerSummary(daemon);
+  assert.equal(summary.available, true);
+  assert.equal(summary.proof_rows.total, 3);
+  assert.equal(summary.proof_of_liabilities.total_liability_sats, 2500);
+  assert.equal(summary.proof_of_reserves.total_reserve_sats, 5000);
+  assert.equal(summary.proof_of_reserves.reserve_surplus_sats, 2500);
+  assert.equal(summary.global_chain.valid, true);
+  assert.equal(summary.panel_sources.store, 'SQLite proof_ledger');
 });
 
 test('ledger reconciliation catches capital invariant mismatches', async () => {

@@ -114,12 +114,15 @@ test('deposit address creation writes a public-safe proof lifecycle event when p
   });
 
   await tracker.load();
-  await tracker.generateAddress('agent-proof-address', {
+  const generated = await tracker.generateAddress('agent-proof-address', {
     source: 'lightning_capital_bridge',
     flow_id: 'flow-should-not-be-public',
   });
 
   assert.equal(proofRows.length, 1);
+  assert.equal(generated.proof_id, null);
+  assert.equal(generated.proof_hash, null);
+  assert.equal(generated.source_of_truth, 'proof_ledger');
   assert.equal(proofRows[0].money_event_type, 'capital_deposit_address_created');
   assert.equal(proofRows[0].event_source, 'lightning_capital');
   const refsJson = JSON.stringify(proofRows[0].public_safe_refs);

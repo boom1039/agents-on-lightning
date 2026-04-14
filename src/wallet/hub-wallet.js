@@ -79,10 +79,12 @@ export class HubWallet {
         expires_at: now + 3600_000,
       });
 
+      let invoiceProof = null;
+      const proofGroupId = proofSafeKey('hub-deposit', { payment_hash: result.r_hash });
       if (this._proofLedger) {
-        await this._proofLedger.appendProof({
+        invoiceProof = await this._proofLedger.appendProof({
           idempotency_key: proofSafeKey('hub-deposit-invoice-created', { deposit_id: depositId }),
-          proof_group_id: proofSafeKey('hub-deposit', { deposit_id: depositId }),
+          proof_group_id: proofGroupId,
           proof_record_type: 'money_lifecycle',
           money_event_type: 'hub_deposit_invoice_created',
           money_event_status: 'created',
@@ -104,6 +106,8 @@ export class HubWallet {
         payment_hash: result.r_hash,
         amount_sats: amountSats,
         expires_at: now + 3600_000,
+        proof_id: invoiceProof?.proof_id || null,
+        proof_group_id: invoiceProof?.proof_group_id || proofGroupId,
         message: 'Pay this Lightning invoice to deposit sats to your account.',
       };
     } catch (err) {
@@ -139,6 +143,7 @@ export class HubWallet {
           if (this._proofLedger) {
             const settledProof = await this._proofLedger.appendProof({
               idempotency_key: proofSafeKey('hub-deposit-settled', { payment_hash: hashHex }),
+              proof_group_id: proofSafeKey('hub-deposit', { payment_hash: hashHex }),
               proof_record_type: 'money_event',
               money_event_type: 'hub_deposit_settled',
               money_event_status: 'settled',

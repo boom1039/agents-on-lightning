@@ -105,6 +105,28 @@ function serializeProofBundle(bundle) {
   };
 }
 
+function liabilityCheckpointIncludesProof(latestProof, latestCheckpoint) {
+  if (!latestProof || !latestCheckpoint) return false;
+  const checkpointedThrough = Number(
+    latestCheckpoint.public_safe_refs?.checkpointed_through_global_sequence
+      || latestCheckpoint.global_sequence
+      || 0,
+  );
+  return checkpointedThrough >= Number(latestProof.global_sequence || 0);
+}
+
+function proofContext(extra = {}) {
+  return {
+    source_of_truth: 'proof_ledger',
+    trust_promise: 'Every balance-changing event should create a signed, hash-linked Proof Ledger row that the agent can keep and verify independently.',
+    balance_meaning: 'Proof-derived balances are what the platform currently acknowledges for this agent, derived from signed Proof Ledger deltas.',
+    verification_meaning: 'A valid proof means the canonical proof JSON, SHA-256 proof hash, Ed25519 platform signature, and chain links verify against the published platform key.',
+    reserve_boundary: 'Current Proof of Reserves is operator-attested unless stronger external reserve evidence is present.',
+    agent_advice: 'Keep important proof ids or proof bundles locally so you can compare future platform state against what was previously acknowledged.',
+    ...extra,
+  };
+}
+
 export function sanitizePublicLedgerEntry(entry) {
   if (!entry || typeof entry !== 'object') return entry;
 
@@ -510,6 +532,7 @@ export function agentWalletRoutes(daemon) {
       });
     }
     const latest = proofLedger.getLatestAgentProof(req.agentId);
+    const latestCheckpoint = proofLedger.getLatestProofByRecordType('liability_checkpoint');
     res.json({
       agent_id: req.agentId,
       source_of_truth: 'proof_ledger',
@@ -517,7 +540,18 @@ export function agentWalletRoutes(daemon) {
       capital_balance: proofLedger.getCapitalBalance(req.agentId),
       latest_agent_proof: latest ? serializeProofRow(latest, { includeCanonical: false }) : null,
       agent_chain: proofLedger.verifyChain({ agentId: req.agentId }),
+      latest_liability_checkpoint: latestCheckpoint
+        ? serializeProofRow(latestCheckpoint, { includeCanonical: false })
+        : null,
+      included_in_latest_liability_checkpoint: liabilityCheckpointIncludesProof(latest, latestCheckpoint),
       public_key: proofLedger.getPublicKeyInfo(),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/me/balance',
+        next_steps: [
+          'Use /api/v1/proofs/me to list your signed proof rows.',
+          'Use /api/v1/proofs/proof/:proofId/bundle to retain a verifiable bundle for an important proof.',
+        ],
+      }),
     });
   });
 
@@ -541,6 +575,10 @@ export function agentWalletRoutes(daemon) {
       source_of_truth: 'proof_ledger',
       total: proofLedger.countProofs({ agentId: req.agentId }),
       proofs,
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/me',
+        list_meaning: 'This is the ordered set of signed Proof Ledger rows linked to your agent id.',
+      }),
     });
   });
 
@@ -565,6 +603,10 @@ export function agentWalletRoutes(daemon) {
       source_of_truth: 'proof_ledger',
       proof: serializeProofRow(proof),
       verification: proofLedger.verifyProof(proof),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/proof/:proofId',
+        proof_meaning: 'This proof is one platform-signed statement about a money event, lifecycle event, checkpoint, or reserve snapshot.',
+      }),
     });
   });
 
@@ -589,6 +631,10 @@ export function agentWalletRoutes(daemon) {
       proof_id: proof.proof_id,
       verification: proofLedger.verifyProof(proof),
       agent_chain: proofLedger.verifyChain({ agentId: req.agentId }),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/proof/:proofId/verify',
+        valid_result: 'valid=true means this proof verifies against the platform public key and expected proof hash.',
+      }),
     });
   });
 
@@ -609,7 +655,13 @@ export function agentWalletRoutes(daemon) {
         message: 'No proof bundle with that id belongs to this agent.',
       });
     }
-    res.json(serializeProofBundle(bundle));
+    res.json({
+      ...serializeProofBundle(bundle),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/proof/:proofId/bundle',
+        bundle_meaning: 'A bundle includes the proof, adjacent chain context, public key info, and verification instructions so the agent can retain evidence outside the platform.',
+      }),
+    });
   });
 
   // Read current proof-derived platform liabilities.
@@ -635,6 +687,10 @@ export function agentWalletRoutes(daemon) {
         global_chain: proofLedger.verifyChain(),
       },
       public_key: proofLedger.getPublicKeyInfo(),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/liabilities',
+        liabilities_meaning: 'Proof of Liabilities is the current total the platform acknowledges from signed agent balance proofs.',
+      }),
     });
   });
 
@@ -657,6 +713,10 @@ export function agentWalletRoutes(daemon) {
         limitation: 'Proof of Liabilities is derived from signed Proof Ledger rows. Proof of Reserves requires reserve evidence and is not claimed unless a reserve snapshot is present.',
       },
       public_key: proofLedger.getPublicKeyInfo(),
+      proof_context: proofContext({
+        endpoint: '/api/v1/proofs/reserves',
+        reserves_meaning: 'Proof of Reserves shows latest operator-attested reserve evidence and should be compared against Proof of Liabilities.',
+      }),
     });
   });
 

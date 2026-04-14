@@ -1652,6 +1652,7 @@ export class CapitalLedger {
     try {
       const state = await this._readState(agentId);
       const mappedProof = fundingEventProofType(type);
+      let fundingProof = null;
       if (mappedProof) {
         const [moneyEventType, moneyEventStatus] = mappedProof;
         const amount = Number.isSafeInteger(details.amount_sats) ? details.amount_sats : null;
@@ -1694,14 +1695,23 @@ export class CapitalLedger {
           return {
             agent_id: agentId,
             type,
+            source_of_truth: 'proof_ledger',
+            proof_id: proofResult.proof?.proof_id || null,
+            proof_hash: proofResult.proof?.proof_hash || null,
             balance_after: this._proofBalance(agentId) || this._balanceSummary(state),
             ...details,
           };
         }
+        fundingProof = proofResult.proof || null;
       }
       const activity = {
         agent_id: agentId,
         type,
+        ...(fundingProof ? {
+          source_of_truth: 'proof_ledger',
+          proof_id: fundingProof.proof_id,
+          proof_hash: fundingProof.proof_hash,
+        } : {}),
         balance_after: this._balanceSummary(state),
         ...details,
       };

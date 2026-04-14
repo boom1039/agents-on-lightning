@@ -144,6 +144,7 @@
       display: block;
       margin-top: 1px;
     }
+    .metric[title] { cursor: help; }
     .main {
       display: grid;
       grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1.35fr) minmax(350px, 0.9fr);
@@ -329,6 +330,30 @@
       border-bottom: 1px solid var(--line);
     }
     .kv div:nth-child(odd) { color: var(--muted); }
+    .proof-status {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 4px 8px;
+      padding: 6px 7px;
+      border-bottom: 1px solid var(--line);
+      background: #080a09;
+    }
+    .proof-status div {
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .proof-status .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 9px;
+    }
+    .proof-status a {
+      color: var(--cyan);
+      text-decoration: none;
+    }
+    .proof-status a:hover { color: var(--green); }
     .timeline-row {
       display: grid;
       grid-template-columns: 104px 50px minmax(100px, 0.95fr) 42px minmax(120px, 1.05fr);
@@ -380,6 +405,7 @@
       <div class="nav">
         <a href="/journey">route-grid</a>
         <a href="/journey/three">3d</a>
+        <a href="/proofs">proofs</a>
         <a href="/llms.txt">llms</a>
         <button id="reset-layout" title="Reset saved panel, column, and sort state">reset layout</button>
       </div>
@@ -393,7 +419,7 @@
       <section class="pane" data-panel="agents">
         <div class="pane-head">
           <h2>Agent Index</h2>
-          <span class="muted">MCP + ledger identities</span>
+          <span class="muted" title="Sources: /api/analytics/mcp-agents from DuckDB mcp_tool_events plus /api/analytics/ledger/agents from SQLite proof_ledger projections.">MCP + proof identities</span>
           <span class="grow"></span>
           <input id="agent-filter" placeholder="agent id">
           <button id="refresh">refresh</button>
@@ -412,7 +438,7 @@
       <section class="pane" data-panel="timeline">
         <div class="pane-head">
           <h2>Agent Timeline</h2>
-          <span id="selected-agent" class="cyan">none selected</span>
+          <span id="selected-agent" class="cyan" title="Sources: /api/analytics/mcp-agent/:id/journey for behavior and /api/analytics/ledger/agent/:id for Proof Ledger money events.">none selected</span>
           <span class="grow"></span>
           <button id="clear-agent">clear</button>
           <button class="panel-drag" draggable="true" data-panel-drag="timeline" title="Drag section">move</button>
@@ -427,7 +453,7 @@
       <div class="panel-slot" data-slot-index="2">
         <section class="subpane" data-panel="funnel">
           <div class="subhead">
-            <span>Funnel</span>
+            <span title="Source: /api/analytics/mcp-funnel from DuckDB mcp_tool_events workflow_stage metadata.">Funnel</span>
             <span class="grow"></span>
             <button class="panel-drag" draggable="true" data-panel-drag="funnel" title="Drag section">move</button>
           </div>
@@ -443,7 +469,7 @@
       <div class="panel-slot" data-slot-index="3">
         <section class="subpane" data-panel="tools">
           <div class="subhead">
-            <span>Tools + Failures</span>
+            <span title="Source: /api/analytics/mcp-tool-breakdown from DuckDB mcp_tool_events.">Tools + Failures</span>
             <span class="grow"></span>
             <button class="panel-drag" draggable="true" data-panel-drag="tools" title="Drag section">move</button>
           </div>
@@ -459,7 +485,7 @@
       <div class="panel-slot" data-slot-index="4">
         <section class="subpane" data-panel="sql">
           <div class="subhead">
-            <span>SQL Explorer</span>
+            <span title="Source: DuckDB analytics query route. This explores behavior telemetry, not canonical money proofs.">SQL Explorer</span>
             <span class="grow"></span>
             <button class="panel-drag" draggable="true" data-panel-drag="sql" title="Drag section">move</button>
           </div>
@@ -483,7 +509,7 @@
         <section class="ledger-pane" data-panel="ledger">
           <div class="pane-head">
             <h2>Ledger Stream</h2>
-            <span class="muted">latest 100 public entries by default</span>
+            <span class="muted" title="Source: /api/analytics/ledger/recent derived from Proof Ledger public-safe rows when proof_ledger is enabled.">latest 100 proof/public entries</span>
             <span class="grow"></span>
             <div class="filters">
               <input id="ledger-agent" placeholder="agent id">
@@ -496,6 +522,7 @@
             <button class="panel-drag" draggable="true" data-panel-drag="ledger" title="Drag section">move</button>
           </div>
           <div class="pane-body">
+            <div id="proof-status" class="proof-status"></div>
             <table>
               <thead id="ledger-head"></thead>
               <tbody id="ledger-body"></tbody>
@@ -520,10 +547,10 @@
     const TABLE_IDS = ['agents', 'funnel', 'tools', 'ledger'];
     const tableState = {};
     const defaultTableState = {
-      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'proofBalance', 'proofs', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       funnel: { order: ['stage', 'agents', 'calls', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
-      ledger: { order: ['time', 'agent', 'type', 'amount', 'source', 'details', 'ledgerId'], widths: {}, sortBy: null, sortDir: 'desc' },
+      ledger: { order: ['time', 'agent', 'proofId', 'record', 'status', 'type', 'amount', 'source', 'details', 'hash'], widths: {}, sortBy: null, sortDir: 'desc' },
     };
     let panelOrder = loadJson('panels', PANEL_IDS);
     let draggedPanelId = null;
@@ -662,8 +689,8 @@
       </svg>`;
     }
 
-    function metric(label, value, note, values, color) {
-      return `<div class="metric">
+    function metric(label, value, note, values, color, title = '') {
+      return `<div class="metric"${title ? ` title="${esc(title)}"` : ''}>
         <label>${esc(label)}</label>
         <strong>${esc(value)}</strong>
         <small>${esc(note || '')}</small>
@@ -677,8 +704,25 @@
 
     function detailText(entry) {
       const parts = [];
-      for (const key of ['reference', 'flow_id', 'txid', 'channel_point', 'from_bucket', 'to_bucket', 'status', 'reason', 'address_hint']) {
+      const refs = entry?.public_safe_refs && typeof entry.public_safe_refs === 'object' ? entry.public_safe_refs : {};
+      for (const key of [
+        'reference',
+        'flow_id',
+        'txid',
+        'channel_point',
+        'proof_group_id',
+        'from_bucket',
+        'to_bucket',
+        'status',
+        'reason',
+        'address_hint',
+        'checkpointed_through_global_sequence',
+        'total_liability_sats',
+        'total_reserve_sats',
+        'reserve_sufficient',
+      ]) {
         if (entry?.[key] !== undefined && entry?.[key] !== null) parts.push(`${key}=${entry[key]}`);
+        else if (refs?.[key] !== undefined && refs?.[key] !== null) parts.push(`${key}=${refs[key]}`);
       }
       return parts.join(' ');
     }
@@ -688,6 +732,18 @@
         + Number(row.capital_locked_sats || 0)
         + Number(row.capital_pending_deposit_sats || 0)
         + Number(row.capital_pending_close_sats || 0);
+    }
+
+    function proofBalance(row) {
+      return Number(row.proof_total_tracked_sats || 0);
+    }
+
+    function proofHash(row) {
+      return row.proof_hash || row.latest_proof_hash || '';
+    }
+
+    function proofSourceTitle(label, route, store, transform) {
+      return `${label}. Source route: ${route}. Source data: ${store}. Transform: ${transform}`;
     }
 
     function compareValues(a, b) {
@@ -708,6 +764,24 @@
         { id: 'fail', label: 'fail', width: 38, className: (row) => `${Number(row.failed_calls || 0) ? 'bad' : 'ok'} mono`, html: (row) => fmtNum(row.failed_calls), sort: (row) => Number(row.failed_calls || 0) },
         { id: 'stage', label: 'stage', width: 86, html: (row) => esc(short(row.last_workflow_stage || '-', 14)), sort: (row) => row.last_workflow_stage || '' },
         { id: 'lastTool', label: 'last tool', html: (row) => esc(short(row.last_tool || '-', 28)), sort: (row) => row.last_tool || '' },
+        {
+          id: 'proofBalance',
+          label: 'proof bal',
+          width: 78,
+          className: 'mono',
+          title: () => 'Source: /api/analytics/ledger/agents from SQLite proof_ledger. Sum of proof-derived balance buckets for this agent.',
+          html: (row) => fmtSats(proofBalance(row)),
+          sort: (row) => proofBalance(row),
+        },
+        {
+          id: 'proofs',
+          label: 'proofs',
+          width: 54,
+          className: 'mono',
+          title: () => 'Source: /api/analytics/ledger/agents from SQLite proof_ledger. Number of signed proof rows linked to this agent.',
+          html: (row) => fmtNum(row.proof_rows || 0),
+          sort: (row) => Number(row.proof_rows || 0),
+        },
         { id: 'capital', label: 'capital', width: 88, className: 'mono', html: (row) => fmtSats(agentCapital(row)), sort: (row) => agentCapital(row) },
         { id: 'ledger', label: 'ledger', width: 78, className: 'mono', html: (row) => fmtNum(row.public_ledger_entries || 0), sort: (row) => Number(row.public_ledger_entries || 0) },
         {
@@ -758,11 +832,45 @@
       ledger: [
         { id: 'time', label: 'time', width: 118, html: (row) => fmtTime(tsOf(row)), sort: (row) => tsOf(row) },
         { id: 'agent', label: 'agent', width: 92, className: 'cyan', html: (row) => esc(short(eventAgent(row) || '-', 14)), sort: (row) => eventAgent(row) || '' },
+        {
+          id: 'proofId',
+          label: 'proof id',
+          width: 118,
+          className: 'cyan',
+          title: () => 'Source: /api/analytics/ledger/recent from SQLite proof_ledger via proof-backed public rows. This is the signed proof identifier.',
+          html: (row) => esc(short(row.proof_id || row.ledger_id || '-', 18)),
+          sort: (row) => row.proof_id || row.ledger_id || '',
+        },
+        {
+          id: 'record',
+          label: 'record',
+          width: 94,
+          title: () => 'Source: proof_record_type in SQLite proof_ledger. Shows whether this row is a money event, lifecycle event, checkpoint, reserve snapshot, or reconciliation.',
+          html: (row) => esc(short(row.proof_record_type || '-', 18)),
+          sort: (row) => row.proof_record_type || '',
+        },
+        {
+          id: 'status',
+          label: 'status',
+          width: 78,
+          className: (row) => row.status === 'failed' || row.status === 'rejected' ? 'bad' : row.status === 'pending' ? 'warn' : 'ok',
+          title: () => 'Source: money_event_status in SQLite proof_ledger. This is lifecycle state, not proof validity.',
+          html: (row) => esc(short(row.status || '-', 12)),
+          sort: (row) => row.status || '',
+        },
         { id: 'type', label: 'type', width: 142, html: (row) => esc(short(row.type || '-', 24)), sort: (row) => row.type || '' },
         { id: 'amount', label: 'amount', width: 94, className: 'mono', html: (row) => fmtSats(row.amount_sats), sort: (row) => Number(row.amount_sats || 0) },
         { id: 'source', label: 'source', width: 88, html: (row) => esc(short(row.source || '-', 14)), sort: (row) => row.source || '' },
         { id: 'details', label: 'reference / details', html: (row) => esc(short(detailText(row), 96)), sort: (row) => detailText(row) },
-        { id: 'ledgerId', label: 'ledger id', width: 100, className: 'dim', html: (row) => esc(short(row.ledger_id || '-', 14)), sort: (row) => row.ledger_id || '' },
+        {
+          id: 'hash',
+          label: 'hash',
+          width: 116,
+          className: 'dim',
+          title: () => 'Source: proof_hash in SQLite proof_ledger. Hash of canonical proof JSON, used for chain verification.',
+          html: (row) => esc(short(proofHash(row) || '-', 16)),
+          sort: (row) => proofHash(row),
+        },
       ],
     };
 
@@ -1018,25 +1126,61 @@
 
     function renderMetrics() {
       const ledger = state.data.ledgerSummary || {};
+      const proof = state.data.proofSummary || {};
       const publicLedger = ledger.public_ledger || {};
       const capital = ledger.capital || {};
+      const liabilities = proof.proof_of_liabilities || {};
+      const reserves = proof.proof_of_reserves || {};
+      const chain = proof.global_chain || {};
       const agents = Array.isArray(state.data.mcpAgents) ? state.data.mcpAgents : [];
       const tools = Array.isArray(state.data.tools) ? state.data.tools : [];
       const calls = agents.reduce((sum, row) => sum + Number(row.tool_calls || 0), 0);
       const failures = agents.reduce((sum, row) => sum + Number(row.failed_calls || 0), 0);
       const uniqueTools = tools.length;
       const funnelValues = (state.data.funnel || []).map((row) => row.agents);
-      const milestoneValues = (state.data.milestones || []).map((row) => row.agents);
+      const liabilityTotal = Number(liabilities.total_liability_sats || 0);
+      const reserveTotal = Number(reserves.total_reserve_sats || 0);
+      const reserveSurplus = Number(reserves.reserve_surplus_sats || 0);
+      const coverage = liabilities.total_liability_sats > 0 && Number.isFinite(Number(reserves.reserve_coverage_ratio))
+        ? `${Number(reserves.reserve_coverage_ratio).toFixed(2)}x`
+        : liabilityTotal === 0 && reserveTotal > 0
+          ? 'no liab'
+          : '-';
       $('metrics').innerHTML = [
-        metric('mcp agents', fmtNum(agents.length), 'identities seen using MCP tools', funnelValues, '#40d071'),
-        metric('mcp calls', fmtNum(calls), `${fmtNum(failures)} failures`, [calls - failures, failures], failures ? '#e7b94f' : '#40d071'),
-        metric('success', calls ? `${(((calls - failures) / calls) * 100).toFixed(1)}%` : '-', 'tool success rate', [calls - failures, failures], '#65d8d2'),
-        metric('tools used', fmtNum(uniqueTools), 'unique MCP tools called', tools.map((row) => row.calls), '#65d8d2'),
-        metric('ledger rows', fmtNum(publicLedger.total_entries), 'public append-only', (publicLedger.type_counts || []).map((r) => r.count), '#40d071'),
-        metric('capital', fmtSats(capital.total_committed_sats), 'available+locked+pending', [capital.available_sats, capital.locked_sats, capital.pending_deposit_sats, capital.pending_close_sats], '#65d8d2'),
-        metric('locked', fmtSats(capital.locked_sats), 'channel capital', [capital.locked_sats, capital.available_sats], '#e7b94f'),
-        metric('revenue', fmtSats(capital.total_revenue_credited_sats), 'credited sats', milestoneValues, '#40d071'),
+        metric('proof chain', chain.valid ? 'valid' : proof.available ? 'invalid' : 'off', `seq ${fmtNum(proof.latest_global_proof?.global_sequence || 0)} | checked ${fmtNum(chain.checked || 0)}`, [chain.checked || 0], chain.valid ? '#40d071' : '#ff5d5d', proofSourceTitle('Is the global proof chain valid?', '/api/analytics/proof-ledger/summary', 'SQLite proof_ledger', 'proofLedger.verifyChain() checks signatures, hashes, and global links.')),
+        metric('liabilities', fmtSats(liabilityTotal), `${fmtNum(proof.proof_rows?.agent_count || 0)} agents with proofs`, Object.values(liabilities.live_derived_liability_totals || {}).filter((v) => Number.isFinite(Number(v))), '#65d8d2', proofSourceTitle('What does the platform acknowledge owing agents?', '/api/analytics/proof-ledger/summary', 'SQLite proof_ledger', 'sum current proof-derived balance buckets across agents.')),
+        metric('reserves', fmtSats(reserveTotal), reserves.status || 'not published', (reserves.reserve_totals_by_source || []).map((row) => row.amount_sats), reserves.reserve_sufficient === false ? '#ff5d5d' : '#40d071', proofSourceTitle('Are reserves currently attested?', '/api/analytics/proof-ledger/summary', 'latest reserve_snapshot row in SQLite proof_ledger', 'reads operator-attested reserve totals and sufficiency flag.')),
+        metric('coverage', coverage, `surplus ${fmtSats(reserveSurplus)}`, [reserveTotal, liabilityTotal], reserves.reserve_sufficient === false ? '#ff5d5d' : '#e7b94f', proofSourceTitle('Do reserves appear sufficient for acknowledged liabilities?', '/api/analytics/proof-ledger/summary', 'SQLite proof_ledger', 'reserve_total minus liability_total; reserve snapshots are operator-attested.')),
+        metric('mcp agents', fmtNum(agents.length), 'identities seen using MCP tools', funnelValues, '#40d071', proofSourceTitle('Which agents are using tools?', '/api/analytics/mcp-agents', 'DuckDB mcp_tool_events', 'group MCP tool events by agent_id.')),
+        metric('mcp calls', fmtNum(calls), `${fmtNum(failures)} failures`, [calls - failures, failures], failures ? '#e7b94f' : '#40d071', proofSourceTitle('How active are agents?', '/api/analytics/mcp-agents', 'DuckDB mcp_tool_events', 'sum calls and failures across agent identities.')),
+        metric('tools used', fmtNum(uniqueTools), 'unique MCP tools called', tools.map((row) => row.calls), '#65d8d2', proofSourceTitle('Which tool surface is active?', '/api/analytics/mcp-tool-breakdown', 'DuckDB mcp_tool_events', 'count distinct MCP tools used.')),
+        metric('proof rows', fmtNum(proof.proof_rows?.total || publicLedger.total_entries), 'signed money proofs', (publicLedger.type_counts || []).map((r) => r.count), '#40d071', proofSourceTitle('How many signed proof rows exist?', '/api/analytics/proof-ledger/summary', 'SQLite proof_ledger', 'count all signed Proof Ledger rows.')),
       ].join('');
+    }
+
+    function renderProofStatus() {
+      const proof = state.data.proofSummary || {};
+      const latest = proof.latest_global_proof || {};
+      const liabilities = proof.proof_of_liabilities || {};
+      const reserves = proof.proof_of_reserves || {};
+      const checkpoint = liabilities.latest_signed_liability_checkpoint || {};
+      const snapshot = reserves.latest_reserve_snapshot || {};
+      const key = proof.public_key || {};
+      const chain = proof.global_chain || {};
+      const sources = proof.panel_sources || {};
+      const title = `Source route: ${sources.route || '/api/analytics/proof-ledger/summary'}. Source data: ${sources.store || 'SQLite proof_ledger'}. Meaning: ${sources.meaning || 'Proof Ledger explains signed money state.'}`;
+      $('proof-status').innerHTML = `<div title="${esc(title)}"><span class="label">chain</span> <span class="${chain.valid ? 'ok' : 'bad'}">${esc(chain.valid ? 'valid' : proof.available ? 'invalid' : 'off')}</span></div>
+        <div title="${esc('Latest signed proof row in global Proof Ledger order.')}"><span class="label">latest</span> <span class="cyan">${esc(short(latest.proof_id || '-', 18))}</span></div>
+        <div title="${esc('Hash of the latest canonical proof JSON. Agents can use this to verify chain continuity.')}"><span class="label">hash</span> ${esc(short(latest.proof_hash || chain.latest_hash || '-', 18))}</div>
+        <div title="${esc('Latest signed proof-of-liabilities checkpoint derived from agent balances.')}"><span class="label">liability cp</span> ${esc(short(checkpoint.proof_id || '-', 18))}</div>
+        <div title="${esc('Latest reserve snapshot is operator-attested until external reserve evidence is added.')}"><span class="label">reserve snap</span> ${esc(short(snapshot.proof_id || '-', 18))}</div>
+        <div title="${esc('Published Ed25519 signing key id for proof verification.')}"><span class="label">key</span> ${esc(short(key.signing_key_id || '-', 18))}</div>
+        <div title="${esc('Total proof-derived liabilities acknowledged by the platform.')}"><span class="label">owed</span> ${fmtSats(liabilities.total_liability_sats)}</div>
+        <div title="${esc('Total reserves from latest operator-attested reserve snapshot.')}"><span class="label">reserves</span> ${fmtSats(reserves.total_reserve_sats)}</div>
+        <div title="${esc('Reserve surplus equals reserve sats minus acknowledged liability sats.')}"><span class="label">surplus</span> ${fmtSats(reserves.reserve_surplus_sats)}</div>
+        <div title="${esc('Links to the public proof explainer page.')}"><a href="/proofs">proof page</a></div>
+        <div title="${esc('Links to public machine-readable proof checkpoint JSON.')}"><a href="/.well-known/proof-ledger.json">well-known json</a></div>
+        <div title="${esc('MCP telemetry is behavior data in DuckDB; Proof Ledger is money data in SQLite proof_ledger.')}"><span class="label">boundary</span> behavior != money</div>`;
     }
 
     function renderAgents() {
@@ -1067,6 +1211,7 @@
     function renderLedger() {
       const payload = state.data.ledgerRecent || { entries: [], total: 0, limit: state.ledgerLimit, offset: state.ledgerOffset };
       $('ledger-page').textContent = `${fmtNum(payload.offset || 0)}-${fmtNum((payload.offset || 0) + (payload.entries || []).length)} / ${fmtNum(payload.total || 0)}`;
+      renderProofStatus();
       renderConfiguredTable('ledger', payload.entries || [], {
         rowAttrs: (entry) => `data-agent="${esc(eventAgent(entry))}"`,
       });
@@ -1076,17 +1221,25 @@
     }
 
     function tsOf(entry) {
-      return Number(entry?.recorded_at || entry?._ts || entry?.ts || 0) || 0;
+      return Number(entry?.recorded_at || entry?.created_at_ms || entry?._ts || entry?.ts || 0) || 0;
     }
 
     function renderAgentDetail(agentPayload, ledgerPayload) {
       const agent = combineAgents().find((row) => row.agent_id === state.selectedAgent) || {};
       const capital = ledgerPayload?.capital_balance || {};
+      const proofBalanceData = ledgerPayload?.proof_balance || {};
+      const latestProof = ledgerPayload?.latest_agent_proof || {};
+      const agentChain = ledgerPayload?.agent_chain || {};
       const publicTotal = Number(ledgerPayload?.public_total || 0);
       $('agent-detail').innerHTML = `<div class="kv">
         <div>agent</div><div class="cyan">${esc(state.selectedAgent || '-')}</div>
         <div>calls</div><div>${fmtNum(agent.tool_calls || 0)} tool calls, ${fmtNum(agent.failed_calls || 0)} failures</div>
         <div>stage</div><div>${esc(agent.last_workflow_stage || '-')} / ${esc(agent.highest_financial_milestone || '-')}</div>
+        <div title="Source: /api/analytics/ledger/agent/:id from SQLite proof_ledger">proof balance</div><div>${fmtSats(proofBalanceData.total_tracked_sats)} total acknowledged</div>
+        <div title="Source: /api/analytics/ledger/agent/:id from SQLite proof_ledger balance projection">proof buckets</div><div>ecash ${fmtSats(proofBalanceData.wallet_ecash_sats)} | hub ${fmtSats(proofBalanceData.wallet_hub_sats)} | cap ${fmtSats(proofBalanceData.capital_available_sats)} | locked ${fmtSats(proofBalanceData.capital_locked_sats)} | pend ${fmtSats((proofBalanceData.capital_pending_deposit_sats || 0) + (proofBalanceData.capital_pending_close_sats || 0))}</div>
+        <div title="Source: /api/analytics/ledger/agent/:id from SQLite proof_ledger">latest proof</div><div class="cyan">${esc(short(latestProof.proof_id || '-', 28))} <span class="dim">${esc(short(latestProof.proof_hash || '', 18))}</span></div>
+        <div title="Source: proofLedger.verifyChain({ agentId })">agent chain</div><div class="${agentChain.valid ? 'ok' : 'bad'}">${esc(agentChain.valid ? 'valid' : agentChain ? 'invalid' : '-')} | ${fmtNum(agentChain.checked || 0)} checked | ${fmtNum(ledgerPayload?.proof_total || 0)} proofs</div>
+        <div title="Source: latest liability checkpoint compared to selected agent latest proof sequence">checkpoint</div><div class="${ledgerPayload?.included_in_latest_liability_checkpoint ? 'ok' : 'warn'}">${esc(ledgerPayload?.included_in_latest_liability_checkpoint ? 'included in latest liability checkpoint' : 'not included yet or no money proof')}</div>
         <div>capital</div><div>${fmtSats((capital.available || 0) + (capital.locked || 0) + (capital.pending_deposit || 0) + (capital.pending_close || 0))} total tracked</div>
         <div>buckets</div><div>avail ${fmtSats(capital.available)} | locked ${fmtSats(capital.locked)} | pend dep ${fmtSats(capital.pending_deposit)} | pend close ${fmtSats(capital.pending_close)}</div>
         <div>ledger</div><div>${fmtNum(publicTotal)} public rows, ${fmtNum(ledgerPayload?.capital_activity_total || 0)} capital activity rows</div>
@@ -1206,6 +1359,7 @@
           ledgerRecent,
           ledgerAgents,
           reconciliation,
+          proofSummary,
         ] = await Promise.all([
           api('/api/analytics/mcp-agents?limit=100'),
           api('/api/analytics/mcp-funnel'),
@@ -1215,8 +1369,9 @@
           api('/api/analytics/ledger/recent?limit=100&offset=0'),
           api('/api/analytics/ledger/agents?limit=100'),
           api('/api/analytics/ledger/reconciliation'),
+          api('/api/analytics/proof-ledger/summary'),
         ]);
-        state.data = { mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation };
+        state.data = { mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation, proofSummary };
         state.ledgerOffset = 0;
         renderMetrics();
         renderAgents();
