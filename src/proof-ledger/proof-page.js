@@ -123,8 +123,14 @@ export function buildProofLedgerPageHtml() {
     const short = (v) => v ? String(v).slice(0, 18) + (String(v).length > 18 ? '...' : '') : 'none';
     const date = (ms) => ms ? new Date(ms).toLocaleString() : 'none';
     const cls = (ok) => ok ? 'good' : 'bad';
+    const escapeHtml = (value) => String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
     function row(label, value, className = '') {
-      return '<div class="metric"><span class="label">' + label + '</span><span class="value ' + className + '">' + value + '</span></div>';
+      return '<div class="metric"><span class="label">' + escapeHtml(label) + '</span><span class="value ' + className + '">' + escapeHtml(value) + '</span></div>';
     }
     function rows(entries) {
       return entries.map(([label, value, className]) => row(label, value, className || '')).join('');
@@ -139,7 +145,7 @@ export function buildProofLedgerPageHtml() {
         ['hash', short(proof.proof_hash)],
         ['previous hash', short(proof.previous_global_proof_hash)],
         ['created', date(proof.created_at_ms)]
-      ]) + '<pre class="mono-block">' + JSON.stringify(proof.public_safe_refs || {}, null, 2) + '</pre>';
+      ]) + '<pre class="mono-block">' + escapeHtml(JSON.stringify(proof.public_safe_refs || {}, null, 2)) + '</pre>';
     }
     async function load() {
       try {

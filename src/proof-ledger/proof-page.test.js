@@ -10,4 +10,6 @@ test('proof ledger page links only to public proof surfaces', () => {
   assert.ok(html.includes('/.well-known/proof-ledger-public-key.json'));
   assert.match(html, /Proof of Liabilities and Proof of Reserves/);
   assert.equal(html.includes('/api/v1/'), false);
+  assert.match(html, /escapeHtml/);
+  assert.match(html, /replaceAll\('&', '&amp;'\)/);
 });
