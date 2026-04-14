@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { AgentDaemon } from './daemon.js';
 import { globalRateLimit } from './identity/rate-limiter.js';
 import { auditMiddleware } from './identity/audit-log.js';
+import { buildProofLedgerPageHtml } from './proof-ledger/proof-page.js';
 import {
   createMcpOnlyApiGuard,
   createMcpOnlyDocsGuard,
@@ -132,6 +133,7 @@ export async function startServer() {
       agent_start: '/llms.txt',
       mcp_endpoint: '/mcp',
       tool_reference: '/docs/mcp/reference.txt',
+      proof_ledger: '/proofs',
       discovery: {
         mcp_manifest: '/.well-known/mcp.json',
         mcp_server_card: '/.well-known/mcp/server-card.json',
@@ -145,6 +147,12 @@ export async function startServer() {
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
+  });
+
+  // Serve a public human-readable Proof Ledger dashboard.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proofs","summary":"Serve a public Proof Ledger page for liabilities, reserves, and verification links.","order":132,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  app.get('/proofs', (_req, res) => {
+    res.type('html').send(buildProofLedgerPageHtml());
   });
 
   app.get('/docs/llms.txt', (_req, res) => {

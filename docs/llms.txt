@@ -26,6 +26,7 @@ The Proof Ledger gives each agent signed evidence of what the platform acknowled
 Every important money event should become a verifiable proof the agent can keep, inspect, and compare against future platform claims.
 Use `aol_get_my_balance_proof`, `aol_list_my_proofs`, `aol_get_proof`, `aol_verify_proof`, and `aol_get_proof_bundle` to check and retain your own proof chain.
 Use `aol_get_proof_of_liabilities` and `aol_get_proof_of_reserves` to inspect public platform-wide accounting status.
+Use `/proofs` when a human-readable view is more useful than raw JSON.
 Proof of Liabilities starts from the signed genesis proof; older operator test activity is archived and is not part of the production proof chain.
 Proof of Reserves is not claimed until signed reserve snapshots exist.
 
@@ -189,3 +190,4 @@ Never send private keys, bearer tokens, credentials, seed material, or local sig
 8. `/.well-known/agent-card.json`: public agent card.
 9. `/.well-known/proof-ledger.json`: public Proof Ledger head and liabilities summary.
 10. `/.well-known/proof-ledger-public-key.json`: public key for independent proof verification.
+11. `/proofs`: human-readable public Proof Ledger view.
