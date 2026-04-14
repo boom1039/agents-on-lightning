@@ -169,6 +169,66 @@ export async function startServer() {
   }
   journeyMonitor?.setDaemon?.(daemon);
 
+  function proofLedgerUnavailable(res) {
+    return res.status(503).json({
+      error: 'proof_ledger_unavailable',
+      message: 'Proof Ledger is not enabled on this server yet.',
+    });
+  }
+
+  function summarizeProofRow(row) {
+    if (!row) return null;
+    return {
+      proof_id: row.proof_id,
+      proof_record_type: row.proof_record_type,
+      money_event_type: row.money_event_type,
+      money_event_status: row.money_event_status,
+      global_sequence: row.global_sequence,
+      proof_hash: row.proof_hash,
+      previous_global_proof_hash: row.previous_global_proof_hash,
+      signing_key_id: row.signing_key_id,
+      issuer_domains: row.issuer_domains,
+      public_safe_refs: row.public_safe_refs,
+      created_at_ms: row.created_at_ms,
+    };
+  }
+
+  // Publish Proof Ledger public key for independent proof verification.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proof-ledger-public-key","summary":"Publish Proof Ledger verification public key.","order":130,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  app.get('/.well-known/proof-ledger-public-key.json', (_req, res) => {
+    if (!daemon.proofLedger) return proofLedgerUnavailable(res);
+    res.json(daemon.proofLedger.getPublicKeyInfo());
+  });
+
+  // Publish current Proof Ledger head and proof-of-liabilities summary.
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proof-ledger","summary":"Publish Proof Ledger head and liabilities summary.","order":131,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  app.get('/.well-known/proof-ledger.json', (_req, res) => {
+    if (!daemon.proofLedger) return proofLedgerUnavailable(res);
+    const latest = daemon.proofLedger.getLatestGlobalProof();
+    const latestLiabilityCheckpoint = daemon.proofLedger.getLatestProofByRecordType('liability_checkpoint');
+    const latestReserveSnapshot = daemon.proofLedger.getLatestProofByRecordType('reserve_snapshot');
+    res.json({
+      name: 'Agents on Lightning Proof Ledger',
+      source_of_truth: 'proof_ledger',
+      status: latest ? 'live' : 'not_started',
+      latest_global_sequence: latest?.global_sequence || 0,
+      latest_global_proof_id: latest?.proof_id || null,
+      latest_global_proof_hash: latest?.proof_hash || null,
+      proof_of_liabilities: {
+        status: latest ? 'live' : 'not_started',
+        live_derived_liability_totals: daemon.proofLedger.getLiabilityTotals(),
+        latest_signed_liability_checkpoint: summarizeProofRow(latestLiabilityCheckpoint),
+      },
+      proof_of_reserves: {
+        status: latestReserveSnapshot ? 'operator_attested_snapshot_available' : 'not_yet_published',
+        latest_signed_reserve_snapshot: summarizeProofRow(latestReserveSnapshot),
+        limitation: 'Proof of Reserves is only claimed when a signed reserve snapshot with reserve evidence is published.',
+      },
+      global_chain: daemon.proofLedger.verifyChain(),
+      public_key: daemon.proofLedger.getPublicKeyInfo(),
+    });
+  });
+
   const internalBaseUrl = process.env.AOL_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
   const publicBaseUrl = process.env.AOL_PUBLIC_BASE_URL || 'https://agentsonlightning.com';
 

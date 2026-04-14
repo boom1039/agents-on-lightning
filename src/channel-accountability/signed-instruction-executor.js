@@ -105,13 +105,23 @@ const HINTS = {
  * 10-step validation pipeline before touching LND.
  */
 export class SignedInstructionExecutor {
-  constructor({ assignmentRegistry, auditLog, nodeManager, agentRegistry, dataLayer, publicLedger = null, safetySettings = {} }) {
+  constructor({
+    assignmentRegistry,
+    auditLog,
+    nodeManager,
+    agentRegistry,
+    dataLayer,
+    publicLedger = null,
+    proofLedger = null,
+    safetySettings = {},
+  }) {
     this._assignments = assignmentRegistry;
     this._auditLog = auditLog;
     this._nodeManager = nodeManager;
     this._agentRegistry = agentRegistry;
     this._dataLayer = dataLayer;
     this._publicLedger = publicLedger;
+    this._proofLedger = proofLedger;
     this._defaultCooldownMinutes = Number.isInteger(safetySettings.defaultCooldownMinutes)
       ? safetySettings.defaultCooldownMinutes
       : 60;
@@ -633,23 +643,55 @@ export class SignedInstructionExecutor {
   }
 
   async _recordPublicLedgerExecution({ agentId, assignment, instruction, executedAt, executionMeta }) {
-    if (!this._publicLedger?.record || !executionMeta?.ledgerType) return;
-    try {
-      await this._publicLedger.record({
-        type: executionMeta.ledgerType,
-        agent_id: agentId,
-        amount_sats: 0,
-        channel_id: instruction.channel_id,
-        channel_point: assignment.channel_point,
-        action: instruction.action,
-        params: instruction.params,
-        old_policy: executionMeta.old_policy || null,
-        new_policy: executionMeta.new_policy || null,
-        source: 'channels_signed',
-        executed_at: executedAt,
-      });
-    } catch (err) {
-      console.warn(`[InstructionExecutor] Public ledger mirror failed: ${err.message}`);
+    if (!executionMeta?.ledgerType) return;
+    if (this._publicLedger?.record) {
+      try {
+        await this._publicLedger.record({
+          type: executionMeta.ledgerType,
+          agent_id: agentId,
+          amount_sats: 0,
+          channel_id: instruction.channel_id,
+          channel_point: assignment.channel_point,
+          action: instruction.action,
+          params: instruction.params,
+          old_policy: executionMeta.old_policy || null,
+          new_policy: executionMeta.new_policy || null,
+          source: 'channels_signed',
+          executed_at: executedAt,
+        });
+      } catch (err) {
+        console.warn(`[InstructionExecutor] Public ledger mirror failed: ${err.message}`);
+      }
+    }
+
+    if (this._proofLedger?.appendProof && !this._publicLedger?.isProofBacked) {
+      const instructionHash = sha256(canonicalJSON(instruction));
+      const moneyEventType = executionMeta.ledgerType === 'channel_fee_policy_updated'
+        ? 'channel_policy_updated'
+        : 'channel_htlc_limits_updated';
+      try {
+        await this._proofLedger.appendProof({
+          idempotency_key: `signed-channel-policy:${agentId}:${instructionHash}`,
+          proof_record_type: 'money_lifecycle',
+          money_event_type: moneyEventType,
+          money_event_status: 'confirmed',
+          agent_id: agentId,
+          event_source: 'channels_signed',
+          authorization_method: 'agent_signed_instruction',
+          primary_amount_sats: 0,
+          public_safe_refs: {
+            channel_id: instruction.channel_id,
+            channel_point: assignment.channel_point,
+            action: instruction.action,
+            instruction_hash: instructionHash,
+            status: 'confirmed',
+          },
+          allowed_public_ref_keys: ['action'],
+          created_at_ms: executedAt,
+        });
+      } catch (err) {
+        console.warn(`[InstructionExecutor] Proof Ledger lifecycle record failed: ${err.message}`);
+      }
     }
   }
 

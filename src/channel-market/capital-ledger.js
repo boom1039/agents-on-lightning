@@ -10,6 +10,9 @@
  *     available + locked + pending_deposit + pending_close +
  *     total_withdrawn + total_routing_pnl
  *
+ * With Proof Ledger enabled, proof_ledger is the accounting source of truth.
+ * The JSON files remain operational caches/recovery state only.
+ *
  * Every state change is:
  *   1. Mutex-protected (per-agent)
  *   2. Validated (no negative balances)
@@ -18,8 +21,51 @@
  *   5. Audit-chained (tamper-evident hash chain)
  */
 
+import { createHash } from 'node:crypto';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
+
 const STATE_DIR = 'data/channel-market/capital';
 const MAX_PROCESSED_REFS = 10_000;
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
+}
+
+function safeReferenceHash(value) {
+  return typeof value === 'string' && value.length > 0 ? sha256Hex(value) : null;
+}
+
+function isPublicChannelPoint(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}:\d+$/i.test(value);
+}
+
+function isLightningCapitalSource(details = {}) {
+  return String(details.source || '').startsWith('lightning_') || Boolean(details.flow_id);
+}
+
+function fundingEventProofType(type) {
+  const map = {
+    lightning_receive_preflight_rejected: ['lightning_capital_receive_preflight_rejected', 'rejected'],
+    lightning_bridge_preflight_rejected: ['lightning_capital_bridge_preflight_rejected', 'rejected'],
+    lightning_bridge_preflight: ['lightning_capital_bridge_preflight_accepted', 'confirmed'],
+    lightning_invoice_created: ['lightning_capital_invoice_created', 'created'],
+    lightning_paid: ['lightning_capital_invoice_paid', 'settled'],
+    loop_out_started: ['lightning_capital_bridge_started', 'pending'],
+    boltz_swap_started: ['lightning_capital_bridge_started', 'pending'],
+    lightning_wallet_bridge_broadcast: ['lightning_capital_wallet_fallback_started', 'submitted'],
+    loop_out_broadcast: ['lightning_capital_bridge_broadcast', 'submitted'],
+    boltz_claim_broadcast: ['lightning_capital_bridge_broadcast', 'submitted'],
+    lightning_deposit_failed: ['lightning_capital_bridge_failed', 'failed'],
+    lightning_deposit_recovery_required: ['lightning_capital_recovery_required', 'unknown'],
+    lightning_deposit_retrying: ['lightning_capital_recovery_required', 'pending'],
+    lightning_deposit_confirmed: ['lightning_capital_confirmed', 'confirmed'],
+  };
+  return map[type] || null;
+}
 
 /**
  * Creates a fresh zero-balance state object.
@@ -136,8 +182,9 @@ export class CapitalLedger {
    * @param {import('../channel-accountability/hash-chain-audit-log.js').HashChainAuditLog} opts.auditLog
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    * @param {import('../wallet/ledger.js').PublicLedger} [opts.publicLedger]
+   * @param {import('../proof-ledger/proof-ledger.js').ProofLedger} [opts.proofLedger]
    */
-  constructor({ dataLayer, auditLog, mutex, publicLedger = null }) {
+  constructor({ dataLayer, auditLog, mutex, publicLedger = null, proofLedger = null }) {
     if (!dataLayer) throw new Error('CapitalLedger requires dataLayer');
     if (!auditLog) throw new Error('CapitalLedger requires auditLog');
     if (!mutex) throw new Error('CapitalLedger requires mutex');
@@ -146,6 +193,7 @@ export class CapitalLedger {
     this._auditLog = auditLog;
     this._mutex = mutex;
     this._publicLedger = publicLedger;
+    this._proofLedger = proofLedger;
   }
 
   // ---------------------------------------------------------------------------
@@ -282,6 +330,74 @@ export class CapitalLedger {
     }
   }
 
+  async _appendProof(input) {
+    if (!this._proofLedger?.appendProof) {
+      return { proof: null, existing: false };
+    }
+    const existing = this._proofLedger.getProofByIdempotencyKey(input.idempotency_key);
+    if (existing) {
+      return { proof: existing, existing: true };
+    }
+    const proof = await this._proofLedger.appendProof(input);
+    return { proof, existing: false };
+  }
+
+  _proofBalance(agentId) {
+    return this._proofLedger?.getCapitalBalance
+      ? this._proofLedger.getCapitalBalance(agentId)
+      : null;
+  }
+
+  async recordLifecycleProof(agentId, {
+    moneyEventType,
+    moneyEventStatus = 'confirmed',
+    eventSource = 'capital',
+    authorizationMethod = 'system_settlement',
+    primaryAmountSats = 0,
+    reference = null,
+    proofGroupId = null,
+    publicSafeRefs = {},
+    allowedPublicRefKeys = [],
+    createdAtMs = Date.now(),
+  } = {}) {
+    assertAgentId(agentId);
+    if (!moneyEventType || typeof moneyEventType !== 'string') {
+      throw new Error('moneyEventType is required');
+    }
+    const idempotencyRef = reference || proofSafeKey('lifecycle-ref', {
+      agent_id: agentId,
+      money_event_type: moneyEventType,
+      public_safe_refs: publicSafeRefs,
+      created_at_ms: createdAtMs,
+    });
+    const proofInput = {
+      idempotency_key: proofSafeKey('capital_lifecycle', {
+        agent_id: agentId,
+        money_event_type: moneyEventType,
+        reference: idempotencyRef,
+      }),
+      proof_group_id: proofGroupId,
+      proof_record_type: 'money_lifecycle',
+      money_event_type: moneyEventType,
+      money_event_status: moneyEventStatus,
+      agent_id: agentId,
+      event_source: eventSource,
+      authorization_method: authorizationMethod,
+      primary_amount_sats: primaryAmountSats,
+      public_safe_refs: {
+        agent_id: agentId,
+        amount_sats: primaryAmountSats,
+        status: moneyEventStatus,
+        reference_hash: safeReferenceHash(reference),
+        ...publicSafeRefs,
+      },
+      allowed_public_ref_keys: ['reference_hash', ...allowedPublicRefKeys],
+      created_at_ms: createdAtMs,
+    };
+    const { proof } = await this._appendProof(proofInput);
+    return proof;
+  }
+
   /**
    * Append an entry to the audit chain.
    */
@@ -320,6 +436,9 @@ export class CapitalLedger {
    */
   async getBalance(agentId) {
     assertAgentId(agentId);
+    if (this._proofLedger) {
+      return this._proofLedger.getCapitalBalance(agentId);
+    }
     const state = await this._readState(agentId);
     return this._balanceSummary(state);
   }
@@ -328,6 +447,9 @@ export class CapitalLedger {
    * Get all agents' capital balances. Reads per-agent state dir.
    */
   async getAllBalances() {
+    if (this._proofLedger) {
+      return this._proofLedger.getAllCapitalBalances();
+    }
     const entries = await this._dataLayer.listDir(STATE_DIR);
     const results = {};
     for (const entry of entries) {
@@ -361,6 +483,33 @@ export class CapitalLedger {
 
       state.pending_deposit += amount;
       state.total_deposited += amount;
+
+      const proofEventType = isLightningCapitalSource(details)
+        ? 'lightning_capital_onchain_pending'
+        : 'capital_deposit_pending';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, { agent_id: agentId, txid }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: 'pending',
+        agent_id: agentId,
+        event_source: isLightningCapitalSource(details) ? 'lightning_capital' : 'capital',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: amount,
+        gross_amount_sats: Number.isInteger(details.gross_amount_sats) ? details.gross_amount_sats : null,
+        fee_sats: Number.isInteger(details.actual_fee_sats) ? details.actual_fee_sats : null,
+        capital_pending_deposit_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          gross_amount_sats: Number.isInteger(details.gross_amount_sats) ? details.gross_amount_sats : undefined,
+          fee_sats: Number.isInteger(details.actual_fee_sats) ? details.actual_fee_sats : undefined,
+          txid,
+          confirmation_count: Number.isInteger(details.confirmations) ? details.confirmations : undefined,
+          status: 'pending',
+          provider: details.source,
+        },
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `recordDeposit:${agentId}`);
 
@@ -416,6 +565,34 @@ export class CapitalLedger {
       state.pending_deposit -= amount;
       state.available += amount;
 
+      const proofEventType = isLightningCapitalSource(details)
+        ? 'lightning_capital_confirmed'
+        : 'capital_deposit_confirmed';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, { agent_id: agentId, txid }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: 'confirmed',
+        agent_id: agentId,
+        event_source: isLightningCapitalSource(details) ? 'lightning_capital' : 'capital',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: amount,
+        gross_amount_sats: Number.isInteger(details.gross_amount_sats) ? details.gross_amount_sats : null,
+        fee_sats: Number.isInteger(details.actual_fee_sats) ? details.actual_fee_sats : null,
+        capital_pending_deposit_delta_sats: -amount,
+        capital_available_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          gross_amount_sats: Number.isInteger(details.gross_amount_sats) ? details.gross_amount_sats : undefined,
+          fee_sats: Number.isInteger(details.actual_fee_sats) ? details.actual_fee_sats : undefined,
+          txid,
+          confirmation_count: Number.isInteger(details.confirmations) ? details.confirmations : undefined,
+          status: 'confirmed',
+          provider: details.source,
+        },
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `confirmDeposit:${agentId}`);
 
       const activity = {
@@ -469,6 +646,29 @@ export class CapitalLedger {
       state.available -= amount;
       state.locked += amount;
 
+      const isRebalanceLock = channelPoint.startsWith('rebalance:');
+      const proofEventType = isRebalanceLock ? 'rebalance_fee_locked' : 'channel_open_capital_locked';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, { agent_id: agentId, channel_point: channelPoint }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: 'pending',
+        agent_id: agentId,
+        event_source: isRebalanceLock ? 'rebalance' : 'channel_open',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: -amount,
+        capital_locked_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          channel_point: isPublicChannelPoint(channelPoint) ? channelPoint : undefined,
+          reference_hash: isPublicChannelPoint(channelPoint) ? undefined : safeReferenceHash(channelPoint),
+          status: 'pending',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `lockForChannel:${agentId}`);
 
       const activity = {
@@ -519,6 +719,27 @@ export class CapitalLedger {
 
       state.locked -= amount;
       state.available += amount;
+
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('channel_open_failed_unlocked', { agent_id: agentId, reference }),
+        proof_record_type: 'money_event',
+        money_event_type: 'channel_open_failed_unlocked',
+        money_event_status: 'refunded',
+        agent_id: agentId,
+        event_source: 'channel_open',
+        authorization_method: 'refund',
+        primary_amount_sats: amount,
+        capital_locked_delta_sats: -amount,
+        capital_available_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          channel_point: isPublicChannelPoint(reference) ? reference : undefined,
+          reference_hash: safeReferenceHash(reference),
+          status: 'refunded',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `unlockForFailedOpen:${agentId}`);
 
@@ -596,6 +817,29 @@ export class CapitalLedger {
       state.pending_close += localBalance;
       state.total_routing_pnl += routingPnl;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('channel_close_pending', { agent_id: agentId, channel_point: channelPoint }),
+        proof_record_type: 'money_event',
+        money_event_type: 'channel_close_pending',
+        money_event_status: 'pending',
+        agent_id: agentId,
+        event_source: 'channel_close',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: localBalance,
+        capital_locked_delta_sats: -originalLocked,
+        capital_pending_close_delta_sats: localBalance,
+        routing_pnl_delta_sats: routingPnl,
+        public_safe_refs: {
+          amount_sats: localBalance,
+          gross_amount_sats: originalLocked,
+          channel_point: isPublicChannelPoint(channelPoint) ? channelPoint : undefined,
+          reference_hash: isPublicChannelPoint(channelPoint) ? undefined : safeReferenceHash(channelPoint),
+          status: 'pending',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `initiateClose:${agentId}`);
 
       const activity = {
@@ -665,6 +909,25 @@ export class CapitalLedger {
 
       state.pending_close -= settledAmount;
       state.available += settledAmount;
+
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('channel_close_settled', { agent_id: agentId, txid }),
+        proof_record_type: 'money_event',
+        money_event_type: 'channel_close_settled',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'channel_close',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: settledAmount,
+        capital_pending_close_delta_sats: -settledAmount,
+        capital_available_delta_sats: settledAmount,
+        public_safe_refs: {
+          amount_sats: settledAmount,
+          txid,
+          status: 'settled',
+        },
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `settleClose:${agentId}`);
 
@@ -746,6 +1009,41 @@ export class CapitalLedger {
         );
       }
 
+      const proofInput = {
+        idempotency_key: proofSafeKey('channel_close_untracked_reconciliation', {
+          agent_id: agentId,
+          txid,
+          channel_point: channelPoint,
+          source_bucket: sourceBucket,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: 'channel_close_untracked_reconciliation',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'channel_close',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: settledAmount,
+        fee_sats: closeFeeSats,
+        capital_available_delta_sats: settledAmount,
+        routing_pnl_delta_sats: routingPnlAdjustmentSats,
+        public_safe_refs: {
+          amount_sats: settledAmount,
+          fee_sats: closeFeeSats,
+          txid,
+          channel_point: isPublicChannelPoint(channelPoint) ? channelPoint : undefined,
+          source_bucket: sourceBucket,
+          status: 'settled',
+        },
+        allowed_public_ref_keys: ['source_bucket'],
+      };
+      if (sourceBucket === 'pending_close') {
+        proofInput.capital_pending_close_delta_sats = -localBalanceAtClose;
+      } else {
+        proofInput.capital_locked_delta_sats = -originalLocked;
+      }
+      const proofResult = await this._appendProof(proofInput);
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `reconcileClosedChannel:${agentId}`);
 
       await this._logActivity({
@@ -820,6 +1118,33 @@ export class CapitalLedger {
       state.locked += originalLocked;
       state.total_routing_pnl -= routingPnl;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('channel_close_failed_rolled_back', {
+          agent_id: agentId,
+          channel_point: channelPoint,
+          reason,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: 'channel_close_failed_rolled_back',
+        money_event_status: 'refunded',
+        agent_id: agentId,
+        event_source: 'channel_close',
+        authorization_method: 'refund',
+        primary_amount_sats: originalLocked,
+        capital_pending_close_delta_sats: -localBalance,
+        capital_locked_delta_sats: originalLocked,
+        routing_pnl_delta_sats: -routingPnl,
+        public_safe_refs: {
+          amount_sats: originalLocked,
+          channel_point: isPublicChannelPoint(channelPoint) ? channelPoint : undefined,
+          reference_hash: isPublicChannelPoint(channelPoint) ? undefined : safeReferenceHash(channelPoint),
+          reason,
+          status: 'refunded',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `rollbackInitiatedClose:${agentId}`);
 
       const activity = {
@@ -855,7 +1180,7 @@ export class CapitalLedger {
    * Withdraw available capital to an external Bitcoin address.
    * available -= amount, total_withdrawn += amount
    */
-  async withdraw(agentId, amount, destinationAddress) {
+  async withdraw(agentId, amount, destinationAddress, details = {}) {
     assertAgentId(agentId);
     assertPositiveSats(amount, 'withdrawal amount');
     if (!destinationAddress || typeof destinationAddress !== 'string') {
@@ -875,6 +1200,39 @@ export class CapitalLedger {
 
       state.available -= amount;
       state.total_withdrawn += amount;
+
+      const destinationHash = safeReferenceHash(destinationAddress);
+      const reference = typeof details.reference === 'string' && details.reference.length > 0
+        ? details.reference
+        : `capital-withdraw:${Date.now()}:${sha256Hex(`${agentId}:${amount}:${destinationHash}`).slice(0, 12)}`;
+      const proofEventType = details.event_type === 'swap_direct_payout_debited'
+        ? 'swap_direct_payout_debited'
+        : 'capital_withdrawal_debited';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, {
+          agent_id: agentId,
+          amount_sats: amount,
+          destination_hash: destinationHash,
+          reference,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: 'submitted',
+        agent_id: agentId,
+        event_source: proofEventType === 'swap_direct_payout_debited' ? 'swap' : 'capital',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: -amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          destination_hash: destinationHash,
+          reference_hash: safeReferenceHash(reference),
+          swap_id: details.swap_id,
+          status: 'submitted',
+        },
+        allowed_public_ref_keys: ['destination_hash', 'reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `withdraw:${agentId}`);
 
@@ -906,7 +1264,7 @@ export class CapitalLedger {
    * Refund a withdrawal that never broadcast successfully.
    * available += amount, total_withdrawn -= amount
    */
-  async refundWithdrawal(agentId, amount, destinationAddress, reason = 'withdrawal_failed') {
+  async refundWithdrawal(agentId, amount, destinationAddress, reason = 'withdrawal_failed', details = {}) {
     assertAgentId(agentId);
     assertPositiveSats(amount, 'withdrawal refund amount');
     if (!destinationAddress || typeof destinationAddress !== 'string') {
@@ -926,6 +1284,41 @@ export class CapitalLedger {
 
       state.total_withdrawn -= amount;
       state.available += amount;
+
+      const destinationHash = safeReferenceHash(destinationAddress);
+      const reference = typeof details.reference === 'string' && details.reference.length > 0
+        ? details.reference
+        : `${reason}:${destinationHash}`;
+      const proofEventType = details.event_type === 'swap_failed_refunded'
+        ? 'swap_failed_refunded'
+        : 'capital_withdrawal_refunded';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, {
+          agent_id: agentId,
+          amount_sats: amount,
+          destination_hash: destinationHash,
+          reason,
+          reference,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: 'refunded',
+        agent_id: agentId,
+        event_source: proofEventType === 'swap_failed_refunded' ? 'swap' : 'capital',
+        authorization_method: 'refund',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          destination_hash: destinationHash,
+          reference_hash: safeReferenceHash(reference),
+          reason,
+          swap_id: details.swap_id,
+          status: 'refunded',
+        },
+        allowed_public_ref_keys: ['destination_hash', 'reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `refund-withdrawal:${agentId}`);
 
@@ -984,6 +1377,27 @@ export class CapitalLedger {
       state.available -= amount;
       state.total_service_spent += amount;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('paid_service_charge_debited', { agent_id: agentId, reference, service }),
+        proof_record_type: 'money_event',
+        money_event_type: 'paid_service_charge_debited',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'paid_service',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: -amount,
+        capital_service_spent_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          service,
+          reference_hash: safeReferenceHash(reference),
+          status: 'settled',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `spendOnService:${agentId}`);
 
       const activity = {
@@ -1041,6 +1455,28 @@ export class CapitalLedger {
       state.available += amount;
       state.total_service_spent -= amount;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('paid_service_refunded', { agent_id: agentId, reference, service, reason }),
+        proof_record_type: 'money_event',
+        money_event_type: 'paid_service_refunded',
+        money_event_status: 'refunded',
+        agent_id: agentId,
+        event_source: 'paid_service',
+        authorization_method: 'refund',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: amount,
+        capital_service_spent_delta_sats: -amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          service,
+          reference_hash: safeReferenceHash(reference),
+          reason: reason || null,
+          status: 'refunded',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `refundServiceSpend:${agentId}`);
 
       const activity = {
@@ -1093,6 +1529,25 @@ export class CapitalLedger {
       state.available += amount;
       state.total_revenue_credited += amount;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('routing_revenue_credited', { agent_id: agentId, reference }),
+        proof_record_type: 'money_event',
+        money_event_type: 'routing_revenue_credited',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'routing_revenue',
+        authorization_method: 'routing_revenue',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          reference_hash: safeReferenceHash(reference),
+          status: 'settled',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `creditRevenue:${agentId}`);
 
       const activity = {
@@ -1138,6 +1593,25 @@ export class CapitalLedger {
       state.available += amount;
       state.total_ecash_funded += amount;
 
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey('capital_ecash_funding_credited', { agent_id: agentId, reference }),
+        proof_record_type: 'money_event',
+        money_event_type: 'capital_ecash_funding_credited',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'ecash_to_channel_funding',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: amount,
+        capital_available_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          reference_hash: safeReferenceHash(reference),
+          status: 'settled',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
+
       await this._writeState(agentId, state, `creditEcashFunding:${agentId}`);
 
       const activity = {
@@ -1177,6 +1651,54 @@ export class CapitalLedger {
     const unlock = await this._mutex.acquire(`capital:${agentId}`);
     try {
       const state = await this._readState(agentId);
+      const mappedProof = fundingEventProofType(type);
+      if (mappedProof) {
+        const [moneyEventType, moneyEventStatus] = mappedProof;
+        const amount = Number.isSafeInteger(details.amount_sats) ? details.amount_sats : null;
+        const referenceSeed = {
+          agent_id: agentId,
+          type,
+          reference: details.reference || null,
+          flow_hash: safeReferenceHash(details.flow_id),
+          amount_sats: amount,
+          status: details.status || moneyEventStatus,
+          txid: details.txid || details.claim_txid || null,
+          swap_id: details.loop_out_swap_id || details.boltz_swap_id || null,
+        };
+        const auth = /preflight|invoice_created/.test(type) ? 'agent_api_key' : 'system_settlement';
+        const proofResult = await this._appendProof({
+          idempotency_key: proofSafeKey(moneyEventType, referenceSeed),
+          proof_record_type: 'money_lifecycle',
+          money_event_type: moneyEventType,
+          money_event_status: moneyEventStatus,
+          agent_id: agentId,
+          event_source: 'lightning_capital',
+          authorization_method: auth,
+          primary_amount_sats: amount,
+          gross_amount_sats: Number.isSafeInteger(details.gross_amount_sats) ? details.gross_amount_sats : null,
+          fee_sats: Number.isSafeInteger(details.actual_fee_sats) ? details.actual_fee_sats : null,
+          public_safe_refs: {
+            amount_sats: amount,
+            gross_amount_sats: Number.isSafeInteger(details.gross_amount_sats) ? details.gross_amount_sats : undefined,
+            fee_sats: Number.isSafeInteger(details.actual_fee_sats) ? details.actual_fee_sats : undefined,
+            provider: details.provider || details.source,
+            status: details.status || moneyEventStatus,
+            txid: details.txid || details.claim_txid,
+            swap_id: details.loop_out_swap_id || details.boltz_swap_id,
+            reference_hash: safeReferenceHash(details.reference),
+            flow_hash: safeReferenceHash(details.flow_id),
+          },
+          allowed_public_ref_keys: ['reference_hash', 'flow_hash'],
+        });
+        if (proofResult.existing) {
+          return {
+            agent_id: agentId,
+            type,
+            balance_after: this._proofBalance(agentId) || this._balanceSummary(state),
+            ...details,
+          };
+        }
+      }
       const activity = {
         agent_id: agentId,
         type,
@@ -1234,6 +1756,33 @@ export class CapitalLedger {
       state.locked -= maxFeeLocked;
       state.available += refunded;
       state.total_routing_pnl += actualFee;
+
+      const proofEventType = actualFee > 0
+        ? 'rebalance_succeeded_fee_settled'
+        : 'rebalance_failed_fee_refunded';
+      const proofResult = await this._appendProof({
+        idempotency_key: proofSafeKey(proofEventType, { agent_id: agentId, reference }),
+        proof_record_type: 'money_event',
+        money_event_type: proofEventType,
+        money_event_status: actualFee > 0 ? 'settled' : 'refunded',
+        agent_id: agentId,
+        event_source: 'rebalance',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: maxFeeLocked,
+        fee_sats: actualFee,
+        capital_locked_delta_sats: -maxFeeLocked,
+        capital_available_delta_sats: refunded,
+        routing_pnl_delta_sats: actualFee,
+        public_safe_refs: {
+          amount_sats: maxFeeLocked,
+          fee_sats: actualFee,
+          net_amount_sats: refunded,
+          reference_hash: safeReferenceHash(reference),
+          status: actualFee > 0 ? 'settled' : 'refunded',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+      if (proofResult.existing) return this._proofBalance(agentId) || this._balanceSummary(state);
 
       await this._writeState(agentId, state, `settleRebalance:${agentId}`);
 
@@ -1326,6 +1875,32 @@ export class CapitalLedger {
   async readActivity({ agentId, limit = 50, offset = 0 } = {}) {
     const clampedLimit = Math.min(Math.max(1, limit), 500);
     const clampedOffset = Math.max(0, offset);
+
+    if (this._proofLedger) {
+      const entries = this._proofLedger
+        .listCapitalActivity({ agentId, limit: clampedLimit, offset: clampedOffset })
+        .map((proof) => ({
+          source_of_truth: 'proof_ledger',
+          proof_id: proof.proof_id,
+          proof_hash: proof.proof_hash,
+          type: proof.money_event_type,
+          status: proof.money_event_status,
+          agent_id: proof.agent_id,
+          amount_sats: proof.primary_amount_sats,
+          capital_available_delta_sats: proof.capital_available_delta_sats,
+          capital_locked_delta_sats: proof.capital_locked_delta_sats,
+          capital_pending_deposit_delta_sats: proof.capital_pending_deposit_delta_sats,
+          capital_pending_close_delta_sats: proof.capital_pending_close_delta_sats,
+          capital_service_spent_delta_sats: proof.capital_service_spent_delta_sats,
+          routing_pnl_delta_sats: proof.routing_pnl_delta_sats,
+          public_safe_refs: proof.public_safe_refs,
+          _ts: proof.created_at_ms,
+        }));
+      return {
+        entries,
+        total: this._proofLedger.countCapitalActivity({ agentId }),
+      };
+    }
 
     let all;
     if (agentId) {

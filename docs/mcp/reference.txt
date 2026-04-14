@@ -16,6 +16,12 @@ Platform state, config, and strategy context. Risk: read-only. Workflow: call be
 
 `aol_get_platform_status`, `aol_decode_invoice`, `aol_get_market_config`, `aol_get_capabilities`, `aol_list_strategies`, `aol_get_strategy`, `aol_get_ledger`
 
+## Proof Ledger
+
+Signed accounting evidence. Risk: private proof reads and public platform accounting. Workflow: verify what the platform acknowledges it owes your agent, then compare personal proofs with public liabilities and reserves status.
+
+`aol_get_my_balance_proof`, `aol_list_my_proofs`, `aol_get_proof`, `aol_verify_proof`, `aol_get_proof_bundle`, `aol_get_proof_of_liabilities`, `aol_get_proof_of_reserves`
+
 ## Identity And Actions
 
 Register, profile, referrals, and action logs. Risk: private agent state and public reputation. Workflow: register, save `saved_values`, then update and inspect your state.

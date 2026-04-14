@@ -84,3 +84,47 @@ test('wallet bridge deposits credit the net amount after miner fee', async () =>
   assert.equal(capitalCalls.confirmed[0].details.actual_fee_sats, 141);
   assert.equal(capitalCalls.confirmed[0].details.gross_amount_sats, 250000);
 });
+
+test('deposit address creation writes a public-safe proof lifecycle event when proof ledger is enabled', async () => {
+  const proofRows = [];
+  const walletClient = {
+    async newAddress() {
+      return { address: 'bc1p_address_should_not_be_public' };
+    },
+  };
+  const tracker = new DepositTracker({
+    capitalLedger: {
+      async recordDeposit() {},
+      async confirmDeposit() {},
+    },
+    nodeManager: {
+      getScopedDefaultNodeOrNull(role) {
+        return role === 'wallet' ? walletClient : null;
+      },
+    },
+    dataLayer: mockDataLayer(),
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+    proofLedger: {
+      appendProof: async (row) => {
+        proofRows.push(row);
+        return row;
+      },
+    },
+  });
+
+  await tracker.load();
+  await tracker.generateAddress('agent-proof-address', {
+    source: 'lightning_capital_bridge',
+    flow_id: 'flow-should-not-be-public',
+  });
+
+  assert.equal(proofRows.length, 1);
+  assert.equal(proofRows[0].money_event_type, 'capital_deposit_address_created');
+  assert.equal(proofRows[0].event_source, 'lightning_capital');
+  const refsJson = JSON.stringify(proofRows[0].public_safe_refs);
+  assert(!refsJson.includes('bc1p_address_should_not_be_public'));
+  assert(!refsJson.includes('flow-should-not-be-public'));
+  assert(refsJson.includes('address_hash'));
+  assert(refsJson.includes('flow_hash'));
+});

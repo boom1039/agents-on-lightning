@@ -58,6 +58,7 @@ const MCP_PEER_PUBKEY_ALIAS_HINT = 'Alias for peer_pubkey; send the same Lightni
 const MCP_TOURNAMENT_ID_HINT = 'Real tournament id returned by aol_list_tournaments; do not invent ids.';
 const MCP_TOURNAMENT_ID_ALIAS_HINT = 'Alias for tournament_id; send the same tournament id value.';
 const MCP_CHANNEL_POINT_ALIAS_HINT = 'Alias for chan_id when accepted; send the exact channel id or channel point returned by channel tools.';
+const MCP_PROOF_ID_HINT = 'Real proof_id returned by aol_list_my_proofs or a proof view. Use it to read or verify one signed Proof Ledger row owned by your agent.';
 function getInternalRequestTimeoutMs(value = process.env.AOL_MCP_INTERNAL_REQUEST_TIMEOUT_MS) {
   const parsed = Number(value || DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS;
@@ -1107,6 +1108,104 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl }) {
     internalBaseUrl,
     method: 'GET',
     path: '/api/v1/ledger',
+  })));
+
+  server.registerTool('aol_get_my_balance_proof', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+    },
+  }, async ({ api_key }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/proofs/me/balance',
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_list_my_proofs', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      limit: z.number().int().positive().optional().describe('Optional maximum number of signed proof rows to return for your agent. Use this to page through your own Proof Ledger history.'),
+      offset: z.number().int().nonnegative().optional().describe('Optional row offset for paging through your own signed proof rows.'),
+    },
+  }, async ({ api_key, limit, offset }) => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/proofs/me',
+    query: { limit, offset },
+    headers: { Authorization: `Bearer ${api_key}` },
+  })));
+
+  server.registerTool('aol_get_proof', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      proof_id: z.string().optional().describe(MCP_PROOF_ID_HINT),
+      id: z.string().optional().describe('Alias for proof_id; send the same signed Proof Ledger proof id value.'),
+    },
+  }, async ({ api_key, proof_id, id }) => {
+    const normalizedProofId = firstNonEmptyString(proof_id, id);
+    if (!normalizedProofId) {
+      return toolInputError('Send proof_id or id from aol_list_my_proofs.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/proofs/proof/${encodeURIComponent(normalizedProofId)}`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
+
+  server.registerTool('aol_verify_proof', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      proof_id: z.string().optional().describe(MCP_PROOF_ID_HINT),
+      id: z.string().optional().describe('Alias for proof_id; send the same signed Proof Ledger proof id value.'),
+    },
+  }, async ({ api_key, proof_id, id }) => {
+    const normalizedProofId = firstNonEmptyString(proof_id, id);
+    if (!normalizedProofId) {
+      return toolInputError('Send proof_id or id from aol_list_my_proofs.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/proofs/proof/${encodeURIComponent(normalizedProofId)}/verify`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
+
+  server.registerTool('aol_get_proof_bundle', {
+    inputSchema: {
+      api_key: z.string().describe(MCP_API_KEY_HINT),
+      proof_id: z.string().optional().describe(MCP_PROOF_ID_HINT),
+      id: z.string().optional().describe('Alias for proof_id; send the same signed Proof Ledger proof id value.'),
+    },
+  }, async ({ api_key, proof_id, id }) => {
+    const normalizedProofId = firstNonEmptyString(proof_id, id);
+    if (!normalizedProofId) {
+      return toolInputError('Send proof_id or id from aol_list_my_proofs.');
+    }
+    return toToolResult(await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/proofs/proof/${encodeURIComponent(normalizedProofId)}/bundle`,
+      headers: { Authorization: `Bearer ${api_key}` },
+    }));
+  });
+
+  server.registerTool('aol_get_proof_of_liabilities', {
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/proofs/liabilities',
+  })));
+
+  server.registerTool('aol_get_proof_of_reserves', {
+    inputSchema: {},
+  }, async () => toToolResult(await performSiteRequest({
+    internalBaseUrl,
+    method: 'GET',
+    path: '/api/v1/proofs/reserves',
   })));
 
   server.registerTool('aol_get_leaderboard', {

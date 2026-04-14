@@ -19,11 +19,21 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { acquire } from '../identity/mutex.js';
 import { logWalletOperation } from '../identity/audit-log.js';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
+}
 
 // Path to the Python query runner
 const ANALYTICS_SCRIPT_DIR = process.env.AOL_ANALYTICS_SCRIPT_DIR
@@ -126,17 +136,48 @@ export class AnalyticsGateway {
    * @param {import('../data-layer.js').DataLayer} opts.dataLayer
    * @param {import('../wallet/ledger.js').PublicLedger} opts.ledger
    * @param {import('./capital-ledger.js').CapitalLedger} [opts.capitalLedger]
+   * @param {import('../proof-ledger/proof-ledger.js').ProofLedger} [opts.proofLedger]
    */
-  constructor({ walletOps, dataLayer, ledger, capitalLedger = null, nodeManager = null }) {
+  constructor({ walletOps, dataLayer, ledger, capitalLedger = null, nodeManager = null, proofLedger = null }) {
     this._walletOps = walletOps;
     this._dataLayer = dataLayer;
     this._ledger = ledger;
     this._capitalLedger = capitalLedger;
     this._nodeManager = nodeManager;
+    this._proofLedger = proofLedger;
     this._activeQueries = 0;
     this._totalExecuted = 0;
     this._totalRevenueSats = 0;
     this._historyPath = 'data/analytics/query-history.jsonl';
+  }
+
+  async _recordServiceFulfilledProof(agentId, amount, queryId, executionMs) {
+    if (!this._proofLedger?.appendProof) return;
+    try {
+      await this._proofLedger.appendProof({
+        idempotency_key: proofSafeKey('paid_service_fulfilled', {
+          agent_id: agentId,
+          service: 'analytics',
+          service_id: queryId,
+          execution_ms: executionMs,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'paid_service_fulfilled',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'paid_service',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          service: 'analytics',
+          service_id: queryId,
+          status: 'fulfilled',
+        },
+      });
+    } catch (err) {
+      console.error(`[AnalyticsGateway] Proof lifecycle append failed for analytics fulfillment: ${err.message}`);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -311,13 +352,16 @@ export class AnalyticsGateway {
         this._totalExecuted++;
         this._totalRevenueSats += query.price_sats;
 
-        await this._ledger.record({
-          type: 'analytics_query',
-          agent_id: agentId,
-          amount_sats: query.price_sats,
-          query_id: queryId,
-          execution_ms: executionMs,
-        });
+        if (!this._proofLedger && this._ledger?.record) {
+          await this._ledger.record({
+            type: 'analytics_query',
+            agent_id: agentId,
+            amount_sats: query.price_sats,
+            query_id: queryId,
+            execution_ms: executionMs,
+          });
+        }
+        await this._recordServiceFulfilledProof(agentId, query.price_sats, queryId, executionMs);
 
         // Log to query history
         await this._logQuery(agentId, queryId, params, query.price_sats, executionMs, true);
@@ -342,13 +386,16 @@ export class AnalyticsGateway {
           this._totalExecuted++;
           this._totalRevenueSats += query.price_sats;
 
-          await this._ledger.record({
-            type: 'analytics_query',
-            agent_id: agentId,
-            amount_sats: query.price_sats,
-            query_id: queryId,
-            execution_ms: executionMs,
-          });
+          if (!this._proofLedger && this._ledger?.record) {
+            await this._ledger.record({
+              type: 'analytics_query',
+              agent_id: agentId,
+              amount_sats: query.price_sats,
+              query_id: queryId,
+              execution_ms: executionMs,
+            });
+          }
+          await this._recordServiceFulfilledProof(agentId, query.price_sats, queryId, executionMs);
 
           await this._logQuery(agentId, queryId, params, query.price_sats, executionMs, true);
 

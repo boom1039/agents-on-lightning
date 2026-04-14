@@ -18,6 +18,8 @@ import { DedupCache } from '../channel-accountability/dedup-cache.js';
 import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
+import { createHash } from 'node:crypto';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
 
 const STATE_PATH = 'data/channel-market/pending-closes.json';
 
@@ -35,6 +37,14 @@ function parsePositiveSats(value) {
     if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   }
   return null;
+}
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
 }
 
 function isUntrackedPeerCloseLedgerError(err) {
@@ -89,7 +99,7 @@ export class ChannelCloser {
    * @param {import('../channel-accountability/channel-assignment-registry.js').ChannelAssignmentRegistry} opts.assignmentRegistry
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, config = {} }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, proofLedger = null, config = {} }) {
     if (!capitalLedger) throw new Error('ChannelCloser requires capitalLedger');
     if (!nodeManager) throw new Error('ChannelCloser requires nodeManager');
     if (!dataLayer) throw new Error('ChannelCloser requires dataLayer');
@@ -105,6 +115,7 @@ export class ChannelCloser {
     this._agentRegistry = agentRegistry;
     this._assignmentRegistry = assignmentRegistry;
     this._mutex = mutex;
+    this._proofLedger = proofLedger;
 
     // channel_point → pending close entry
     this._state = {};
@@ -484,6 +495,20 @@ export class ChannelCloser {
     };
   }
 
+  async _appendProof(input) {
+    if (!this._proofLedger?.appendProof) return null;
+    return this._proofLedger.appendProof(input);
+  }
+
+  async _appendProofBestEffort(input, context) {
+    try {
+      return await this._appendProof(input);
+    } catch (err) {
+      console.error(`[ChannelCloser] Proof lifecycle append failed for ${context}: ${err.message}`);
+      return null;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Close request
   // ---------------------------------------------------------------------------
@@ -492,7 +517,7 @@ export class ChannelCloser {
     const validation = await this._validate(agentId, payload);
     if (!validation.success) return validation;
 
-    const { assignment, params } = validation;
+    const { assignment, params, instrHash } = validation;
     const channelPoint = params.channel_point;
     const force = params.force === true;
 
@@ -562,6 +587,27 @@ export class ChannelCloser {
     // Capital ledger: initiateClose
     const unlock = await this._mutex.acquire(`close:${channelPoint}`);
     try {
+      await this._appendProof({
+        idempotency_key: proofSafeKey('channel_close_instruction_accepted', {
+          agent_id: agentId,
+          instruction_hash: instrHash,
+          channel_point: channelPoint,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'channel_close_instruction_accepted',
+        money_event_status: 'confirmed',
+        agent_id: agentId,
+        event_source: 'channel_close',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: localBalance,
+        public_safe_refs: {
+          amount_sats: localBalance,
+          channel_point: channelPoint,
+          instruction_hash: instrHash,
+          peer_pubkey: assignment.remote_pubkey,
+          status: 'accepted',
+        },
+      });
       await this._capitalLedger.initiateClose(agentId, localBalance, originalLocked, channelPoint);
     } catch (err) {
       unlock();
@@ -609,6 +655,27 @@ export class ChannelCloser {
           error: normalizedError,
           original_error: String(err?.message || ''),
         });
+
+        await this._appendProofBestEffort({
+          idempotency_key: proofSafeKey('channel_close_submission_unknown', {
+            agent_id: agentId,
+            channel_point: channelPoint,
+            instruction_hash: instrHash,
+          }),
+          proof_record_type: 'money_lifecycle',
+          money_event_type: 'channel_close_submission_unknown',
+          money_event_status: 'unknown',
+          agent_id: agentId,
+          event_source: 'channel_close',
+          authorization_method: 'agent_signed_instruction',
+          primary_amount_sats: localBalance,
+          public_safe_refs: {
+            amount_sats: localBalance,
+            channel_point: channelPoint,
+            instruction_hash: instrHash,
+            status: 'unknown',
+          },
+        }, 'channel_close_submission_unknown');
 
         return {
           success: true,
@@ -658,6 +725,27 @@ export class ChannelCloser {
       local_balance_sats: localBalance,
       original_locked_sats: originalLocked,
     });
+
+    await this._appendProofBestEffort({
+      idempotency_key: proofSafeKey('channel_close_submitted', {
+        agent_id: agentId,
+        channel_point: channelPoint,
+        instruction_hash: instrHash,
+      }),
+      proof_record_type: 'money_lifecycle',
+      money_event_type: 'channel_close_submitted',
+      money_event_status: 'submitted',
+      agent_id: agentId,
+      event_source: 'channel_close',
+      authorization_method: 'agent_signed_instruction',
+      primary_amount_sats: localBalance,
+      public_safe_refs: {
+        amount_sats: localBalance,
+        channel_point: channelPoint,
+        instruction_hash: instrHash,
+        status: 'submitted',
+      },
+    }, 'channel_close_submitted');
 
     const routingPnl = originalLocked - localBalance;
     return {

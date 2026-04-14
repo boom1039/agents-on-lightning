@@ -25,6 +25,12 @@ Do not use `git pull`, manual `scp`, or direct lower-level scripts as the normal
 Do not commit real env files, config files, certs, macaroons, keys, or live data.
 Production external agent access is MCP-only: public clients use `/mcp`; `/api/v1/*` is an internal route layer.
 
+Proof Ledger cutover has its own runbook:
+
+```text
+deploy/proof-ledger-cutover.md
+```
+
 ## Canonical Deploy
 
 Create a private deploy env first:

@@ -14,10 +14,16 @@
  * State persisted to disk — survives Express restarts.
  */
 
+import { createHash } from 'node:crypto';
+
 const STATE_PATH = 'data/channel-market/deposit-addresses.json';
 const DUST_THRESHOLD_SATS = 10_000;
 const LIGHTNING_BRIDGE_SOURCE = 'lightning_capital_bridge';
 const WALLET_BRIDGE_LABEL_PREFIX = 'lightning-capital-wallet:';
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
 
 export class DepositTracker {
   /**
@@ -27,9 +33,10 @@ export class DepositTracker {
    * @param {import('../data-layer.js').DataLayer} opts.dataLayer
    * @param {import('../channel-accountability/hash-chain-audit-log.js').HashChainAuditLog} opts.auditLog
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
+   * @param {import('../proof-ledger/proof-ledger.js').ProofLedger} [opts.proofLedger]
    * @param {number} [opts.confirmationsRequired=3]
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, mutex, confirmationsRequired = 3 }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, mutex, proofLedger = null, confirmationsRequired = 3 }) {
     if (!capitalLedger) throw new Error('DepositTracker requires capitalLedger');
     if (!nodeManager) throw new Error('DepositTracker requires nodeManager');
     if (!dataLayer) throw new Error('DepositTracker requires dataLayer');
@@ -41,6 +48,7 @@ export class DepositTracker {
     this._dataLayer = dataLayer;
     this._auditLog = auditLog;
     this._mutex = mutex;
+    this._proofLedger = proofLedger;
     this._confirmationsRequired = confirmationsRequired;
 
     // address → { agent_id, created_at, status, amount_sats, txid, confirmations }
@@ -121,6 +129,27 @@ export class DepositTracker {
       source: metadata.source || 'onchain',
       flow_id: metadata.flow_id || null,
     };
+
+    if (this._proofLedger?.appendProof) {
+      const source = metadata.source || 'onchain';
+      const addressHash = sha256Hex(address);
+      await this._proofLedger.appendProof({
+        idempotency_key: `capital-deposit-address-created:${agentId}:${addressHash}`,
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'capital_deposit_address_created',
+        money_event_status: 'created',
+        agent_id: agentId,
+        event_source: source === LIGHTNING_BRIDGE_SOURCE ? 'lightning_capital' : 'capital',
+        authorization_method: 'agent_api_key',
+        public_safe_refs: {
+          address_hash: addressHash,
+          flow_hash: typeof metadata.flow_id === 'string' ? sha256Hex(metadata.flow_id) : null,
+          provider: source,
+          status: 'watching',
+        },
+        allowed_public_ref_keys: ['address_hash', 'flow_hash'],
+      });
+    }
 
     await this._persist();
     console.log(`[DepositTracker] Generated address ${address} for agent ${agentId}`);

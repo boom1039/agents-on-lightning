@@ -302,6 +302,32 @@ export class SubmarineSwapProvider {
     this._state[swapId] = entry;
     await this._persist();
 
+    const payoutLabel = `market-swap-boltz:${agentId}:${swapId}`;
+    let debited = false;
+    let balanceAfterDebit = null;
+    try {
+      balanceAfterDebit = await this._capitalLedger.withdraw(agentId, amount_sats, onchain_address, {
+        reference: payoutLabel,
+        swap_id: swapId,
+        event_type: 'swap_direct_payout_debited',
+      });
+      debited = true;
+    } catch (err) {
+      entry.status = 'rejected';
+      entry.error = err.message;
+      entry.completed_at = Date.now();
+      await this._persist();
+      return {
+        success: false,
+        error: isInsufficientCapitalError(err) ? 'insufficient_capital' : err.message,
+        message: isInsufficientCapitalError(err)
+          ? `You do not have enough available capital to swap ${amount_sats} sats.`
+          : err.message,
+        hint: 'Check your available capital before creating the swap.',
+        status: isInsufficientCapitalError(err) ? 400 : 500,
+      };
+    }
+
     // Pay the Lightning invoice
     try {
       const payResult = await client.sendPayment(
@@ -311,6 +337,16 @@ export class SubmarineSwapProvider {
       );
 
       if (payResult.payment_error) {
+        if (debited) {
+          await this._capitalLedger.refundWithdrawal(
+            agentId,
+            amount_sats,
+            onchain_address,
+            'swap_invoice_payment_failed_refunded',
+            { reference: payoutLabel, swap_id: swapId, event_type: 'swap_failed_refunded' },
+          );
+          debited = false;
+        }
         entry.status = 'invoice_failed';
         entry.error = payResult.payment_error;
         await this._persist();
@@ -327,8 +363,39 @@ export class SubmarineSwapProvider {
       entry.status = 'invoice_paid';
       entry.payment_preimage = payResult.payment_preimage || null;
       entry.payment_hash = payResult.payment_hash || null;
+      entry.balance_after = balanceAfterDebit;
       await this._persist();
+      await this._capitalLedger.recordLifecycleProof?.(agentId, {
+        moneyEventType: 'swap_submitted',
+        moneyEventStatus: 'submitted',
+        eventSource: 'swap',
+        authorizationMethod: 'agent_api_key',
+        primaryAmountSats: amount_sats,
+        reference: payoutLabel,
+        publicSafeRefs: {
+          swap_id: swapId,
+          amount_sats,
+          provider: 'boltz',
+          status: 'invoice_paid',
+        },
+      }).catch((proofErr) => {
+        console.error(`[SubmarineSwap] Swap submitted proof failed for ${swapId}: ${proofErr.message}`);
+      });
     } catch (err) {
+      if (debited) {
+        try {
+          await this._capitalLedger.refundWithdrawal(
+            agentId,
+            amount_sats,
+            onchain_address,
+            'swap_invoice_payment_error_refunded',
+            { reference: payoutLabel, swap_id: swapId, event_type: 'swap_failed_refunded' },
+          );
+          debited = false;
+        } catch (refundErr) {
+          console.error(`[SubmarineSwap] CRITICAL: refund after swap payment error failed for ${swapId}: ${refundErr.message}`);
+        }
+      }
       entry.status = 'invoice_failed';
       entry.error = err.message;
       await this._persist();
@@ -399,7 +466,11 @@ export class SubmarineSwapProvider {
 
     let debited = false;
     try {
-      const balanceAfter = await this._capitalLedger.withdraw(agentId, amount_sats, onchain_address);
+      const balanceAfter = await this._capitalLedger.withdraw(agentId, amount_sats, onchain_address, {
+        reference: payoutLabel,
+        swap_id: swapId,
+        event_type: 'swap_direct_payout_debited',
+      });
       debited = true;
 
       let sendResult = null;
@@ -429,6 +500,7 @@ export class SubmarineSwapProvider {
             amount_sats,
             onchain_address,
             unknownOutcome ? 'swap_unknown_outcome_refunded' : 'swap_send_failed',
+            { reference: payoutLabel, swap_id: swapId, event_type: 'swap_failed_refunded' },
           );
           debited = false;
           entry.status = 'broadcast_failed';
@@ -455,6 +527,23 @@ export class SubmarineSwapProvider {
       entry.recovered_from_unknown = recoveredFromUnknown;
       entry.completed_at = Date.now();
       await this._persist();
+      await this._capitalLedger.recordLifecycleProof?.(agentId, {
+        moneyEventType: 'swap_payout_broadcast',
+        moneyEventStatus: 'submitted',
+        eventSource: 'swap',
+        authorizationMethod: 'agent_api_key',
+        primaryAmountSats: amount_sats,
+        reference: payoutLabel,
+        publicSafeRefs: {
+          swap_id: swapId,
+          txid: sendResult.txid,
+          amount_sats,
+          provider: 'direct_onchain_payout',
+          status: 'broadcast',
+        },
+      }).catch((proofErr) => {
+        console.error(`[SubmarineSwap] Direct payout broadcast proof failed for ${swapId}: ${proofErr.message}`);
+      });
 
       await this._auditLog.append({
         type: 'direct_onchain_payout_created',
@@ -487,6 +576,7 @@ export class SubmarineSwapProvider {
             amount_sats,
             onchain_address,
             'swap_internal_error_refunded',
+            { reference: payoutLabel, swap_id: swapId, event_type: 'swap_failed_refunded' },
           );
         } catch {}
       }
@@ -573,6 +663,23 @@ export class SubmarineSwapProvider {
           // in many cases when claimAddress was provided at creation time).
           entry.status = 'claim_broadcast';
           await this._persist();
+          await this._capitalLedger.recordLifecycleProof?.(entry.agent_id, {
+            moneyEventType: 'swap_payout_broadcast',
+            moneyEventStatus: 'submitted',
+            eventSource: 'swap',
+            authorizationMethod: 'system_settlement',
+            primaryAmountSats: entry.amount_sats,
+            reference: `boltz-claim-broadcast:${swapId}:${entry.lockup_txid || 'unknown'}`,
+            publicSafeRefs: {
+              swap_id: swapId,
+              txid: entry.lockup_txid || null,
+              amount_sats: entry.amount_sats,
+              provider: 'boltz',
+              status: 'claim_broadcast',
+            },
+          }).catch((proofErr) => {
+            console.error(`[SubmarineSwap] Claim broadcast proof failed for ${swapId}: ${proofErr.message}`);
+          });
         }
 
         if (boltzStatus === 'transaction.claimed' || boltzStatus === 'swap.completed') {
@@ -586,6 +693,23 @@ export class SubmarineSwapProvider {
           entry.status = 'deposit_credited';
           entry.completed_at = Date.now();
           await this._persist();
+          await this._capitalLedger.recordLifecycleProof?.(entry.agent_id, {
+            moneyEventType: 'swap_completed',
+            moneyEventStatus: 'settled',
+            eventSource: 'swap',
+            authorizationMethod: 'system_settlement',
+            primaryAmountSats: entry.amount_sats,
+            reference: `boltz-completed:${swapId}:${entry.claim_txid}`,
+            publicSafeRefs: {
+              swap_id: swapId,
+              txid: entry.claim_txid,
+              amount_sats: entry.amount_sats,
+              provider: 'boltz',
+              status: 'completed',
+            },
+          }).catch((proofErr) => {
+            console.error(`[SubmarineSwap] Swap completed proof failed for ${swapId}: ${proofErr.message}`);
+          });
 
           await this._auditLog.append({
             type: 'submarine_swap_completed',
@@ -601,6 +725,22 @@ export class SubmarineSwapProvider {
           entry.status = 'lockup_timeout';
           entry.error = `Boltz swap failed: ${boltzStatus}`;
           await this._persist();
+          await this._capitalLedger.recordLifecycleProof?.(entry.agent_id, {
+            moneyEventType: 'swap_submitted',
+            moneyEventStatus: 'failed',
+            eventSource: 'swap',
+            authorizationMethod: 'system_settlement',
+            primaryAmountSats: entry.amount_sats,
+            reference: `boltz-failed:${swapId}:${boltzStatus}`,
+            publicSafeRefs: {
+              swap_id: swapId,
+              amount_sats: entry.amount_sats,
+              provider: 'boltz',
+              status: boltzStatus,
+            },
+          }).catch((proofErr) => {
+            console.error(`[SubmarineSwap] Swap failed proof failed for ${swapId}: ${proofErr.message}`);
+          });
           console.warn(`[SubmarineSwap] Swap ${swapId} failed: ${boltzStatus}`);
         }
       } catch (err) {

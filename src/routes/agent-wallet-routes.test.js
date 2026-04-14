@@ -2,8 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { configureRateLimiterPolicy } from '../identity/rate-limiter.js';
+import { ProofLedger } from '../proof-ledger/proof-ledger.js';
 import { agentWalletRoutes } from './agent-wallet-routes.js';
 
 async function startWalletRouteApp(daemon) {
@@ -82,5 +86,152 @@ test('wallet mint quote rejects before invoice when single-channel inbound capac
     assert.equal(mintQuoteCalled, false);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('ledger route prefers proof-backed public ledger when available', async () => {
+  const daemon = {
+    agentRegistry: { getByApiKey: () => null },
+    publicLedger: {
+      getAll: async () => ({
+        entries: [{ ledger_id: 'legacy-row', payment_request: 'lnbc_should_not_leak' }],
+        total: 1,
+      }),
+    },
+    proofBackedPublicLedger: {
+      getAll: async () => ({
+        entries: [{
+          ledger_id: 'proof-row',
+          proof_id: 'proof-row',
+          type: 'proof_ledger_started',
+          payment_request: 'lnbc_should_not_leak',
+        }],
+        total: 1,
+        source_of_truth: 'proof_ledger',
+      }),
+    },
+  };
+  const { server, baseUrl } = await startWalletRouteApp(daemon);
+
+  try {
+    const response = await fetch(new URL('/api/v1/ledger', baseUrl));
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.source_of_truth, 'proof_ledger');
+    assert.equal(body.entries[0].ledger_id, 'proof-row');
+    assert.equal(body.entries[0].payment_request, undefined);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('proof routes expose agent-owned signed proofs and public liability status', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'aol-proof-routes-'));
+  const apiKey = `lb-agent-${'b'.repeat(64)}`;
+  const proofLedger = new ProofLedger({
+    dbPath: join(tempDir, 'proof-ledger.sqlite'),
+    keyPath: join(tempDir, 'proof-ledger.key.pem'),
+    allowGenerateKey: true,
+  });
+  await proofLedger.ensureGenesisProof();
+  const proof = await proofLedger.appendProof({
+    idempotency_key: 'test-agent-wallet-proof-route',
+    proof_record_type: 'money_event',
+    money_event_type: 'wallet_mint_issued',
+    money_event_status: 'settled',
+    agent_id: 'agent-proof',
+    event_source: 'wallet',
+    authorization_method: 'system_settlement',
+    primary_amount_sats: 1234,
+    wallet_ecash_delta_sats: 1234,
+    public_safe_refs: { quote_id: 'quote-123', amount_sats: 1234 },
+    allowed_public_ref_keys: ['quote_id'],
+  });
+  const liabilityCheckpoint = await proofLedger.createLiabilityCheckpoint({ createdAtMs: 1713021600000 });
+  const reserveSnapshot = await proofLedger.createReserveSnapshot({
+    reserveTotalsBySource: { lnd_onchain: { reserve_source_type: 'lnd_onchain_wallet', amount_sats: 2000 } },
+    reserveEvidenceRefs: [{ evidence_type: 'operator_attested', txid: 'reserve-txid' }],
+    reserveSufficient: true,
+    createdAtMs: 1713021601000,
+  });
+  const daemon = {
+    proofLedger,
+    agentRegistry: {
+      getByApiKey: (key) => key === apiKey ? { id: 'agent-proof', name: 'agent-proof' } : null,
+    },
+    publicLedger: {
+      getAll: async () => ({ entries: [], total: 0 }),
+    },
+  };
+  const { server, baseUrl } = await startWalletRouteApp(daemon);
+
+  try {
+    const authHeaders = { authorization: `Bearer ${apiKey}` };
+    const balanceResponse = await fetch(new URL('/api/v1/proofs/me/balance', baseUrl), {
+      headers: authHeaders,
+    });
+    const balanceBody = await balanceResponse.json();
+    assert.equal(balanceResponse.status, 200);
+    assert.equal(balanceBody.source_of_truth, 'proof_ledger');
+    assert.equal(balanceBody.balance.wallet_ecash_sats, 1234);
+    assert.equal(balanceBody.latest_agent_proof.proof_id, proof.proof_id);
+    assert.equal(balanceBody.agent_chain.valid, true);
+
+    const listResponse = await fetch(new URL('/api/v1/proofs/me?limit=10', baseUrl), {
+      headers: authHeaders,
+    });
+    const listBody = await listResponse.json();
+    assert.equal(listResponse.status, 200);
+    assert.equal(listBody.total, 1);
+    assert.equal(listBody.proofs[0].proof_id, proof.proof_id);
+    assert.match(listBody.proofs[0].canonical_proof_json, /wallet_mint_issued/);
+
+    const proofResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}`, baseUrl), {
+      headers: authHeaders,
+    });
+    const proofBody = await proofResponse.json();
+    assert.equal(proofResponse.status, 200);
+    assert.equal(proofBody.proof.proof_id, proof.proof_id);
+    assert.equal(proofBody.verification.valid, true);
+
+    const verifyResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}/verify`, baseUrl), {
+      headers: authHeaders,
+    });
+    const verifyBody = await verifyResponse.json();
+    assert.equal(verifyResponse.status, 200);
+    assert.equal(verifyBody.verification.valid, true);
+    assert.equal(verifyBody.agent_chain.valid, true);
+
+    const bundleResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}/bundle`, baseUrl), {
+      headers: authHeaders,
+    });
+    const bundleBody = await bundleResponse.json();
+    assert.equal(bundleResponse.status, 200);
+    assert.equal(bundleBody.bundle_version, 'aol-proof-bundle-v1');
+    assert.equal(bundleBody.proof.proof_id, proof.proof_id);
+    assert.equal(bundleBody.previous_agent_proof, null);
+    assert.equal(bundleBody.latest_liability_checkpoint.proof_id, liabilityCheckpoint.proof_id);
+    assert.equal(bundleBody.latest_reserve_snapshot.proof_id, reserveSnapshot.proof_id);
+    assert.equal(bundleBody.public_key.signing_key_id, proofLedger.getPublicKeyInfo().signing_key_id);
+
+    const liabilitiesResponse = await fetch(new URL('/api/v1/proofs/liabilities', baseUrl));
+    const liabilitiesBody = await liabilitiesResponse.json();
+    assert.equal(liabilitiesResponse.status, 200);
+    assert.equal(liabilitiesBody.proof_of_liabilities.live_derived_liability_totals.wallet_ecash_sats, 1234);
+    assert.equal(
+      liabilitiesBody.proof_of_liabilities.latest_signed_liability_checkpoint.proof_id,
+      liabilityCheckpoint.proof_id,
+    );
+    assert.equal(liabilitiesBody.proof_of_liabilities.global_chain.valid, true);
+
+    const reservesResponse = await fetch(new URL('/api/v1/proofs/reserves', baseUrl));
+    const reservesBody = await reservesResponse.json();
+    assert.equal(reservesResponse.status, 200);
+    assert.equal(reservesBody.proof_of_reserves.status, 'operator_attested_snapshot_available');
+    assert.equal(reservesBody.proof_of_reserves.latest_reserve_snapshot.proof_id, reserveSnapshot.proof_id);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    proofLedger.close();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });

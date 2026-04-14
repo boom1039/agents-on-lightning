@@ -54,6 +54,7 @@ test('set_fee_policy preserves current fee fields that were not changed', async 
 
 test('set_fee_policy mirrors a zero-sat event into the public ledger', async () => {
   const mirrored = [];
+  const proofRows = [];
   const executor = new SignedInstructionExecutor({
     assignmentRegistry: mockAssignmentRegistry(),
     auditLog: mockAuditLog(),
@@ -64,6 +65,12 @@ test('set_fee_policy mirrors a zero-sat event into the public ledger', async () 
       record: async (entry) => {
         mirrored.push(structuredClone(entry));
         return entry;
+      },
+    },
+    proofLedger: {
+      appendProof: async (proof) => {
+        proofRows.push(structuredClone(proof));
+        return proof;
       },
     },
   });
@@ -97,5 +104,21 @@ test('set_fee_policy mirrors a zero-sat event into the public ledger', async () 
     new_policy: { base_fee_msat: 1500, fee_rate_ppm: 2, time_lock_delta: 40 },
     source: 'channels_signed',
     executed_at: 1234567890,
+  });
+  assert.equal(proofRows.length, 1);
+  assert.equal(proofRows[0].proof_record_type, 'money_lifecycle');
+  assert.equal(proofRows[0].money_event_type, 'channel_policy_updated');
+  assert.equal(proofRows[0].money_event_status, 'confirmed');
+  assert.equal(proofRows[0].agent_id, 'agent-1');
+  assert.equal(proofRows[0].event_source, 'channels_signed');
+  assert.equal(proofRows[0].authorization_method, 'agent_signed_instruction');
+  assert.equal(proofRows[0].primary_amount_sats, 0);
+  assert.match(proofRows[0].idempotency_key, /^signed-channel-policy:agent-1:/);
+  assert.deepEqual(proofRows[0].public_safe_refs, {
+    channel_id: '123',
+    channel_point: 'fundingtx:0',
+    action: 'set_fee_policy',
+    instruction_hash: proofRows[0].public_safe_refs.instruction_hash,
+    status: 'confirmed',
   });
 });

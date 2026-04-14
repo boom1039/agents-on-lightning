@@ -3,7 +3,8 @@
  *
  * Per-agent ecash wallet backed by real Cashu proofs persisted to disk.
  * Wraps @cashu/cashu-ts with mutex-protected read-modify-write cycles,
- * public ledger logging, and audit trail.
+ * signed Proof Ledger accounting when enabled, legacy public ledger logging
+ * only outside proof mode, and audit trail.
  *
  * Deterministic mode (NUT-09/NUT-13): when a seedManager is provided, each
  * agent gets its own CashuWallet with a derived BIP39 seed. Every operation
@@ -21,8 +22,10 @@ import {
   getEncodedToken,
   getDecodedToken,
 } from '@cashu/cashu-ts';
+import { createHash } from 'node:crypto';
 import { acquire } from '../identity/mutex.js';
 import { logWalletOperation } from '../identity/audit-log.js';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
 
 // ---------------------------------------------------------------------------
 // Lightweight BOLT11 invoice validation
@@ -30,6 +33,14 @@ import { logWalletOperation } from '../identity/audit-log.js';
 
 const BECH32_ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 const BECH32_LOOKUP = new Map(BECH32_ALPHABET.split('').map((c, i) => [c, i]));
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
+}
 
 /**
  * Validate a BOLT11 invoice format and check expiry.
@@ -115,9 +126,10 @@ export function validateBolt11Invoice(invoice) {
 }
 
 export class AgentCashuWalletOperations {
-  constructor({ proofStore, ledger, mintUrl, mintPort, seedManager }) {
+  constructor({ proofStore, ledger, mintUrl, mintPort, seedManager, proofLedger = null }) {
     this._proofStore = proofStore;
     this._ledger = ledger;
+    this._proofLedger = proofLedger;
     this._mintUrl = mintUrl || null;
     this._mintPort = mintPort || 3338;
     this._seedManager = seedManager || null;
@@ -125,6 +137,11 @@ export class AgentCashuWalletOperations {
     this._agentWallets = new Map(); // agentId → { wallet, loaded: Promise }
     this._sharedWalletPromise = null; // fallback when no seedManager
     this._pendingMeltQuotes = new Map(); // `{agentId}:{quoteId}` → MeltQuoteResponse
+  }
+
+  async _appendProof(input) {
+    if (!this._proofLedger?.appendProof) return null;
+    return this._proofLedger.appendProof(input);
   }
 
   /**
@@ -211,6 +228,24 @@ export class AgentCashuWalletOperations {
     }
     const wallet = await this._getAgentWallet(agentId);
     const quote = await wallet.createMintQuote(amount);
+    await this._appendProof({
+      idempotency_key: proofSafeKey('wallet_mint_quote_created', { agent_id: agentId, quote_id: quote.quote }),
+      proof_record_type: 'money_lifecycle',
+      money_event_type: 'wallet_mint_quote_created',
+      money_event_status: 'created',
+      agent_id: agentId,
+      event_source: 'wallet_ecash',
+      authorization_method: 'agent_api_key',
+      primary_amount_sats: amount,
+      public_safe_refs: {
+        amount_sats: amount,
+        quote_id: quote.quote,
+        invoice_hash: sha256Hex(quote.request || ''),
+        expiry: Number.isSafeInteger(quote.expiry) ? quote.expiry : null,
+        status: quote.state || 'created',
+      },
+      allowed_public_ref_keys: ['quote_id', 'invoice_hash', 'expiry'],
+    });
     return {
       quote: quote.quote,
       request: quote.request,   // BOLT11 invoice to pay
@@ -249,12 +284,33 @@ export class AgentCashuWalletOperations {
       const balance = existing.reduce((s, p) => s + (p.amount || 0), 0)
         + proofs.reduce((s, p) => s + (p.amount || 0), 0);
 
-      await this._ledger.record({
-        type: 'cashu_mint',
+      await this._appendProof({
+        idempotency_key: proofSafeKey('wallet_mint_issued', { agent_id: agentId, quote_id: quoteId }),
+        proof_record_type: 'money_event',
+        money_event_type: 'wallet_mint_issued',
+        money_event_status: 'settled',
         agent_id: agentId,
-        amount_sats: amount,
-        proof_count: proofs.length,
+        event_source: 'wallet_ecash',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: amount,
+        wallet_ecash_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          quote_id: quoteId,
+          proof_count: proofs.length,
+          status: 'issued',
+        },
+        allowed_public_ref_keys: ['quote_id', 'proof_count'],
       });
+
+      if (!this._proofLedger && this._ledger?.record) {
+        await this._ledger.record({
+          type: 'cashu_mint',
+          agent_id: agentId,
+          amount_sats: amount,
+          proof_count: proofs.length,
+        });
+      }
       logWalletOperation(agentId, 'cashu_mint', amount, true);
 
       return { state: 'issued', proofCount: proofs.length, balance };
@@ -287,6 +343,27 @@ export class AgentCashuWalletOperations {
 
     // Store for later use by meltProofs
     this._pendingMeltQuotes.set(`${agentId}:${quote.quote}`, quote);
+
+    await this._appendProof({
+      idempotency_key: proofSafeKey('wallet_melt_quote_created', { agent_id: agentId, quote_id: quote.quote }),
+      proof_record_type: 'money_lifecycle',
+      money_event_type: 'wallet_melt_quote_created',
+      money_event_status: 'created',
+      agent_id: agentId,
+      event_source: 'wallet_ecash',
+      authorization_method: 'agent_api_key',
+      primary_amount_sats: quote.amount,
+      fee_sats: quote.fee_reserve,
+      public_safe_refs: {
+        amount_sats: quote.amount,
+        fee_sats: quote.fee_reserve,
+        quote_id: quote.quote,
+        invoice_hash: sha256Hex(invoice),
+        expiry: Number.isSafeInteger(quote.expiry) ? quote.expiry : null,
+        status: quote.state || 'created',
+      },
+      allowed_public_ref_keys: ['quote_id', 'invoice_hash', 'expiry'],
+    });
 
     return {
       quote: quote.quote,
@@ -355,13 +432,37 @@ export class AgentCashuWalletOperations {
       this._pendingMeltQuotes.delete(`${agentId}:${quoteId}`);
 
       const balance = finalProofs.reduce((s, p) => s + (p.amount || 0), 0);
+      const ecashDelta = balance - currentBalance;
+      const actualFee = Math.max(0, -ecashDelta - (quote.amount || 0));
 
-      await this._ledger.record({
-        type: 'cashu_melt',
+      await this._appendProof({
+        idempotency_key: proofSafeKey('wallet_melt_paid', { agent_id: agentId, quote_id: quoteId }),
+        proof_record_type: 'money_event',
+        money_event_type: 'wallet_melt_paid',
+        money_event_status: 'settled',
         agent_id: agentId,
-        amount_sats: quote.amount,
-        fee_reserve_sats: quote.fee_reserve,
+        event_source: 'wallet_ecash',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: quote.amount,
+        fee_sats: actualFee,
+        wallet_ecash_delta_sats: ecashDelta,
+        public_safe_refs: {
+          amount_sats: quote.amount,
+          fee_sats: actualFee,
+          quote_id: quoteId,
+          status: 'paid',
+        },
+        allowed_public_ref_keys: ['quote_id'],
       });
+
+      if (!this._proofLedger && this._ledger?.record) {
+        await this._ledger.record({
+          type: 'cashu_melt',
+          agent_id: agentId,
+          amount_sats: quote.amount,
+          fee_reserve_sats: quote.fee_reserve,
+        });
+      }
       logWalletOperation(agentId, 'cashu_melt', quote.amount, true);
 
       return { paid: true, balance };
@@ -413,11 +514,35 @@ export class AgentCashuWalletOperations {
       // Track the sent token for reclaim if unclaimed
       await this._proofStore.addPendingSend(agentId, { token, amount });
 
-      await this._ledger.record({
-        type: 'cashu_send',
+      await this._appendProof({
+        idempotency_key: proofSafeKey('wallet_ecash_sent', {
+          agent_id: agentId,
+          token_hash: sha256Hex(token),
+          amount_sats: amount,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: 'wallet_ecash_sent',
+        money_event_status: 'submitted',
         agent_id: agentId,
-        amount_sats: amount,
+        event_source: 'wallet_ecash',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: amount,
+        wallet_ecash_delta_sats: balance - currentBalance,
+        public_safe_refs: {
+          amount_sats: amount,
+          token_hash: sha256Hex(token),
+          status: 'submitted',
+        },
+        allowed_public_ref_keys: ['token_hash'],
       });
+
+      if (!this._proofLedger && this._ledger?.record) {
+        await this._ledger.record({
+          type: 'cashu_send',
+          agent_id: agentId,
+          amount_sats: amount,
+        });
+      }
       logWalletOperation(agentId, 'cashu_send', amount, true);
 
       return { token, amount, balance };
@@ -463,12 +588,37 @@ export class AgentCashuWalletOperations {
 
       const balance = existing.reduce((s, p) => s + (p.amount || 0), 0) + amount;
 
-      await this._ledger.record({
-        type: 'cashu_receive',
+      await this._appendProof({
+        idempotency_key: proofSafeKey('wallet_ecash_received', {
+          agent_id: agentId,
+          token_hash: sha256Hex(token),
+          amount_sats: amount,
+        }),
+        proof_record_type: 'money_event',
+        money_event_type: 'wallet_ecash_received',
+        money_event_status: 'settled',
         agent_id: agentId,
-        amount_sats: amount,
-        proof_count: freshProofs.length,
+        event_source: 'wallet_ecash',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: amount,
+        wallet_ecash_delta_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          token_hash: sha256Hex(token),
+          proof_count: freshProofs.length,
+          status: 'received',
+        },
+        allowed_public_ref_keys: ['token_hash', 'proof_count'],
       });
+
+      if (!this._proofLedger && this._ledger?.record) {
+        await this._ledger.record({
+          type: 'cashu_receive',
+          agent_id: agentId,
+          amount_sats: amount,
+          proof_count: freshProofs.length,
+        });
+      }
       logWalletOperation(agentId, 'cashu_receive', amount, true);
 
       return { amount, proofCount: freshProofs.length, balance };
@@ -496,6 +646,8 @@ export class AgentCashuWalletOperations {
     const wallet = await this._getAgentWallet(agentId);
     const unlock = await acquire(`cashu:${agentId}`);
     try {
+      const existing = await this._proofStore.loadProofs(agentId);
+      const previousBalance = existing.reduce((s, p) => s + (p.amount || 0), 0);
       const { proofs, lastCounterWithSignature } = await wallet.batchRestore();
 
       if (!proofs || proofs.length === 0) {
@@ -517,6 +669,33 @@ export class AgentCashuWalletOperations {
       await this._proofStore.saveCounter(agentId, { [keysetId]: newCounter });
 
       const balance = unspent.reduce((s, p) => s + (p.amount || 0), 0);
+      const ecashDelta = balance - previousBalance;
+      if (ecashDelta !== 0) {
+        await this._appendProof({
+          idempotency_key: proofSafeKey('wallet_ecash_proof_state_reconciled', {
+            agent_id: agentId,
+            reason: 'restore_from_seed',
+            balance,
+            recovered: unspent.length,
+            last_counter: lastCounterWithSignature || 0,
+          }),
+          proof_record_type: 'money_event',
+          money_event_type: 'wallet_ecash_proof_state_reconciled',
+          money_event_status: 'settled',
+          agent_id: agentId,
+          event_source: 'wallet_ecash',
+          authorization_method: 'system_settlement',
+          primary_amount_sats: Math.abs(ecashDelta),
+          wallet_ecash_delta_sats: ecashDelta,
+          public_safe_refs: {
+            amount_sats: Math.abs(ecashDelta),
+            proof_count: unspent.length,
+            reason: 'restore_from_seed',
+            status: 'settled',
+          },
+          allowed_public_ref_keys: ['proof_count'],
+        });
+      }
       console.log(`[AgentCashuWallet] Restored ${unspent.length} proofs (${balance} sats) for agent ${agentId}`);
 
       return { recovered: unspent.length, balance, restoreSupported: true };
@@ -540,6 +719,7 @@ export class AgentCashuWalletOperations {
       let reclaimed = 0;
       let reclaimedAmount = 0;
       const remaining = [];
+      const reclaimedTokenHashes = [];
 
       for (const send of sends) {
         if (send.created_at > cutoff) {
@@ -561,12 +741,36 @@ export class AgentCashuWalletOperations {
           await this._proofStore.saveProofs(agentId, [...existing, ...proofs]);
           reclaimed++;
           reclaimedAmount += proofs.reduce((s, p) => s + (p.amount || 0), 0);
+          reclaimedTokenHashes.push(sha256Hex(send.token || ''));
         } catch {
           // Token already claimed by someone — remove from pending (don't add to remaining)
         }
       }
 
       await this._proofStore.savePendingSends(agentId, remaining);
+      if (reclaimedAmount > 0) {
+        await this._appendProof({
+          idempotency_key: proofSafeKey('wallet_ecash_pending_reclaimed', {
+            agent_id: agentId,
+            reclaimed_amount: reclaimedAmount,
+            token_hashes: reclaimedTokenHashes,
+          }),
+          proof_record_type: 'money_event',
+          money_event_type: 'wallet_ecash_pending_reclaimed',
+          money_event_status: 'settled',
+          agent_id: agentId,
+          event_source: 'wallet_ecash',
+          authorization_method: 'system_settlement',
+          primary_amount_sats: reclaimedAmount,
+          wallet_ecash_delta_sats: reclaimedAmount,
+          public_safe_refs: {
+            amount_sats: reclaimedAmount,
+            proof_count: reclaimed,
+            status: 'settled',
+          },
+          allowed_public_ref_keys: ['proof_count'],
+        });
+      }
       return { reclaimed, reclaimedAmount, pendingRemaining: remaining.length };
     } finally {
       unlock();
@@ -587,6 +791,7 @@ export class AgentCashuWalletOperations {
     try {
       const proofs = await this._proofStore.loadProofs(agentId);
       if (proofs.length === 0) return { removedSpent: 0, balance: 0 };
+      const previousBalance = proofs.reduce((s, p) => s + (p.amount || 0), 0);
 
       const states = await wallet.checkProofsStates(proofs);
 
@@ -607,6 +812,32 @@ export class AgentCashuWalletOperations {
       }
 
       const balance = live.reduce((s, p) => s + (p.amount || 0), 0);
+      if (removedSpent > 0) {
+        await this._appendProof({
+          idempotency_key: proofSafeKey('wallet_ecash_proof_state_reconciled', {
+            agent_id: agentId,
+            reason: 'spent_proofs_removed',
+            previous_balance: previousBalance,
+            balance,
+            removed_spent: removedSpent,
+          }),
+          proof_record_type: 'money_event',
+          money_event_type: 'wallet_ecash_proof_state_reconciled',
+          money_event_status: 'settled',
+          agent_id: agentId,
+          event_source: 'wallet_ecash',
+          authorization_method: 'system_settlement',
+          primary_amount_sats: previousBalance - balance,
+          wallet_ecash_delta_sats: balance - previousBalance,
+          public_safe_refs: {
+            amount_sats: previousBalance - balance,
+            proof_count: removedSpent,
+            reason: 'spent_proofs_removed',
+            status: 'settled',
+          },
+          allowed_public_ref_keys: ['proof_count'],
+        });
+      }
       return { removedSpent, balance };
     } finally {
       unlock();

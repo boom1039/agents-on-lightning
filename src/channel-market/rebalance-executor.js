@@ -393,6 +393,23 @@ export class RebalanceExecutor {
     };
     this._state[paymentHash] = entry;
     await this._persist();
+    await this._capitalLedger.recordLifecycleProof?.(agentId, {
+      moneyEventType: 'rebalance_submitted',
+      moneyEventStatus: 'submitted',
+      eventSource: 'rebalance',
+      authorizationMethod: 'agent_signed_instruction',
+      primaryAmountSats: amount_sats,
+      reference: `rebalance-submitted:${paymentHash}`,
+      publicSafeRefs: {
+        chan_id: outbound_chan_id,
+        channel_id: inbound_chan_id || null,
+        amount_sats,
+        fee_sats: max_fee_sats,
+        instruction_hash: instrHash,
+      },
+    }).catch((err) => {
+      console.error(`[RebalanceExecutor] Proof ledger submit proof failed: ${err.message}`);
+    });
     unlock();
 
     // Execute circular payment via streaming sendPaymentV2
@@ -588,6 +605,23 @@ export class RebalanceExecutor {
         const fee = parseInt(r.total_fees || '0', 10);
         return fee < (best.fee || Infinity) ? { route: r, fee } : best;
       }, { fee: Infinity });
+
+      await this._capitalLedger.recordLifecycleProof?.(agentId, {
+        moneyEventType: 'rebalance_fee_estimated',
+        moneyEventStatus: 'confirmed',
+        eventSource: 'rebalance',
+        authorizationMethod: 'agent_api_key',
+        primaryAmountSats: amount_sats,
+        reference: `rebalance-estimate:${agentId}:${outbound_chan_id}:${amount_sats}:${bestRoute.fee}`,
+        publicSafeRefs: {
+          chan_id: outbound_chan_id,
+          amount_sats,
+          fee_sats: bestRoute.fee,
+          status: 'estimated',
+        },
+      }).catch((err) => {
+        console.error(`[RebalanceExecutor] Proof ledger estimate proof failed: ${err.message}`);
+      });
 
       return {
         success: true,

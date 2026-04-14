@@ -17,6 +17,8 @@ import { validateSignedInstruction } from '../channel-accountability/signed-inst
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
 import { pickSafePublicPeerAddress } from '../identity/request-security.js';
+import { createHash } from 'node:crypto';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
 
 const STATE_PATH = 'data/channel-market/pending-opens.json';
 
@@ -26,6 +28,14 @@ const CHANNEL_OPEN_CONFIG = {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
 }
 
 function withTimeout(promise, ms, label) {
@@ -189,7 +199,7 @@ export class ChannelOpener {
    * @param {import('../channel-accountability/channel-assignment-registry.js').ChannelAssignmentRegistry} opts.assignmentRegistry
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
    */
-  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, config = {} }) {
+  constructor({ capitalLedger, nodeManager, dataLayer, auditLog, agentRegistry, assignmentRegistry, mutex, proofLedger = null, config = {} }) {
     if (!capitalLedger) throw new Error('ChannelOpener requires capitalLedger');
     if (!nodeManager) throw new Error('ChannelOpener requires nodeManager');
     if (!dataLayer) throw new Error('ChannelOpener requires dataLayer');
@@ -205,6 +215,7 @@ export class ChannelOpener {
     this._agentRegistry = agentRegistry;
     this._assignmentRegistry = assignmentRegistry;
     this._mutex = mutex;
+    this._proofLedger = proofLedger;
 
     // channel_point → pending open entry
     this._state = {};
@@ -226,6 +237,20 @@ export class ChannelOpener {
       peerSafety: { ...(config.peerSafety || {}) },
       startupPolicyLimits: { ...(config.startupPolicyLimits || {}) },
     };
+  }
+
+  async _appendProof(input) {
+    if (!this._proofLedger?.appendProof) return null;
+    return this._proofLedger.appendProof(input);
+  }
+
+  async _appendProofBestEffort(input, context) {
+    try {
+      return await this._appendProof(input);
+    } catch (err) {
+      console.error(`[ChannelOpener] Proof lifecycle append failed for ${context}: ${err.message}`);
+      return null;
+    }
   }
 
   getStartupRules() {
@@ -872,6 +897,26 @@ export class ChannelOpener {
     // Acquire mutex for this agent's capital operations
     const unlock = await this._mutex.acquire(`channel-open:${agentId}`);
     try {
+      await this._appendProof({
+        idempotency_key: proofSafeKey('channel_open_instruction_accepted', {
+          agent_id: agentId,
+          instruction_hash: instrHash,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'channel_open_instruction_accepted',
+        money_event_status: 'confirmed',
+        agent_id: agentId,
+        event_source: 'channel_open',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          instruction_hash: instrHash,
+          peer_pubkey: peerPubkey,
+          status: 'accepted',
+        },
+      });
+
       // Lock funds in capital ledger
       const lockRef = `pending-open:${instrHash}`;
       try {
@@ -992,6 +1037,29 @@ export class ChannelOpener {
       };
       await this._persist();
 
+      await this._appendProofBestEffort({
+        idempotency_key: proofSafeKey('channel_open_submitted', {
+          agent_id: agentId,
+          channel_point: channelPoint,
+          instruction_hash: instrHash,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'channel_open_submitted',
+        money_event_status: 'submitted',
+        agent_id: agentId,
+        event_source: 'channel_open',
+        authorization_method: 'agent_signed_instruction',
+        primary_amount_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          channel_point: channelPoint,
+          txid: fundingTxidStr,
+          instruction_hash: instrHash,
+          peer_pubkey: peerPubkey,
+          status: 'submitted',
+        },
+      }, 'channel_open_submitted');
+
       await this._auditLog.append({
         domain: 'channel_market',
         type: 'channel_open_requested',
@@ -1104,6 +1172,8 @@ export class ChannelOpener {
       if (activeChannel) {
         // Channel confirmed and active
         const chanId = activeChannel.chan_id;
+        const activeCapacitySats = Number.parseInt(activeChannel.capacity || '0', 10);
+        const safeActiveCapacitySats = Number.isSafeInteger(activeCapacitySats) ? activeCapacitySats : null;
 
         if (entry.status !== 'active') {
           try {
@@ -1113,7 +1183,7 @@ export class ChannelOpener {
               entry.agent_id,
               {
                 remote_pubkey: entry.peer_pubkey,
-                capacity: parseInt(activeChannel.capacity, 10),
+                capacity: safeActiveCapacitySats,
               },
               entry.fee_constraints,
             );
@@ -1135,9 +1205,31 @@ export class ChannelOpener {
             channel_point: channelPoint,
             peer_pubkey: entry.peer_pubkey,
             peer_alias: entry.peer_alias,
-            capacity: parseInt(activeChannel.capacity, 10),
+            capacity: safeActiveCapacitySats,
             local_funding_amount: entry.local_funding_amount,
           });
+
+          await this._appendProofBestEffort({
+            idempotency_key: proofSafeKey('channel_open_active', {
+              agent_id: entry.agent_id,
+              chan_id: chanId,
+              channel_point: channelPoint,
+            }),
+            proof_record_type: 'money_lifecycle',
+            money_event_type: 'channel_open_active',
+            money_event_status: 'confirmed',
+            agent_id: entry.agent_id,
+            event_source: 'channel_open',
+            authorization_method: 'system_settlement',
+            primary_amount_sats: safeActiveCapacitySats,
+            public_safe_refs: {
+              amount_sats: safeActiveCapacitySats,
+              chan_id: chanId,
+              channel_point: channelPoint,
+              peer_pubkey: entry.peer_pubkey,
+              status: 'active',
+            },
+          }, 'channel_open_active');
 
           entry.status = 'active';
           entry.chan_id = chanId;

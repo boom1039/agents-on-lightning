@@ -1,13 +1,25 @@
+import { createHash } from 'node:crypto';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
+
 const ASSIGNMENTS_PATH = 'data/channel-accountability/assignments.json';
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
+}
 
 /**
  * Maps channel_point → agent_id with optional fee constraints.
  * Persisted as atomic JSON writes. Audit-logged on assign/revoke.
  */
 export class ChannelAssignmentRegistry {
-  constructor(dataLayer, auditLog) {
+  constructor(dataLayer, auditLog, { proofLedger = null } = {}) {
     this._dataLayer = dataLayer;
     this._auditLog = auditLog;
+    this._proofLedger = proofLedger;
     // Keyed by chan_id (uint64 string)
     this._assignments = new Map();
     // Secondary index: channel_point → chan_id
@@ -71,6 +83,26 @@ export class ChannelAssignmentRegistry {
     this._pointIndex.set(channelPoint, chanId);
     await this._persist();
 
+    if (this._proofLedger?.appendProof) {
+      await this._proofLedger.appendProof({
+        idempotency_key: proofSafeKey('channel_assignment_created', { chan_id: chanId, channel_point: channelPoint }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'channel_assignment_created',
+        money_event_status: 'confirmed',
+        agent_id: agentId,
+        event_source: 'channel_assignment',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: Number.isSafeInteger(meta.capacity) ? meta.capacity : null,
+        public_safe_refs: {
+          amount_sats: Number.isSafeInteger(meta.capacity) ? meta.capacity : undefined,
+          chan_id: chanId,
+          channel_point: channelPoint,
+          peer_pubkey: meta.remote_pubkey || null,
+          status: 'confirmed',
+        },
+      });
+    }
+
     await this._auditLog.append({
       type: 'channel_assigned',
       chan_id: chanId,
@@ -101,6 +133,29 @@ export class ChannelAssignmentRegistry {
       this._pointIndex.delete(entry.channel_point);
     }
     await this._persist();
+
+    if (this._proofLedger?.appendProof) {
+      await this._proofLedger.appendProof({
+        idempotency_key: proofSafeKey('channel_assignment_revoked', {
+          chan_id: chanId,
+          channel_point: entry.channel_point,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'channel_assignment_revoked',
+        money_event_status: 'confirmed',
+        agent_id: entry.agent_id,
+        event_source: 'channel_assignment',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: Number.isSafeInteger(entry.capacity) ? entry.capacity : null,
+        public_safe_refs: {
+          amount_sats: Number.isSafeInteger(entry.capacity) ? entry.capacity : undefined,
+          chan_id: chanId,
+          channel_point: entry.channel_point,
+          peer_pubkey: entry.remote_pubkey || null,
+          status: 'revoked',
+        },
+      });
+    }
 
     await this._auditLog.append({
       type: 'channel_assignment_revoked',

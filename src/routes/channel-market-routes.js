@@ -1067,6 +1067,24 @@ export function channelMarketRoutes(daemon) {
       const amount = parseInt(req.query.amount_sats || '0', 10);
       const result = await daemon.swapProvider.getQuote(amount);
       if (result.success) {
+        await daemon.capitalLedger?.recordLifecycleProof?.(req.agentId, {
+          moneyEventType: 'swap_quote_created',
+          moneyEventStatus: 'created',
+          eventSource: 'swap',
+          authorizationMethod: 'agent_api_key',
+          primaryAmountSats: amount,
+          reference: `swap-quote:${req.agentId}:${amount}:${result.total_fee_sats || 0}:${result.receive_amount_sats || amount}`,
+          publicSafeRefs: {
+            amount_sats: amount,
+            fee_sats: result.total_fee_sats || 0,
+            net_amount_sats: result.receive_amount_sats || amount,
+            provider: result.settlement_mode || 'boltz',
+            status: 'quoted',
+          },
+          allowedPublicRefKeys: ['net_amount_sats'],
+        }).catch((proofErr) => {
+          console.error(`[market/swap/quote] Proof ledger quote proof failed: ${proofErr.message}`);
+        });
         res.json(result);
       } else {
         res.status(400).json(result);

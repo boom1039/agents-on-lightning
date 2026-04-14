@@ -128,6 +128,64 @@ test('ledger analytics summarizes public entries and capital balances', async ()
   assert.equal(agent.timeline.length, 4);
 });
 
+test('ledger analytics prefers proof ledger projections when available', async () => {
+  const daemon = {
+    publicLedger: {
+      getAll: async () => ({ entries: [{ ledger_id: 'legacy', agent_id: 'agent-old' }], total: 1 }),
+    },
+    proofBackedPublicLedger: {
+      getAll: async () => ({
+        entries: [{
+          ledger_id: 'proof-row',
+          proof_id: 'proof-row',
+          recorded_at: 5000,
+          type: 'wallet_mint_issued',
+          agent_id: 'agent-proof',
+          amount_sats: 250,
+        }],
+        total: 1,
+      }),
+    },
+    capitalLedger: {
+      getAllBalances: async () => ({ 'agent-old': { available: 999 } }),
+      readActivity: async () => ({ entries: [{ agent_id: 'agent-old' }], total: 1 }),
+    },
+    proofLedger: {
+      getAllCapitalBalances: () => ({
+        'agent-proof': {
+          available: 250,
+          locked: 0,
+          pending_deposit: 0,
+          pending_close: 0,
+          total_deposited: 250,
+          total_withdrawn: 0,
+          total_revenue_credited: 0,
+          total_ecash_funded: 0,
+          total_service_spent: 0,
+          total_routing_pnl: 0,
+        },
+      }),
+      listCapitalActivity: () => [{
+        global_sequence: 2,
+        created_at_ms: 5000,
+        agent_id: 'agent-proof',
+        money_event_type: 'wallet_mint_issued',
+      }],
+      countCapitalActivity: () => 1,
+    },
+  };
+
+  const summary = await ledgerSummary(daemon);
+  assert.equal(summary.public_ledger.total_entries, 1);
+  assert.equal(summary.public_ledger.unique_agents, 1);
+  assert.equal(summary.capital.available_sats, 250);
+
+  const agents = await ledgerAgents(daemon);
+  assert.equal(agents.total, 1);
+  assert.equal(agents.entries[0].agent_id, 'agent-proof');
+  assert.equal(agents.entries[0].capital_available_sats, 250);
+});
+
 test('ledger reconciliation catches capital invariant mismatches', async () => {
   const daemon = fakeDaemon({
     publicEntries: [{ ledger_id: 'missing-agent', type: 'credit', amount_sats: 1 }],

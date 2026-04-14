@@ -68,6 +68,32 @@ async function startApp() {
     skills: [{ file: '/docs/skills/identity.txt' }],
   }));
   app.get('/api/v1/platform/status', (_req, res) => res.json({ block_height: 1, synced_to_chain: true, synced_to_graph: true, node_pubkey: 'abc', node_alias: 'alias', active_channels: 0 }));
+  app.get('/api/v1/proofs/me/balance', (_req, res) => res.json({
+    source_of_truth: 'proof_ledger',
+    balance: { wallet_ecash_sats: 1000 },
+  }));
+  app.get('/api/v1/proofs/me', (_req, res) => res.json({
+    source_of_truth: 'proof_ledger',
+    proofs: [{ proof_id: 'proof-1' }],
+  }));
+  app.get('/api/v1/proofs/proof/:proofId/verify', (req, res) => res.json({
+    proof_id: req.params.proofId,
+    verification: { valid: true },
+  }));
+  app.get('/api/v1/proofs/proof/:proofId/bundle', (req, res) => res.json({
+    bundle_version: 'aol-proof-bundle-v1',
+    proof: { proof_id: req.params.proofId },
+  }));
+  app.get('/api/v1/proofs/proof/:proofId', (req, res) => res.json({
+    proof: { proof_id: req.params.proofId },
+    verification: { valid: true },
+  }));
+  app.get('/api/v1/proofs/liabilities', (_req, res) => res.json({
+    proof_of_liabilities: { status: 'live' },
+  }));
+  app.get('/api/v1/proofs/reserves', (_req, res) => res.json({
+    proof_of_reserves: { status: 'not_yet_published' },
+  }));
 
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -191,6 +217,23 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       docsResult.structuredContent.body.docs.map((doc) => doc.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
+    apiRequests.length = 0;
+    await client.callTool({ name: 'aol_get_my_balance_proof', arguments: { api_key: 'test-api-key' } });
+    await client.callTool({ name: 'aol_list_my_proofs', arguments: { api_key: 'test-api-key', limit: 5 } });
+    await client.callTool({ name: 'aol_get_proof', arguments: { api_key: 'test-api-key', proof_id: 'proof-1' } });
+    await client.callTool({ name: 'aol_verify_proof', arguments: { api_key: 'test-api-key', id: 'proof-1' } });
+    await client.callTool({ name: 'aol_get_proof_bundle', arguments: { api_key: 'test-api-key', proof_id: 'proof-1' } });
+    await client.callTool({ name: 'aol_get_proof_of_liabilities', arguments: {} });
+    await client.callTool({ name: 'aol_get_proof_of_reserves', arguments: {} });
+    assert.deepEqual(apiRequests, [
+      { method: 'GET', path: '/api/v1/proofs/me/balance' },
+      { method: 'GET', path: '/api/v1/proofs/me' },
+      { method: 'GET', path: '/api/v1/proofs/proof/proof-1' },
+      { method: 'GET', path: '/api/v1/proofs/proof/proof-1/verify' },
+      { method: 'GET', path: '/api/v1/proofs/proof/proof-1/bundle' },
+      { method: 'GET', path: '/api/v1/proofs/liabilities' },
+      { method: 'GET', path: '/api/v1/proofs/reserves' },
+    ]);
     apiRequests.length = 0;
     await client.callTool({ name: 'aol_get_channels_mine', arguments: { api_key: 'test-api-key' } });
     await client.callTool({ name: 'aol_get_leaderboard_agent', arguments: { id: 'agent1234' } });

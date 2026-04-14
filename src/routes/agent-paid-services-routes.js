@@ -377,7 +377,9 @@ export function agentPaidServicesRoutes(daemon) {
     const withdrawalLabel = `capital-withdraw:${req.agentId}:${randomUUID()}`;
     let debited = false;
     try {
-      const balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, amount_sats, destination_address);
+      const balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, amount_sats, destination_address, {
+        reference: withdrawalLabel,
+      });
       debited = true;
 
       let sendResult = null;
@@ -407,6 +409,7 @@ export function agentPaidServicesRoutes(daemon) {
             amount_sats,
             destination_address,
             unknownOutcome ? 'withdraw_unknown_outcome_refunded' : 'withdraw_send_failed',
+            { reference: withdrawalLabel },
           );
           debited = false;
           return agentError(res, unknownOutcome ? 502 : 400, {
@@ -425,6 +428,21 @@ export function agentPaidServicesRoutes(daemon) {
         scope: 'capital_withdraw',
         agentId: req.agentId,
         amountSats: amount_sats,
+      });
+      await daemon.capitalLedger.recordLifecycleProof?.(req.agentId, {
+        moneyEventType: 'capital_withdrawal_broadcast',
+        moneyEventStatus: 'submitted',
+        eventSource: 'capital_withdrawal',
+        authorizationMethod: 'agent_api_key',
+        primaryAmountSats: amount_sats,
+        reference: withdrawalLabel,
+        publicSafeRefs: {
+          txid: sendResult.txid,
+          amount_sats,
+          status: 'broadcast',
+        },
+      }).catch((proofErr) => {
+        console.error(`[Gateway] capital withdraw broadcast proof failed for ${req.agentId}: ${proofErr.message}`);
       });
 
       return res.json({
@@ -447,6 +465,7 @@ export function agentPaidServicesRoutes(daemon) {
             amount_sats,
             destination_address,
             'withdraw_internal_error_refunded',
+            { reference: withdrawalLabel },
           );
         } catch (refundErr) {
           console.error(`[Gateway] capital withdraw refund failed for ${req.agentId}: ${refundErr.message}`);

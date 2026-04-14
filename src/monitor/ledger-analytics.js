@@ -29,11 +29,11 @@ function normalizeSince(value) {
 }
 
 function tsOf(entry) {
-  return Number(entry?.recorded_at || entry?._ts || entry?.ts || 0) || 0;
+  return Number(entry?.recorded_at || entry?.created_at_ms || entry?._ts || entry?.ts || 0) || 0;
 }
 
 function amountOf(entry) {
-  const value = Number(entry?.amount_sats);
+  const value = Number(entry?.amount_sats ?? entry?.primary_amount_sats);
   return Number.isFinite(value) ? value : 0;
 }
 
@@ -85,6 +85,10 @@ export function sanitizeLedgerEntry(entry) {
 }
 
 async function readPublicEntries(daemon) {
+  if (daemon?.proofBackedPublicLedger?.getAll) {
+    const result = await daemon.proofBackedPublicLedger.getAll({});
+    return Array.isArray(result?.entries) ? result.entries : [];
+  }
   if (!daemon?.publicLedger?.getAll) return [];
   const result = await daemon.publicLedger.getAll({});
   return Array.isArray(result?.entries) ? result.entries : [];
@@ -176,6 +180,9 @@ function summarizeCapitalBalances(balances = {}) {
 }
 
 async function readCapitalBalances(daemon) {
+  if (daemon?.proofLedger?.getAllCapitalBalances) {
+    return daemon.proofLedger.getAllCapitalBalances();
+  }
   if (!daemon?.capitalLedger?.getAllBalances) return {};
   try {
     return await daemon.capitalLedger.getAllBalances();
@@ -185,9 +192,22 @@ async function readCapitalBalances(daemon) {
 }
 
 async function readCapitalActivity(daemon, options = {}) {
-  if (!daemon?.capitalLedger?.readActivity) return { entries: [], total: 0, limit: 0, offset: 0 };
   const limit = normalizeLimit(options.limit, 100);
   const offset = normalizeOffset(options.offset);
+  if (daemon?.proofLedger?.listCapitalActivity) {
+    const entries = daemon.proofLedger.listCapitalActivity({
+      agentId: options.agentId,
+      limit,
+      offset,
+    });
+    return {
+      entries,
+      total: daemon.proofLedger.countCapitalActivity({ agentId: options.agentId }),
+      limit,
+      offset,
+    };
+  }
+  if (!daemon?.capitalLedger?.readActivity) return { entries: [], total: 0, limit: 0, offset: 0 };
   try {
     const result = await daemon.capitalLedger.readActivity({
       agentId: options.agentId,

@@ -114,14 +114,16 @@ export function agentEventsRoutes(daemon) {
 
       // --- Wallet transactions ---
       const walletEvents = await collectSafe('wallet', async () => {
-        const txs = await daemon.publicLedger?.getAgentTransactions(agentId);
+        const ledger = daemon.proofBackedPublicLedger || daemon.publicLedger;
+        const txs = await ledger?.getAgentTransactions(agentId);
         if (!txs) return [];
         return txs.map(tx => ({
           type: `wallet:${tx.type || 'unknown'}`,
-          timestamp: toISO(tx.recorded_at || tx._ts),
-          _sort_ts: tx.recorded_at || tx._ts || 0,
+          timestamp: toISO(tx.recorded_at || tx.created_at_ms || tx._ts),
+          _sort_ts: tx.recorded_at || tx.created_at_ms || tx._ts || 0,
           data: {
             ledger_id: tx.ledger_id,
+            proof_id: tx.proof_id || null,
             amount_sats: tx.amount_sats,
             type: tx.type,
             from_agent_id: tx.from_agent_id || null,
@@ -156,10 +158,11 @@ export function agentEventsRoutes(daemon) {
         if (!result?.entries) return [];
         return result.entries.map(e => ({
           type: `capital:${e.type || 'unknown'}`,
-          timestamp: toISO(e._ts),
-          _sort_ts: e._ts || 0,
+          timestamp: toISO(e._ts || e.created_at_ms),
+          _sort_ts: e._ts || e.created_at_ms || 0,
           data: {
             type: e.type,
+            proof_id: e.proof_id || null,
             amount_sats: e.amount_sats,
             from_bucket: e.from_bucket || null,
             to_bucket: e.to_bucket || null,

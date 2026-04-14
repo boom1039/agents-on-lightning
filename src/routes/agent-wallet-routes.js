@@ -35,6 +35,76 @@ function getReceiveSafetyBufferSats(daemon) {
   return 1000;
 }
 
+function getPublicLedgerForRead(daemon) {
+  if (daemon?.proofBackedPublicLedger) {
+    return daemon.proofBackedPublicLedger;
+  }
+  return daemon.publicLedger;
+}
+
+function getProofLedger(daemon) {
+  return daemon?.proofLedger || null;
+}
+
+function serializeProofRow(row, { includeCanonical = true } = {}) {
+  if (!row || typeof row !== 'object') return null;
+  const out = {
+    proof_id: row.proof_id,
+    global_sequence: row.global_sequence,
+    proof_group_id: row.proof_group_id || null,
+    proof_record_type: row.proof_record_type,
+    money_event_type: row.money_event_type,
+    money_event_status: row.money_event_status,
+    agent_id: row.agent_id || null,
+    agent_proof_sequence: row.agent_proof_sequence || null,
+    event_source: row.event_source,
+    authorization_method: row.authorization_method,
+    primary_amount_sats: row.primary_amount_sats,
+    gross_amount_sats: row.gross_amount_sats,
+    fee_sats: row.fee_sats,
+    net_amount_sats: row.net_amount_sats,
+    asset: row.asset,
+    wallet_ecash_delta_sats: row.wallet_ecash_delta_sats,
+    wallet_hub_delta_sats: row.wallet_hub_delta_sats,
+    capital_available_delta_sats: row.capital_available_delta_sats,
+    capital_locked_delta_sats: row.capital_locked_delta_sats,
+    capital_pending_deposit_delta_sats: row.capital_pending_deposit_delta_sats,
+    capital_pending_close_delta_sats: row.capital_pending_close_delta_sats,
+    capital_service_spent_delta_sats: row.capital_service_spent_delta_sats,
+    routing_pnl_delta_sats: row.routing_pnl_delta_sats,
+    balance_snapshot_before: row.balance_snapshot_before,
+    balance_snapshot_after: row.balance_snapshot_after,
+    public_safe_refs: row.public_safe_refs,
+    visibility_scope: row.visibility_scope,
+    issuer_domains: row.issuer_domains,
+    signing_key_id: row.signing_key_id,
+    canonicalization_version: row.canonicalization_version,
+    previous_global_proof_hash: row.previous_global_proof_hash,
+    previous_agent_proof_hash: row.previous_agent_proof_hash,
+    proof_hash: row.proof_hash,
+    platform_signature: row.platform_signature,
+    created_at_ms: row.created_at_ms,
+  };
+  if (includeCanonical) {
+    out.canonical_proof_json = row.canonical_proof_json;
+  }
+  return out;
+}
+
+function serializeProofBundle(bundle) {
+  if (!bundle || typeof bundle !== 'object') return null;
+  return {
+    ...bundle,
+    proof: serializeProofRow(bundle.proof),
+    previous_global_proof: serializeProofRow(bundle.previous_global_proof),
+    previous_agent_proof: serializeProofRow(bundle.previous_agent_proof),
+    latest_global_proof: serializeProofRow(bundle.latest_global_proof, { includeCanonical: false }),
+    latest_agent_proof: serializeProofRow(bundle.latest_agent_proof, { includeCanonical: false }),
+    latest_liability_checkpoint: serializeProofRow(bundle.latest_liability_checkpoint),
+    latest_reserve_snapshot: serializeProofRow(bundle.latest_reserve_snapshot),
+  };
+}
+
 export function sanitizePublicLedgerEntry(entry) {
   if (!entry || typeof entry !== 'object') return entry;
 
@@ -343,7 +413,7 @@ export function agentWalletRoutes(daemon) {
   // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Balance","label":"history","summary":"Read wallet history.","order":210,"tags":["wallet","read","agent"],"doc":"skills/wallet.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/wallet/history', auth, rateLimit('wallet_read'), async (req, res) => {
     try {
-      const history = await daemon.publicLedger.getAgentTransactions(req.agentId);
+      const history = await getPublicLedgerForRead(daemon).getAgentTransactions(req.agentId);
       res.json({ transactions: history });
     } catch (err) {
       return err500Internal(res, 'fetching wallet history');
@@ -412,7 +482,7 @@ export function agentWalletRoutes(daemon) {
   router.get('/api/v1/ledger', rateLimit('discovery'), async (_req, res) => {
     try {
       const { since, type, limit, offset } = _req.query;
-      const result = await daemon.publicLedger.getAll({
+      const result = await getPublicLedgerForRead(daemon).getAll({
         since: since ? parseInt(since, 10) : undefined,
         type: type || undefined,
         limit: limit ? parseInt(limit, 10) : 100,
@@ -427,6 +497,167 @@ export function agentWalletRoutes(daemon) {
     } catch (err) {
       return err500Internal(res, 'fetching ledger');
     }
+  });
+
+  // Read this agent's current proof-derived balance.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Proofs","label":"balance-proof","summary":"Read this agent's proof-derived balance.","order":510,"tags":["wallet","read","agent","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/me/balance', auth, rateLimit('wallet_read'), async (req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return agentError(res, 503, {
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const latest = proofLedger.getLatestAgentProof(req.agentId);
+    res.json({
+      agent_id: req.agentId,
+      source_of_truth: 'proof_ledger',
+      balance: proofLedger.getAgentBalance(req.agentId),
+      capital_balance: proofLedger.getCapitalBalance(req.agentId),
+      latest_agent_proof: latest ? serializeProofRow(latest, { includeCanonical: false }) : null,
+      agent_chain: proofLedger.verifyChain({ agentId: req.agentId }),
+      public_key: proofLedger.getPublicKeyInfo(),
+    });
+  });
+
+  // List this agent's signed proofs.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Proofs","label":"my-proofs","summary":"List this agent's signed proof rows.","order":520,"tags":["wallet","read","agent","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/me', auth, rateLimit('wallet_read'), async (req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return agentError(res, 503, {
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
+    const offset = req.query.offset ? parseInt(req.query.offset, 10) : 0;
+    const proofs = proofLedger
+      .listProofs({ agentId: req.agentId, limit, offset })
+      .map((row) => serializeProofRow(row));
+    res.json({
+      agent_id: req.agentId,
+      source_of_truth: 'proof_ledger',
+      total: proofLedger.countProofs({ agentId: req.agentId }),
+      proofs,
+    });
+  });
+
+  // Read one proof owned by this agent.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Proofs","label":"proof","summary":"Read one signed proof row owned by this agent.","order":530,"tags":["wallet","read","agent","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/proof/:proofId', auth, rateLimit('wallet_read'), async (req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return agentError(res, 503, {
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const proof = proofLedger.getProofById(req.params.proofId);
+    if (!proof || proof.agent_id !== req.agentId) {
+      return agentError(res, 404, {
+        error: 'proof_not_found',
+        message: 'No proof with that id belongs to this agent.',
+      });
+    }
+    res.json({
+      source_of_truth: 'proof_ledger',
+      proof: serializeProofRow(proof),
+      verification: proofLedger.verifyProof(proof),
+    });
+  });
+
+  // Verify one proof owned by this agent.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Proofs","label":"verify-proof","summary":"Verify one signed proof row owned by this agent.","order":540,"tags":["wallet","read","agent","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/proof/:proofId/verify', auth, rateLimit('wallet_read'), async (req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return agentError(res, 503, {
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const proof = proofLedger.getProofById(req.params.proofId);
+    if (!proof || proof.agent_id !== req.agentId) {
+      return agentError(res, 404, {
+        error: 'proof_not_found',
+        message: 'No proof with that id belongs to this agent.',
+      });
+    }
+    res.json({
+      proof_id: proof.proof_id,
+      verification: proofLedger.verifyProof(proof),
+      agent_chain: proofLedger.verifyChain({ agentId: req.agentId }),
+    });
+  });
+
+  // Download one proof bundle owned by this agent.
+  // @agent-route {"auth":"agent","domain":"wallet","subgroup":"Proofs","label":"proof-bundle","summary":"Download one signed proof bundle owned by this agent.","order":545,"tags":["wallet","read","agent","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/proof/:proofId/bundle', auth, rateLimit('wallet_read'), async (req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return agentError(res, 503, {
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const bundle = proofLedger.buildProofBundle(req.params.proofId, { agentId: req.agentId });
+    if (!bundle) {
+      return agentError(res, 404, {
+        error: 'proof_not_found',
+        message: 'No proof bundle with that id belongs to this agent.',
+      });
+    }
+    res.json(serializeProofBundle(bundle));
+  });
+
+  // Read current proof-derived platform liabilities.
+  // @agent-route {"auth":"public","domain":"wallet","subgroup":"Proofs","label":"liabilities","summary":"Read current proof-derived platform liabilities.","order":550,"tags":["wallet","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/liabilities', rateLimit('discovery'), async (_req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return res.status(503).json({
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const latest = proofLedger.getLatestGlobalProof();
+    const latestCheckpoint = proofLedger.getLatestProofByRecordType('liability_checkpoint');
+    res.json({
+      source_of_truth: 'proof_ledger',
+      proof_of_liabilities: {
+        status: latest ? 'live' : 'not_started',
+        latest_global_sequence: latest?.global_sequence || 0,
+        latest_global_proof_hash: latest?.proof_hash || null,
+        live_derived_liability_totals: proofLedger.getLiabilityTotals(),
+        latest_signed_liability_checkpoint: latestCheckpoint ? serializeProofRow(latestCheckpoint) : null,
+        global_chain: proofLedger.verifyChain(),
+      },
+      public_key: proofLedger.getPublicKeyInfo(),
+    });
+  });
+
+  // Read proof-of-reserves status without overstating reserve guarantees.
+  // @agent-route {"auth":"public","domain":"wallet","subgroup":"Proofs","label":"reserves","summary":"Read proof-of-reserves status and current limitations.","order":560,"tags":["wallet","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/proofs/reserves', rateLimit('discovery'), async (_req, res) => {
+    const proofLedger = getProofLedger(daemon);
+    if (!proofLedger) {
+      return res.status(503).json({
+        error: 'proof_ledger_unavailable',
+        message: 'Proof Ledger is not enabled on this server yet.',
+      });
+    }
+    const latestReserve = proofLedger.getLatestProofByRecordType('reserve_snapshot');
+    res.json({
+      source_of_truth: 'proof_ledger',
+      proof_of_reserves: {
+        status: latestReserve ? 'operator_attested_snapshot_available' : 'not_yet_published',
+        latest_reserve_snapshot: latestReserve ? serializeProofRow(latestReserve) : null,
+        limitation: 'Proof of Liabilities is derived from signed Proof Ledger rows. Proof of Reserves requires reserve evidence and is not claimed unless a reserve snapshot is present.',
+      },
+      public_key: proofLedger.getPublicKeyInfo(),
+    });
   });
 
   return router;

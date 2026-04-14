@@ -13,6 +13,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { checkAndIncrement, checkOnly, decrementCounter } from '../identity/rate-limiter.js';
 import {
   validateChannelIdOrPoint,
@@ -20,8 +21,17 @@ import {
   normalizeFreeText,
 } from '../identity/validators.js';
 import { MCP_TOOL_SPECS } from '../mcp/catalog.js';
+import { canonicalProofJson } from '../proof-ledger/proof-ledger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function proofSafeKey(prefix, fields) {
+  return `${prefix}:${sha256Hex(canonicalProofJson(fields))}`;
+}
 
 const MAX_QUESTION_LENGTH = 400;      // chars
 const MAX_RESPONSE_TOKENS = 1024;     // ~1000 tokens
@@ -97,6 +107,7 @@ export class HelpEndpoint {
     marketTransparency,
     walletOps,
     dataLayer,
+    proofLedger = null,
     config = {},
   }) {
     this._agentRegistry = agentRegistry;
@@ -105,6 +116,7 @@ export class HelpEndpoint {
     this._capitalLedger = capitalLedger || null;
     this._performanceTracker = performanceTracker || null;
     this._walletOps = walletOps;
+    this._proofLedger = proofLedger;
     this._systemPrompt = null;
     this._anthropic = null;
     this._anthropicApiKey = null;
@@ -118,6 +130,36 @@ export class HelpEndpoint {
     this._circuitFailureLimit = this._config.circuitFailureLimit;
     this._circuitFailureWindowMs = this._config.circuitFailureWindowMs;
     this._circuitOpenMs = this._config.circuitOpenMs;
+  }
+
+  async _recordServiceFulfilledProof(agentId, amount, reference) {
+    if (!this._proofLedger?.appendProof) return;
+    try {
+      await this._proofLedger.appendProof({
+        idempotency_key: proofSafeKey('paid_service_fulfilled', {
+          agent_id: agentId,
+          service: 'help',
+          reference,
+        }),
+        proof_record_type: 'money_lifecycle',
+        money_event_type: 'paid_service_fulfilled',
+        money_event_status: 'settled',
+        agent_id: agentId,
+        event_source: 'paid_service',
+        authorization_method: 'system_settlement',
+        primary_amount_sats: amount,
+        public_safe_refs: {
+          amount_sats: amount,
+          service: 'help',
+          service_id: 'agent_help',
+          reference_hash: sha256Hex(reference),
+          status: 'fulfilled',
+        },
+        allowed_public_ref_keys: ['reference_hash'],
+      });
+    } catch (err) {
+      console.error(`[HelpEndpoint] Proof lifecycle append failed for help fulfillment: ${err.message}`);
+    }
   }
 
   /**
@@ -694,6 +736,8 @@ export class HelpEndpoint {
       // Extract a concise "learn" takeaway from the answer (last paragraph or sentence)
       const learn = this._extractLearnTakeaway(safeAnswerText);
 
+      await this._recordServiceFulfilledProof(agentId, costSats, chargeReference);
+
       return {
         answer: safeAnswerText,
         sources,
@@ -705,6 +749,7 @@ export class HelpEndpoint {
       if (err?.code !== 'unsafe_help_answer') {
         const localFallback = this._buildLocalFallbackAnswer(normalizedQuestion);
         if (localFallback) {
+          await this._recordServiceFulfilledProof(agentId, costSats, chargeReference);
           return {
             answer: localFallback.answer,
             sources: [...sources, 'local_help_fallback'],

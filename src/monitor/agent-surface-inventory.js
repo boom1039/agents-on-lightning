@@ -404,6 +404,7 @@ export function shouldIgnoreAgentSurfacePath(path = '') {
     || path.startsWith('/local/reports')
     || path.startsWith('/dashboard')
     || path.startsWith('/journey')
+    || path.startsWith('/api/operator')
     || path.startsWith('/api/journey')
     || path.startsWith('/api/analytics')
     || path.startsWith('/api/demo/')

@@ -10,6 +10,8 @@ import { NodeManager } from './lnd/index.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { LoopClient } from './loop/client.js';
+import { ProofLedger } from './proof-ledger/proof-ledger.js';
+import { ProofBackedPublicLedger } from './proof-ledger/public-ledger-adapter.js';
 
 // Identity
 import { AgentRegistry } from './identity/registry.js';
@@ -100,13 +102,21 @@ export class AgentDaemon {
 
     // 4. Agent identity + wallet
     this.publicLedger = new PublicLedger(this.dataLayer);
+    this.proofLedger = null;
+    if (process.env.AOL_PROOF_LEDGER_ENABLED === '1') {
+      this.proofLedger = new ProofLedger();
+      await this.proofLedger.ensureGenesisProof();
+      this.proofBackedPublicLedger = new ProofBackedPublicLedger({ proofLedger: this.proofLedger });
+    }
+
     this.agentRegistry = new AgentRegistry(this.dataLayer);
     await this.agentRegistry.load();
 
     this.hubWallet = new HubWallet({
       dataLayer: this.dataLayer,
       nodeManager: this.nodeManager,
-      ledger: this.publicLedger,
+      ledger: this.proofLedger ? null : this.publicLedger,
+      proofLedger: this.proofLedger,
       config: getWalletServiceSettings(this.config),
     });
 
@@ -123,10 +133,11 @@ export class AgentDaemon {
 
     this.agentCashuWallet = new AgentCashuWalletOperations({
       proofStore: cashuProofStore,
-      ledger: this.publicLedger,
+      ledger: this.proofLedger ? null : this.publicLedger,
       mintUrl: this.config.cashu?.mintUrl || null,
       mintPort: this.config.cashu?.port || null,
       seedManager: this._cashuSeedManager,
+      proofLedger: this.proofLedger,
     });
 
     // 5. Social
@@ -141,7 +152,9 @@ export class AgentDaemon {
     const channelMutex = { acquire: acquireMutex };
     this.channelAuditLog = new HashChainAuditLog(this.dataLayer, channelMutex);
     await this.channelAuditLog._loadTail();
-    this.channelAssignments = new ChannelAssignmentRegistry(this.dataLayer, this.channelAuditLog);
+    this.channelAssignments = new ChannelAssignmentRegistry(this.dataLayer, this.channelAuditLog, {
+      proofLedger: this.proofLedger,
+    });
     await this.channelAssignments.load();
     this.channelExecutor = new SignedInstructionExecutor({
       assignmentRegistry: this.channelAssignments,
@@ -149,7 +162,8 @@ export class AgentDaemon {
       nodeManager: this.nodeManager,
       agentRegistry: this.agentRegistry,
       dataLayer: this.dataLayer,
-      publicLedger: this.publicLedger,
+      publicLedger: this.proofLedger ? null : this.publicLedger,
+      proofLedger: this.proofLedger,
       safetySettings: getSignedChannelSafetySettings(this.config),
     });
     await this.channelExecutor.loadCooldowns();
@@ -166,15 +180,17 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
-      publicLedger: this.publicLedger,
+      publicLedger: this.proofLedger ? null : this.publicLedger,
+      proofLedger: this.proofLedger,
     });
 
     this.analyticsGateway = new AnalyticsGateway({
       walletOps: this.agentCashuWallet,
       dataLayer: this.dataLayer,
-      ledger: this.publicLedger,
+      ledger: this.proofLedger ? null : this.publicLedger,
       capitalLedger: this.capitalLedger,
       nodeManager: this.nodeManager,
+      proofLedger: this.proofLedger,
     });
 
     this.spendingVelocity = new SpendingVelocityTracker(getSpendingVelocitySettings(this.config));
@@ -185,6 +201,7 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
+      proofLedger: this.proofLedger,
     });
     await this.depositTracker.load();
     this.depositTracker.startPolling();
@@ -223,6 +240,7 @@ export class AgentDaemon {
       agentRegistry: this.agentRegistry,
       assignmentRegistry: this.channelAssignments,
       mutex: channelMutex,
+      proofLedger: this.proofLedger,
       config: getChannelOpenSafetySettings(this.config),
     });
     await this.channelOpener.load();
@@ -247,6 +265,7 @@ export class AgentDaemon {
       agentRegistry: this.agentRegistry,
       assignmentRegistry: this.channelAssignments,
       mutex: channelMutex,
+      proofLedger: this.proofLedger,
       config: this.config.channelClose || {},
     });
     await this.channelCloser.load();
@@ -319,6 +338,7 @@ export class AgentDaemon {
         marketTransparency: this.marketTransparency,
         walletOps: this.agentCashuWallet,
         dataLayer: this.dataLayer,
+        proofLedger: this.proofLedger,
         config: getHelpServiceSettings(this.config),
       });
     } catch (err) {
@@ -353,6 +373,7 @@ export class AgentDaemon {
     this.revenueTracker?.stopPolling?.();
     this.swapProvider?.stopPolling?.();
     this.performanceTracker?.stopPolling?.();
+    this.proofLedger?.close?.();
     console.log('[AgentDaemon] Stopped');
   }
 
