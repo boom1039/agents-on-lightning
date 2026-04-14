@@ -441,6 +441,8 @@ export class RebalanceExecutor {
           action: 'rebalance payment',
           fallback: 'Rebalance payment failed.',
         }),
+        payment_hash: paymentHash,
+        instruction_hash: instrHash,
         status: 502,
       };
     }
@@ -482,6 +484,8 @@ export class RebalanceExecutor {
       return {
         success: true,
         status: 'succeeded',
+        payment_hash: paymentHash,
+        instruction_hash: instrHash,
         outbound_chan_id,
         inbound_chan_id: inbound_chan_id || null,
         amount_sats,
@@ -524,6 +528,8 @@ export class RebalanceExecutor {
       return {
         success: false,
         status: 'failed',
+        payment_hash: paymentHash,
+        instruction_hash: instrHash,
         outbound_chan_id,
         amount_sats,
         failure_reason: reason,

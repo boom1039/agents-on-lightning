@@ -15,6 +15,7 @@ import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-r
 import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
 import { validateBitcoinAddress } from '../identity/validators.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
+import { withAgentProofTrace } from '../proof-ledger/agent-proof-trace.js';
 
 function depositExplorerLinks(address) {
   return {
@@ -153,6 +154,10 @@ function isInsufficientCapitalError(err) {
   return /Insufficient available balance/i.test(String(err?.message || ''));
 }
 
+function withRouteProofTrace(body, daemon, agentId, options = {}) {
+  return withAgentProofTrace(body, daemon?.proofLedger || null, agentId, options);
+}
+
 async function findTransactionByLabel(client, label) {
   const txs = await client.getTransactions();
   const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
@@ -245,7 +250,7 @@ export function agentPaidServicesRoutes(daemon) {
         const result = await daemon.analyticsGateway.execute(req.agentId, query_id, params || {});
         return {
           statusCode: 200,
-          body: {
+          body: withRouteProofTrace({
             ...result,
             cost_summary: {
               action: 'analytics_execute',
@@ -255,7 +260,16 @@ export function agentPaidServicesRoutes(daemon) {
               unit: 'sat',
               source: result.payment_source || 'wallet',
             },
-          },
+          }, daemon, req.agentId, {
+            scope: 'paid_service_analytics',
+            eventSources: ['paid_service'],
+            requireMatch: true,
+            match: {
+              service: 'analytics',
+              service_id: result.query_id || query_id,
+              amount_sats: result.price_sats,
+            },
+          }),
         };
       },
       onError: (err) => {
@@ -509,7 +523,7 @@ export function agentPaidServicesRoutes(daemon) {
             { reference: withdrawalLabel },
           );
           debited = false;
-          return agentError(res, unknownOutcome ? 502 : 400, {
+          return agentError(res, unknownOutcome ? 502 : 400, withRouteProofTrace({
             error: 'capital_withdraw_failed',
             message: summarizeLndError(detail, {
               action: 'capital withdrawal',
@@ -517,7 +531,14 @@ export function agentPaidServicesRoutes(daemon) {
             }),
             hint: 'Your capital was returned to available balance.',
             see: 'GET /api/v1/capital/activity',
-          });
+          }, daemon, req.agentId, {
+            scope: 'capital_withdrawal',
+            eventSources: ['capital'],
+            requireMatch: true,
+            match: {
+              referenceValues: [withdrawalLabel],
+            },
+          }));
         }
       }
 
@@ -542,7 +563,7 @@ export function agentPaidServicesRoutes(daemon) {
         console.error(`[Gateway] capital withdraw broadcast proof failed for ${req.agentId}: ${proofErr.message}`);
       });
 
-      return res.json({
+      return res.json(withRouteProofTrace({
         success: true,
         agent_id: req.agentId,
         amount_sats,
@@ -553,7 +574,15 @@ export function agentPaidServicesRoutes(daemon) {
         recovered_from_unknown: recoveredFromUnknown,
         balance_after: balanceAfter,
         learn: 'The withdrawal broadcast on-chain. Watch the txid in a block explorer or your destination wallet.',
-      });
+      }, daemon, req.agentId, {
+        scope: 'capital_withdrawal',
+        eventSources: ['capital', 'capital_withdrawal'],
+        requireMatch: true,
+        match: {
+          txid: sendResult.txid,
+          referenceValues: [withdrawalLabel],
+        },
+      }));
     } catch (err) {
       if (debited) {
         try {
@@ -929,7 +958,7 @@ export function agentPaidServicesRoutes(daemon) {
         const result = await daemon.helpEndpoint.ask(req.agentId, question, context || {});
         return {
           statusCode: 200,
-          body: {
+          body: withRouteProofTrace({
             ...result,
             cost_summary: {
               action: 'help',
@@ -939,7 +968,16 @@ export function agentPaidServicesRoutes(daemon) {
               unit: 'sat',
               source: result.payment_source || 'wallet',
             },
-          },
+          }, daemon, req.agentId, {
+            scope: 'paid_service_help',
+            eventSources: ['paid_service'],
+            requireMatch: true,
+            match: {
+              service: 'help',
+              service_id: 'agent_help',
+              amount_sats: result.cost_sats,
+            },
+          }),
         };
       },
       onError: (err) => {

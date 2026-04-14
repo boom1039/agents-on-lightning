@@ -76,6 +76,7 @@ test('channel close request appends instruction-accepted and submitted lifecycle
     work: async ({ closer, proofLedger }) => {
       const result = await closer.requestClose('agent-close-proof', {});
       assert.equal(result.success, true);
+      assert.equal(result.instruction_hash, 'instr-close-proof');
 
       const proofs = proofLedger.listProofs({ agentId: 'agent-close-proof', limit: 10 }).reverse();
       assert.deepEqual(proofs.map((proof) => proof.money_event_type), [
@@ -95,6 +96,7 @@ test('indeterminate channel close appends unknown-submission lifecycle proof', a
       const result = await closer.requestClose('agent-close-proof', {});
       assert.equal(result.success, true);
       assert.equal(result.status, 'close_submitted_unknown');
+      assert.equal(result.instruction_hash, 'instr-close-proof');
 
       const proofs = proofLedger.listProofs({ agentId: 'agent-close-proof', limit: 10 }).reverse();
       assert.deepEqual(proofs.map((proof) => proof.money_event_type), [

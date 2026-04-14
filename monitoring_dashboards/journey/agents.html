@@ -547,10 +547,10 @@
     const TABLE_IDS = ['agents', 'funnel', 'tools', 'ledger'];
     const tableState = {};
     const defaultTableState = {
-      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'proofBalance', 'proofs', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'proofBalance', 'proofs', 'latestProof', 'proofHash', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       funnel: { order: ['stage', 'agents', 'calls', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
-      ledger: { order: ['time', 'agent', 'proofId', 'record', 'status', 'type', 'amount', 'source', 'details', 'hash'], widths: {}, sortBy: null, sortDir: 'desc' },
+      ledger: { order: ['time', 'seq', 'agent', 'proofId', 'record', 'status', 'type', 'delta', 'amount', 'source', 'refs', 'hash'], widths: {}, sortBy: null, sortDir: 'desc' },
     };
     let panelOrder = loadJson('panels', PANEL_IDS);
     let draggedPanelId = null;
@@ -702,15 +702,61 @@
       return entry?.agent_id || entry?.from_agent_id || entry?.to_agent_id || '';
     }
 
+    const DELTA_FIELDS = [
+      ['ecash', 'wallet_ecash_delta_sats'],
+      ['hub', 'wallet_hub_delta_sats'],
+      ['cap', 'capital_available_delta_sats'],
+      ['lock', 'capital_locked_delta_sats'],
+      ['pend_dep', 'capital_pending_deposit_delta_sats'],
+      ['pend_close', 'capital_pending_close_delta_sats'],
+      ['spent', 'capital_service_spent_delta_sats'],
+      ['pnl', 'routing_pnl_delta_sats'],
+    ];
+
+    function sequenceOf(entry) {
+      return Number(entry?.global_sequence || entry?.sequence || 0) || 0;
+    }
+
+    function signedDeltaParts(entry) {
+      const parts = [];
+      for (const [label, key] of DELTA_FIELDS) {
+        const value = Number(entry?.[key] || 0);
+        if (Number.isFinite(value) && value !== 0) {
+          parts.push(`${label}${value > 0 ? '+' : ''}${fmtSats(value)}`);
+        }
+      }
+      return parts;
+    }
+
+    function signedDeltaText(entry) {
+      const parts = signedDeltaParts(entry);
+      return parts.length ? parts.join(' ') : 'no balance delta';
+    }
+
     function detailText(entry) {
       const parts = [];
       const refs = entry?.public_safe_refs && typeof entry.public_safe_refs === 'object' ? entry.public_safe_refs : {};
       for (const key of [
+        'proof_id',
+        'proof_hash',
+        'global_sequence',
+        'agent_proof_sequence',
         'reference',
+        'reference_hash',
+        'flow_hash',
         'flow_id',
         'txid',
+        'swap_id',
         'channel_point',
+        'channel_id',
+        'chan_id',
+        'instruction_hash',
         'proof_group_id',
+        'provider',
+        'service',
+        'service_id',
+        'fee_sats',
+        'net_amount_sats',
         'from_bucket',
         'to_bucket',
         'status',
@@ -725,6 +771,11 @@
         else if (refs?.[key] !== undefined && refs?.[key] !== null) parts.push(`${key}=${refs[key]}`);
       }
       return parts.join(' ');
+    }
+
+    function refsText(entry) {
+      const detail = detailText(entry);
+      return detail || signedDeltaText(entry);
     }
 
     function agentCapital(row) {
@@ -782,6 +833,24 @@
           html: (row) => fmtNum(row.proof_rows || 0),
           sort: (row) => Number(row.proof_rows || 0),
         },
+        {
+          id: 'latestProof',
+          label: 'latest proof',
+          width: 106,
+          className: 'cyan',
+          title: () => 'Source: /api/analytics/ledger/agents from SQLite proof_ledger. Latest signed proof row acknowledged for this agent.',
+          html: (row) => esc(short(row.latest_proof_id || '-', 16)),
+          sort: (row) => row.latest_proof_sequence || row.latest_proof_id || '',
+        },
+        {
+          id: 'proofHash',
+          label: 'proof hash',
+          width: 96,
+          className: 'dim',
+          title: () => 'Source: /api/analytics/ledger/agents from SQLite proof_ledger. Hash of the agent latest proof row.',
+          html: (row) => esc(short(row.latest_proof_hash || '-', 14)),
+          sort: (row) => row.latest_proof_hash || '',
+        },
         { id: 'capital', label: 'capital', width: 88, className: 'mono', html: (row) => fmtSats(agentCapital(row)), sort: (row) => agentCapital(row) },
         { id: 'ledger', label: 'ledger', width: 78, className: 'mono', html: (row) => fmtNum(row.public_ledger_entries || 0), sort: (row) => Number(row.public_ledger_entries || 0) },
         {
@@ -831,6 +900,15 @@
       ],
       ledger: [
         { id: 'time', label: 'time', width: 118, html: (row) => fmtTime(tsOf(row)), sort: (row) => tsOf(row) },
+        {
+          id: 'seq',
+          label: 'seq',
+          width: 48,
+          className: 'mono',
+          title: () => 'Source: global_sequence in SQLite proof_ledger. This is the global append order of signed proofs.',
+          html: (row) => sequenceOf(row) ? fmtNum(sequenceOf(row)) : '-',
+          sort: (row) => sequenceOf(row),
+        },
         { id: 'agent', label: 'agent', width: 92, className: 'cyan', html: (row) => esc(short(eventAgent(row) || '-', 14)), sort: (row) => eventAgent(row) || '' },
         {
           id: 'proofId',
@@ -859,9 +937,25 @@
           sort: (row) => row.status || '',
         },
         { id: 'type', label: 'type', width: 142, html: (row) => esc(short(row.type || '-', 24)), sort: (row) => row.type || '' },
+        {
+          id: 'delta',
+          label: 'signed delta',
+          width: 136,
+          className: 'mono',
+          title: () => 'Source: delta columns in SQLite proof_ledger. Shows which acknowledged balance bucket changed.',
+          html: (row) => esc(short(signedDeltaText(row), 24)),
+          sort: (row) => signedDeltaParts(row).join(' '),
+        },
         { id: 'amount', label: 'amount', width: 94, className: 'mono', html: (row) => fmtSats(row.amount_sats), sort: (row) => Number(row.amount_sats || 0) },
         { id: 'source', label: 'source', width: 88, html: (row) => esc(short(row.source || '-', 14)), sort: (row) => row.source || '' },
-        { id: 'details', label: 'reference / details', html: (row) => esc(short(detailText(row), 96)), sort: (row) => detailText(row) },
+        {
+          id: 'refs',
+          label: 'proof refs',
+          width: 220,
+          title: () => 'Source: public_safe_refs plus proof IDs from SQLite proof_ledger. These are public-safe references for tracing the money event.',
+          html: (row) => esc(short(refsText(row), 96)),
+          sort: (row) => refsText(row),
+        },
         {
           id: 'hash',
           label: 'hash',
@@ -1230,7 +1324,13 @@
       const proofBalanceData = ledgerPayload?.proof_balance || {};
       const latestProof = ledgerPayload?.latest_agent_proof || {};
       const agentChain = ledgerPayload?.agent_chain || {};
+      const latestCheckpoint = ledgerPayload?.latest_liability_checkpoint || {};
       const publicTotal = Number(ledgerPayload?.public_total || 0);
+      const proofPath = [
+        latestProof.proof_id ? `latest=${short(latestProof.proof_id, 18)}` : 'latest=none',
+        agentChain?.valid ? 'agent-chain=valid' : 'agent-chain=not verified',
+        ledgerPayload?.included_in_latest_liability_checkpoint ? 'checkpoint=included' : 'checkpoint=pending',
+      ].join(' | ');
       $('agent-detail').innerHTML = `<div class="kv">
         <div>agent</div><div class="cyan">${esc(state.selectedAgent || '-')}</div>
         <div>calls</div><div>${fmtNum(agent.tool_calls || 0)} tool calls, ${fmtNum(agent.failed_calls || 0)} failures</div>
@@ -1240,6 +1340,8 @@
         <div title="Source: /api/analytics/ledger/agent/:id from SQLite proof_ledger">latest proof</div><div class="cyan">${esc(short(latestProof.proof_id || '-', 28))} <span class="dim">${esc(short(latestProof.proof_hash || '', 18))}</span></div>
         <div title="Source: proofLedger.verifyChain({ agentId })">agent chain</div><div class="${agentChain.valid ? 'ok' : 'bad'}">${esc(agentChain.valid ? 'valid' : agentChain ? 'invalid' : '-')} | ${fmtNum(agentChain.checked || 0)} checked | ${fmtNum(ledgerPayload?.proof_total || 0)} proofs</div>
         <div title="Source: latest liability checkpoint compared to selected agent latest proof sequence">checkpoint</div><div class="${ledgerPayload?.included_in_latest_liability_checkpoint ? 'ok' : 'warn'}">${esc(ledgerPayload?.included_in_latest_liability_checkpoint ? 'included in latest liability checkpoint' : 'not included yet or no money proof')}</div>
+        <div title="Verification path for this agent: latest signed proof, per-agent hash chain, and latest liability checkpoint">proof trace</div><div>${esc(proofPath)}</div>
+        <div title="Source: /api/analytics/ledger/agent/:id. Agents can independently retain proofs and verify proof hashes/signatures with MCP proof tools.">agent check</div><div>list proofs -> fetch proof -> verify signature/hash chain -> compare checkpoint through seq ${fmtNum(latestCheckpoint.global_sequence || 0)}</div>
         <div>capital</div><div>${fmtSats((capital.available || 0) + (capital.locked || 0) + (capital.pending_deposit || 0) + (capital.pending_close || 0))} total tracked</div>
         <div>buckets</div><div>avail ${fmtSats(capital.available)} | locked ${fmtSats(capital.locked)} | pend dep ${fmtSats(capital.pending_deposit)} | pend close ${fmtSats(capital.pending_close)}</div>
         <div>ledger</div><div>${fmtNum(publicTotal)} public rows, ${fmtNum(ledgerPayload?.capital_activity_total || 0)} capital activity rows</div>
@@ -1272,18 +1374,18 @@
         })),
         ...ledgerTimeline.map((event) => ({
           ts: event.ts,
-          kind: event.source === 'capital_activity' ? 'capital' : 'ledger',
-          label: event.entry?.type || '-',
-          status: '',
-          outcome: `${fmtSats(event.entry?.amount_sats)} sats`,
-          detail: detailText(event.entry),
+          kind: event.entry?.proof_id ? 'proof' : event.source === 'capital_activity' ? 'capital' : 'ledger',
+          label: `${event.entry?.proof_record_type || 'money'}:${event.entry?.type || '-'}`,
+          status: event.entry?.status || '',
+          outcome: signedDeltaText(event.entry),
+          detail: refsText(event.entry),
           bad: false,
         })),
       ].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)).slice(0, 220);
 
       $('timeline').innerHTML = rows.length ? rows.map((row) => `<div class="timeline-row">
         <div class="mono muted">${fmtTimelineTime(row.ts)}</div>
-        <div class="${row.bad ? 'bad' : row.kind === 'ledger' || row.kind === 'capital' ? 'ok' : 'cyan'}">${esc(row.kind)}</div>
+        <div class="${row.bad ? 'bad' : row.kind === 'ledger' || row.kind === 'capital' || row.kind === 'proof' ? 'ok' : 'cyan'}">${esc(row.kind)}</div>
         <div class="nowrap">${esc(row.label)}</div>
         <div class="${row.bad ? 'bad' : 'ok'} mono">${esc(row.status || '')}</div>
         <div class="nowrap">${esc(row.outcome)} <span class="dim">${esc(row.detail)}</span></div>

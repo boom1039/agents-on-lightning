@@ -646,7 +646,7 @@ export class CapitalLedger {
       state.available -= amount;
       state.locked += amount;
 
-      const isRebalanceLock = channelPoint.startsWith('rebalance:');
+      const isRebalanceLock = channelPoint.startsWith('rebalance:') || channelPoint.startsWith('rebalance-lock:');
       const proofEventType = isRebalanceLock ? 'rebalance_fee_locked' : 'channel_open_capital_locked';
       const proofResult = await this._appendProof({
         idempotency_key: proofSafeKey(proofEventType, { agent_id: agentId, channel_point: channelPoint }),
@@ -1517,9 +1517,11 @@ export class CapitalLedger {
     if (!reference || typeof reference !== 'string') {
       throw new Error('creditRevenue requires a reference string');
     }
-    if (!/^forward:\d+:\d+$/.test(reference)) {
+    const referenceMatch = /^forward:(\d+):(\d+)$/.exec(reference);
+    if (!referenceMatch) {
       throw new Error(`creditRevenue reference must match forward:{timestamp}:{chanId}, got: ${reference}`);
     }
+    const [, , chanId] = referenceMatch;
 
     const unlock = await this._mutex.acquire(`capital:${agentId}`);
     try {
@@ -1541,6 +1543,7 @@ export class CapitalLedger {
         capital_available_delta_sats: amount,
         public_safe_refs: {
           amount_sats: amount,
+          chan_id: chanId,
           reference_hash: safeReferenceHash(reference),
           status: 'settled',
         },

@@ -258,11 +258,13 @@ export class EcashChannelFunder {
       }
 
       // 10. Success
+      const openDetails = openResult.result || openResult;
       this._flows[flowId].status = 'complete';
       this._flows[flowId].completed_at = new Date().toISOString();
       this._flows[flowId].open_result = {
-        channel_point: openResult.channel_point,
-        funding_txid: openResult.funding_txid,
+        channel_point: openDetails.channel_point,
+        funding_txid: openDetails.funding_txid,
+        instruction_hash: openDetails.instruction_hash,
       };
       await this._saveFlows();
 
@@ -272,7 +274,7 @@ export class EcashChannelFunder {
         agent_id: agentId,
         flow_id: flowId,
         amount_sats: amount,
-        channel_point: openResult.channel_point,
+        channel_point: openDetails.channel_point,
       });
 
       return {

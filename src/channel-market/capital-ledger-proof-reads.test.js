@@ -202,6 +202,8 @@ test('capital ledger write methods append signed proof rows for money transition
         'lightning_capital_invoice_created',
       ],
     );
+    const revenueProof = proofs.find((proof) => proof.money_event_type === 'routing_revenue_credited');
+    assert.equal(revenueProof.public_safe_refs.chan_id, '12345');
     assert(proofs.every((proof) => proofLedger.verifyProof(proof).valid));
     assert.equal(proofLedger.verifyChain({ agentId: 'agent-write' }).valid, true);
 
@@ -215,6 +217,30 @@ test('capital ledger write methods append signed proof rows for money transition
     assert.equal(balance.total_ecash_funded, 30);
     assert.equal(balance.total_service_spent, 60);
     assert.equal(balance.total_routing_pnl, 50);
+  });
+});
+
+test('rebalance fee locks are recorded as rebalance proofs, not channel-open proofs', async () => {
+  await withProofCapitalLedger(async ({ proofLedger }) => {
+    const capitalLedger = new CapitalLedger({
+      dataLayer: mockDataLayer(),
+      auditLog: mockAuditLog(),
+      mutex: mockMutex(),
+      proofLedger,
+    });
+
+    await capitalLedger.recordDeposit('agent-rebalance-lock', 100, 'tx-rebalance-lock');
+    await capitalLedger.confirmDeposit('agent-rebalance-lock', 100, 'tx-rebalance-lock');
+    await capitalLedger.lockForChannel('agent-rebalance-lock', 12, 'rebalance-lock:instr-hash');
+
+    const proof = proofLedger
+      .listProofs({ agentId: 'agent-rebalance-lock', limit: 10 })
+      .find((entry) => entry.money_event_type === 'rebalance_fee_locked');
+
+    assert.equal(proof.event_source, 'rebalance');
+    assert.equal(proof.money_event_status, 'pending');
+    assert.equal(proof.capital_available_delta_sats, -12);
+    assert.equal(proof.capital_locked_delta_sats, 12);
   });
 });
 

@@ -83,6 +83,7 @@ test('channel open execution appends instruction-accepted and submitted lifecycl
 
     const result = await opener.open('agent-open-proof', {});
     assert.equal(result.success, true);
+    assert.equal(result.result.instruction_hash, 'instr-open-proof');
 
     const proofs = proofLedger.listProofs({ agentId: 'agent-open-proof', limit: 10 }).reverse();
     assert.deepEqual(proofs.map((proof) => proof.money_event_type), [

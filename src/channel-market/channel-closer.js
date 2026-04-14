@@ -629,6 +629,7 @@ export class ChannelCloser {
       routing_pnl: originalLocked - localBalance,
       requested_at: Date.now(),
       peer_pubkey: assignment.remote_pubkey,
+      instruction_hash: instrHash,
     };
     this._state[channelPoint] = entry;
     await this._persist();
@@ -682,6 +683,7 @@ export class ChannelCloser {
           http_status: 202,
           status: 'close_submitted_unknown',
           channel_point: channelPoint,
+          instruction_hash: instrHash,
           close_type: force ? 'force' : 'cooperative',
           local_balance_at_close: localBalance,
           original_funding_sats: originalLocked,
@@ -752,6 +754,7 @@ export class ChannelCloser {
       success: true,
       status: 'pending_close',
       channel_point: channelPoint,
+      instruction_hash: instrHash,
       close_type: force ? 'force' : 'cooperative',
       local_balance_at_close: localBalance,
       original_funding_sats: originalLocked,

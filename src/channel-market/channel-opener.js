@@ -1085,6 +1085,7 @@ export class ChannelOpener {
           status: 'pending_open',
           channel_point: channelPoint,
           funding_txid: fundingTxidStr,
+          instruction_hash: instrHash,
           peer_pubkey: peerPubkey,
           peer_alias: peerAlias,
           local_funding_amount_sats: amount,

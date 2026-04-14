@@ -55,6 +55,11 @@ import { getSocketAddress } from '../identity/request-security.js';
 import { DangerRoutePolicyStore, findUnexpectedKeys } from '../identity/danger-route-policy.js';
 import { getDangerRouteSettings } from '../identity/danger-route-settings.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
+import {
+  proofTraceContext,
+  summarizeProofForAgent,
+  withAgentProofTrace,
+} from '../proof-ledger/agent-proof-trace.js';
 
 const EXPENSIVE_RESULT_CACHE_TTL_MS = 5_000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -119,6 +124,39 @@ function sendUnexpectedKeys(res, unexpected, see) {
     hint: 'Send only the documented JSON keys for this route.',
     see,
   });
+}
+
+function withMarketProofTrace(body, daemon, agentId, options = {}) {
+  return withAgentProofTrace(body, daemon?.proofLedger || null, agentId, options);
+}
+
+function attachMarketItemProofTrace(item, daemon, agentId, options = {}) {
+  if (!item || typeof item !== 'object') return item;
+  return withMarketProofTrace(item, daemon, agentId, options);
+}
+
+function quoteProofTrace(proof, daemon) {
+  return {
+    source_of_truth: 'proof_ledger',
+    available: Boolean(proof),
+    scope: 'swap_quote',
+    count: proof ? 1 : 0,
+    proofs: proof ? [summarizeProofForAgent(proof, daemon?.proofLedger || null)] : [],
+  };
+}
+
+function rebalanceReferenceValues(result = {}) {
+  const values = [];
+  if (result.payment_hash) {
+    values.push(
+      `rebalance-submitted:${result.payment_hash}`,
+      `rebalance:${result.payment_hash}`,
+      `rebalance-failed:${result.payment_hash}`,
+      `stream-fail:${result.payment_hash}`,
+    );
+  }
+  if (result.instruction_hash) values.push(`rebalance-lock:${result.instruction_hash}`);
+  return values;
 }
 
 function parseFundingAmount(body) {
@@ -762,7 +800,21 @@ export function channelMarketRoutes(daemon) {
         const openBody = result?.success && Number.isInteger(amountSats) && amountSats > 0
           ? { ...result, cost_summary: { action: 'channel_open', amount_sats: amountSats, fee_sats: 0, total_sats: amountSats, unit: 'sat' } }
           : result;
-        return { statusCode: pickHttpStatus(result), body: openBody };
+        const instructionHash = openBody?.result?.instruction_hash;
+        return {
+          statusCode: pickHttpStatus(result),
+          body: withMarketProofTrace(openBody, daemon, req.agentId, {
+            scope: 'channel_open',
+            eventSources: ['channel_open'],
+            requireMatch: true,
+            match: {
+              channel_point: openBody?.result?.channel_point,
+              txid: openBody?.result?.funding_txid,
+              instruction_hash: instructionHash,
+              referenceValues: instructionHash ? [`pending-open:${instructionHash}`] : [],
+            },
+          }),
+        };
       },
       onError: (err) => {
         console.error(`[market/open] Error: ${err.message}`);
@@ -798,7 +850,17 @@ export function channelMarketRoutes(daemon) {
       const pending = await enrichPendingFundingStatus(daemon, pendingBase);
       res.json({
         agent_id: req.agentId,
-        pending_opens: pending,
+        pending_opens: pending.map((entry) => attachMarketItemProofTrace(entry, daemon, req.agentId, {
+          scope: 'channel_open',
+          eventSources: ['channel_open'],
+          requireMatch: true,
+          match: {
+            channel_point: entry.channel_point,
+            txid: entry.funding_txid,
+            instruction_hash: entry.instruction_hash,
+            referenceValues: entry.instruction_hash ? [`pending-open:${entry.instruction_hash}`] : [],
+          },
+        })),
         count: pending.length,
         learn: pending.length > 0
           ? 'Your pending channel opens are listed above. Read funding_tx_confirmations to see whether the funding transaction is still waiting on blocks or whether LND still has not activated the channel yet. Once LND marks the channel active, it will be auto-assigned and appear in ' +
@@ -950,7 +1012,15 @@ export function channelMarketRoutes(daemon) {
           : result;
         return {
           statusCode: pickHttpStatus(result),
-          body: closeBody,
+          body: withMarketProofTrace(closeBody, daemon, req.agentId, {
+            scope: 'channel_close',
+            eventSources: ['channel_close'],
+            requireMatch: true,
+            match: {
+              channel_point: closeBody?.channel_point,
+              instruction_hash: closeBody?.instruction_hash,
+            },
+          }),
         };
       },
       onError: (err) => {
@@ -983,7 +1053,15 @@ export function channelMarketRoutes(daemon) {
       const closes = daemon.channelCloser.getClosesForAgent(req.agentId).map(formatCloseEntry);
       res.json({
         agent_id: req.agentId,
-        closes,
+        closes: closes.map((entry) => attachMarketItemProofTrace(entry, daemon, req.agentId, {
+          scope: 'channel_close',
+          eventSources: ['channel_close'],
+          requireMatch: true,
+          match: {
+            channel_point: entry.channel_point,
+            instruction_hash: entry.instruction_hash,
+          },
+        })),
         count: closes.length,
         learn: closes.length > 0
           ? 'Your channel closes are listed above. Pending closes will settle after on-chain confirmation.'
@@ -1007,7 +1085,11 @@ export function channelMarketRoutes(daemon) {
     }
     try {
       const revenue = daemon.revenueTracker.getAgentRevenue(req.agentId);
-      res.json(revenue);
+      res.json(withMarketProofTrace(revenue, daemon, req.agentId, {
+        scope: 'routing_revenue',
+        eventSources: ['routing_revenue'],
+        eventTypes: ['routing_revenue_credited'],
+      }));
     } catch (err) {
       console.error(`[market/revenue] Error: ${err.message}`);
       res.status(500).json({ error: 'Internal error fetching revenue' });
@@ -1027,7 +1109,13 @@ export function channelMarketRoutes(daemon) {
         return err404NotFound(res, 'Channel', { see: 'GET /api/v1/channels/mine' });
       }
       const revenue = daemon.revenueTracker.getChannelRevenue(req.params.chanId);
-      res.json(revenue);
+      res.json(withMarketProofTrace(revenue, daemon, req.agentId, {
+        scope: 'routing_revenue',
+        eventSources: ['routing_revenue'],
+        eventTypes: ['routing_revenue_credited'],
+        requireMatch: true,
+        match: { chan_id: req.params.chanId },
+      }));
     } catch (err) {
       console.error(`[market/revenue/:chanId] Error: ${err.message}`);
       res.status(500).json({ error: 'Internal error fetching channel revenue' });
@@ -1067,7 +1155,8 @@ export function channelMarketRoutes(daemon) {
       const amount = parseInt(req.query.amount_sats || '0', 10);
       const result = await daemon.swapProvider.getQuote(amount);
       if (result.success) {
-        await daemon.capitalLedger?.recordLifecycleProof?.(req.agentId, {
+        let quoteProof = null;
+        quoteProof = await daemon.capitalLedger?.recordLifecycleProof?.(req.agentId, {
           moneyEventType: 'swap_quote_created',
           moneyEventStatus: 'created',
           eventSource: 'swap',
@@ -1084,8 +1173,13 @@ export function channelMarketRoutes(daemon) {
           allowedPublicRefKeys: ['net_amount_sats'],
         }).catch((proofErr) => {
           console.error(`[market/swap/quote] Proof ledger quote proof failed: ${proofErr.message}`);
+          return null;
         });
-        res.json(result);
+        res.json({
+          ...result,
+          proof_context: proofTraceContext('swap_quote'),
+          proof_chain: quoteProofTrace(quoteProof, daemon),
+        });
       } else {
         res.status(400).json(result);
       }
@@ -1104,7 +1198,15 @@ export function channelMarketRoutes(daemon) {
     const history = daemon.swapProvider.getSwapHistory(req.agentId);
     res.json({
       agent_id: req.agentId,
-      swaps: history,
+      swaps: history.map((swap) => attachMarketItemProofTrace(swap, daemon, req.agentId, {
+        scope: 'swap',
+        eventSources: ['swap'],
+        requireMatch: true,
+        match: {
+          swap_id: swap.swap_id,
+          referenceValues: swap.swap_id ? [`swap:${swap.swap_id}`] : [],
+        },
+      })),
       count: history.length,
     });
   });
@@ -1204,7 +1306,18 @@ export function channelMarketRoutes(daemon) {
           });
         }
         if (result?.success) invalidateLndReadViews(daemon);
-        return { statusCode: pickHttpStatus(result), body: result };
+        return {
+          statusCode: pickHttpStatus(result),
+          body: withMarketProofTrace(result, daemon, req.agentId, {
+            scope: 'swap',
+            eventSources: ['swap'],
+            requireMatch: true,
+            match: {
+              swap_id: result?.swap_id,
+              referenceValues: result?.swap_id ? [`swap:${result.swap_id}`] : [],
+            },
+          }),
+        };
       },
       onError: (err) => {
         console.error(`[market/swap/create] Error: ${err.message}`);
@@ -1236,7 +1349,15 @@ export function channelMarketRoutes(daemon) {
       logAuthorizationDenied(req.path, req.agentId, req.params.swapId, getSocketAddress(req) || null);
       return err404NotFound(res, 'Swap');
     }
-    res.json(status);
+    res.json(withMarketProofTrace(status, daemon, req.agentId, {
+      scope: 'swap',
+      eventSources: ['swap'],
+      requireMatch: true,
+      match: {
+        swap_id: req.params.swapId,
+        referenceValues: [`swap:${req.params.swapId}`],
+      },
+    }));
   });
 
   // Run market fund from ecash.
@@ -1344,7 +1465,25 @@ export function channelMarketRoutes(daemon) {
           });
         }
         if (result?.success) invalidateLndReadViews(daemon);
-        return { statusCode: pickHttpStatus(result), body: result };
+        const instructionHash = result?.result?.instruction_hash || result?.instruction_hash;
+        return {
+          statusCode: pickHttpStatus(result),
+          body: withMarketProofTrace(result, daemon, req.agentId, {
+            scope: 'ecash_to_channel_funding',
+            eventSources: ['ecash_to_channel_funding', 'channel_open'],
+            requireMatch: true,
+            match: {
+              flow_id: result?.flow_id,
+              instruction_hash: instructionHash,
+              channel_point: result?.result?.channel_point || result?.channel_point,
+              txid: result?.result?.funding_txid || result?.funding_txid,
+              referenceValues: [
+                ...(result?.flow_id ? [`ecash-fund:${result.flow_id}`] : []),
+                ...(instructionHash ? [`pending-open:${instructionHash}`] : []),
+              ],
+            },
+          }),
+        };
       },
       onError: (err) => {
         console.error(`[market/fund-from-ecash] Error: ${err.message}`);
@@ -1377,7 +1516,17 @@ export function channelMarketRoutes(daemon) {
       logAuthorizationDenied(req.path, req.agentId, req.params.flowId, getSocketAddress(req) || null);
       return err404NotFound(res, 'Funding flow');
     }
-    res.json(status);
+    res.json(withMarketProofTrace(status, daemon, req.agentId, {
+      scope: 'ecash_to_channel_funding',
+      eventSources: ['ecash_to_channel_funding', 'channel_open'],
+      requireMatch: true,
+      match: {
+        flow_id: req.params.flowId,
+        channel_point: status?.open_result?.channel_point,
+        txid: status?.open_result?.funding_txid,
+        referenceValues: [`ecash-fund:${req.params.flowId}`],
+      },
+    }));
   });
 
   // =========================================================================
@@ -1525,7 +1674,19 @@ export function channelMarketRoutes(daemon) {
           });
         }
         if (result?.success) invalidateLndReadViews(daemon);
-        return { statusCode: pickHttpStatus(result), body: result };
+        return {
+          statusCode: pickHttpStatus(result),
+          body: withMarketProofTrace(result, daemon, req.agentId, {
+            scope: 'rebalance',
+            eventSources: ['rebalance'],
+            requireMatch: true,
+            match: {
+              chan_id: result?.outbound_chan_id || req.body?.instruction?.params?.outbound_chan_id,
+              instruction_hash: result?.instruction_hash,
+              referenceValues: rebalanceReferenceValues(result),
+            },
+          }),
+        };
       },
       onError: (err) => {
         console.error(`[market/rebalance] Error: ${err.message}`);
@@ -1588,7 +1749,20 @@ export function channelMarketRoutes(daemon) {
         const result = await daemon.rebalanceExecutor.estimateRebalanceFee(req.agentId, req.body);
         return {
           statusCode: pickHttpStatus(result),
-          body: result,
+          body: withMarketProofTrace(result, daemon, req.agentId, {
+            scope: 'rebalance_estimate',
+            eventSources: ['rebalance'],
+            eventTypes: ['rebalance_fee_estimated'],
+            requireMatch: true,
+            match: {
+              chan_id: result?.estimated_fee_sats !== null && result?.estimated_fee_sats !== undefined
+                ? req.body?.outbound_chan_id
+                : undefined,
+              referenceValues: result?.estimated_fee_sats !== null && result?.estimated_fee_sats !== undefined
+                ? [`rebalance-estimate:${req.agentId}:${req.body?.outbound_chan_id}:${req.body?.amount_sats}:${result.estimated_fee_sats}`]
+                : [],
+            },
+          }),
         };
       });
       res.status(response.statusCode).json(response.body);
@@ -1607,7 +1781,18 @@ export function channelMarketRoutes(daemon) {
     try {
       const limit = parseInt(req.query.limit || '50', 10);
       const result = await daemon.rebalanceExecutor.getRebalanceHistory(req.agentId, limit);
-      res.json(result);
+      res.json({
+        ...result,
+        rebalances: (result.rebalances || []).map((entry) => attachMarketItemProofTrace(entry, daemon, req.agentId, {
+          scope: 'rebalance',
+          eventSources: ['rebalance'],
+          requireMatch: true,
+          match: {
+            chan_id: entry.outbound_chan_id,
+            referenceValues: rebalanceReferenceValues(entry),
+          },
+        })),
+      });
     } catch (err) {
       console.error(`[market/rebalances] Error: ${err.message}`);
       res.status(500).json({ error: 'Internal error fetching rebalance history' });
