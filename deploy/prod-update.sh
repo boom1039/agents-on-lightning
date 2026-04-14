@@ -101,6 +101,30 @@ process.exit(0);
 NODE
 }
 
+current_runtime_modules_work_on_host() {
+  local current_dir="$1"
+
+  [[ -d "$current_dir/node_modules" && -f "$current_dir/package.json" ]] || return 1
+
+  sudo -u "$APP_USER" node - "$current_dir/package.json" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const [packagePath] = process.argv.slice(2);
+const root = path.dirname(packagePath);
+const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const deps = pkg.dependencies || {};
+
+function requireFromRoot(name) {
+  const resolved = require.resolve(name, { paths: [root] });
+  return require(resolved);
+}
+
+if (Object.prototype.hasOwnProperty.call(deps, 'better-sqlite3')) {
+  requireFromRoot('better-sqlite3');
+}
+NODE
+}
+
 restart_and_report() {
   sudo systemctl restart "$SERVICE"
   sudo systemctl is-active "$SERVICE"
@@ -134,19 +158,15 @@ if [[ -e "$CURRENT_LINK" ]]; then
   CURRENT_TARGET="$(readlink -f "$CURRENT_LINK" || true)"
 fi
 
-if [[ -n "$CURRENT_TARGET" && -f "$CURRENT_TARGET/RELEASE.txt" ]]; then
-  if ! artifact_modules_match_host "$CURRENT_TARGET"; then
-    CURRENT_TARGET=""
-  fi
-fi
-
 if [[ -z "$CURRENT_TARGET" && -d "$APP_DIR/src" && -f "$APP_DIR/package-lock.json" ]]; then
   CURRENT_TARGET="$APP_DIR"
 fi
 
 if [[ -d "$RELEASE_DIR/node_modules" ]]; then
   :
-elif [[ -n "$CURRENT_TARGET" ]] && current_runtime_deps_cover_release "$CURRENT_TARGET" "$RELEASE_DIR"; then
+elif [[ -n "$CURRENT_TARGET" ]] \
+  && current_runtime_deps_cover_release "$CURRENT_TARGET" "$RELEASE_DIR" \
+  && current_runtime_modules_work_on_host "$CURRENT_TARGET"; then
   sudo -u "$APP_USER" ln -s "$CURRENT_TARGET/node_modules" "$RELEASE_DIR/node_modules"
 else
   echo "Runtime artifact needs host-compatible dependencies." >&2
