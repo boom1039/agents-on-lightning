@@ -42,6 +42,7 @@ const SENSITIVE_FIELD_PATTERNS = [
 ];
 
 const ALLOWED_SENSITIVE_FIELDS = new Map([
+  ['GET /', new Set(['proof_ledger'])],
   ['GET /.well-known/mcp.json', new Set(['version', 'serverInfo.version'])],
   ['GET /.well-known/mcp/server-card.json', new Set(['version', 'serverInfo.version'])],
   ['GET /.well-known/agent-card.json', new Set(['version'])],
@@ -49,6 +50,27 @@ const ALLOWED_SENSITIVE_FIELDS = new Map([
   ['GET /api/v1/capabilities', new Set(['tiers.invoice'])],
   ['POST /api/v1/agents/register', new Set(['api_key'])],
 ]);
+
+function isAllowedSensitiveField(routeKey, field) {
+  const exact = ALLOWED_SENSITIVE_FIELDS.get(routeKey);
+  if (exact?.has(field)) return true;
+
+  const publicProofRoutes = new Set([
+    'GET /.well-known/proof-ledger.json',
+    'GET /api/v1/proofs/liabilities',
+    'GET /api/v1/proofs/reserves',
+  ]);
+  if (!publicProofRoutes.has(routeKey)) return false;
+
+  return [
+    /^latest_global_proof_(id|hash)$/,
+    /^proof_of_(liabilities|reserves)(\.|$)/,
+    /(^|\.)proof_(id|hash|record_type)$/,
+    /(^|\.)previous_global_proof_hash$/,
+    /(^|\.)checkpointed_global_proof_hash$/,
+    /(^|\.)proof_ledger$/,
+  ].some((pattern) => pattern.test(field));
+}
 
 function shortJson(value, limit = 1200) {
   try {
@@ -258,15 +280,14 @@ for (const route of manifest.routes) {
     if (route.auth === 'public') {
       report.public_routes += 1;
       const sensitiveFields = collectSensitiveFields(result.body);
-      const allowed = ALLOWED_SENSITIVE_FIELDS.get(route.key) || new Set();
-      const unexpectedSensitiveFields = sensitiveFields.filter((field) => !allowed.has(field));
+      const unexpectedSensitiveFields = sensitiveFields.filter((field) => !isAllowedSensitiveField(route.key, field));
       const row = {
         key: route.key,
         status: result.status,
         url: result.url,
         dynamic: isDynamicRoute(route.path),
         sensitive_fields: unexpectedSensitiveFields,
-        allowed_sensitive_fields: sensitiveFields.filter((field) => allowed.has(field)),
+        allowed_sensitive_fields: sensitiveFields.filter((field) => isAllowedSensitiveField(route.key, field)),
         sample: shortJson(result.body),
       };
       if (unexpectedSensitiveFields.length > 0) {
