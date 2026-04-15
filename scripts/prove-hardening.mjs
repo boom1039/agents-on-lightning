@@ -1,9 +1,16 @@
 import { spawn } from 'node:child_process';
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import {
+  buildRegistrationAuthPayload,
+  canonicalAuthJson,
+  normalizeSecp256k1DerSignatureToLowS,
+} from '../src/identity/signed-auth.js';
+import { normalizeRegistrationProfileForSigning } from '../src/identity/registry.js';
 
 const rootDir = resolve(import.meta.dirname, '..');
 const now = new Date();
@@ -38,6 +45,47 @@ function mb(bytes) {
 
 function okSettlement(name, evidence = {}, metrics = {}) {
   settlements.push({ name, ok: true, evidence, metrics });
+}
+
+function publicKeyToCompressedHex(publicKey) {
+  const jwk = publicKey.export({ format: 'jwk' });
+  const x = Buffer.from(jwk.x, 'base64url');
+  const y = Buffer.from(jwk.y, 'base64url');
+  return `${(y[y.length - 1] & 1) ? '03' : '02'}${x.toString('hex')}`;
+}
+
+function signLowS(privateKey, payload) {
+  const signer = createSign('SHA256');
+  signer.update(payload, 'utf8');
+  signer.end();
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signer.sign(privateKey).toString('hex'));
+  if (!normalized.ok) throw new Error(normalized.message || 'Could not normalize secp256k1 signature');
+  return normalized.signature;
+}
+
+function buildRegistrationRequest({ name, audience }) {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+  const pubkey = publicKeyToCompressedHex(publicKey);
+  const profile = normalizeRegistrationProfileForSigning({ name });
+  const payload = buildRegistrationAuthPayload({
+    audience,
+    pubkey,
+    profile,
+    timestamp: Math.floor(Date.now() / 1000),
+    nonce: `hardening-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  });
+  return {
+    body: {
+      name,
+      pubkey,
+      audience,
+      registration_auth: {
+        timestamp: payload.timestamp,
+        nonce: payload.nonce,
+        signature: signLowS(privateKey, canonicalAuthJson(payload)),
+      },
+    },
+  };
 }
 
 function failSettlement(name, error, evidence = {}, metrics = {}) {
@@ -184,7 +232,7 @@ function isAllowedArtifactEntry(entry) {
   if (entry === 'src' || entry.startsWith('src/')) return true;
   if (entry === 'config' || entry === 'config/default.yaml') return true;
   if (entry === 'docs' || entry === 'docs/llms.txt') return true;
-  if (entry.startsWith('docs/mcp') || entry.startsWith('docs/skills') || entry.startsWith('docs/knowledge')) return true;
+  if (entry.startsWith('docs/mcp') || entry.startsWith('docs/knowledge')) return true;
   if (entry === 'monitoring_dashboards') return true;
   if (entry === 'monitoring_dashboards/journey' || entry.startsWith('monitoring_dashboards/journey/')) return true;
   if (entry === 'monitoring_dashboards/live' || entry.startsWith('monitoring_dashboards/live/')) return true;
@@ -248,22 +296,26 @@ async function localLoadProof() {
       expect: [404],
     });
 
+    const registration = buildRegistrationRequest({
+      name: `proof-${Date.now()}`,
+      audience: `${baseUrl}/mcp`,
+    });
     const agent = await requestJson(baseUrl, '/api/v1/agents/register', {
       method: 'POST',
       headers: { ...internalMcpHeaders('aol_register_agent'), 'content-type': 'application/json' },
-      body: JSON.stringify({ name: `proof-${Date.now()}` }),
+      body: JSON.stringify(registration.body),
       expect: [201],
     });
-    const apiKey = agent.body.api_key;
-    if (!apiKey) throw new Error('agent registration did not return api_key');
+    const agentId = agent.body.agent_id;
+    if (!agentId) throw new Error('agent registration did not return agent_id');
 
     await requestJson(baseUrl, '/api/v1/agents/me', {
-      headers: { ...authHeaders(apiKey), ...internalMcpHeaders('aol_get_me') },
+      headers: internalAgentHeaders(agentId, 'aol_get_me', `${baseUrl}/mcp`),
       expect: [200],
     });
     await requestJson(baseUrl, '/api/v1/actions/submit', {
       method: 'POST',
-      headers: { ...authHeaders(apiKey), ...internalMcpHeaders('aol_submit_action'), 'content-type': 'application/json' },
+      headers: { ...internalAgentHeaders(agentId, 'aol_submit_action', `${baseUrl}/mcp`), 'content-type': 'application/json' },
       body: JSON.stringify({ action_type: 'inspect_market', description: 'proof action' }),
       expect: [201],
     });
@@ -275,7 +327,7 @@ async function localLoadProof() {
       if (serverExited) throw new Error(`local proof server exited early\nstdout:\n${tail(serverOutput, 20).join('\n')}\nstderr:\n${tail(serverError, 20).join('\n')}`);
       samples.push({ completed, rss_mb: await readProcessRssMb(serverProcess.pid) });
     };
-    const load = await runLoad(baseUrl, apiKey, options.requests, options.concurrency, options.rps, sampleMemory);
+    const load = await runLoad(baseUrl, agentId, options.requests, options.concurrency, options.rps, sampleMemory);
     const settleSamples = [];
     for (let i = 0; i < 10; i += 1) {
       await sleep(1000);
@@ -388,19 +440,20 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-async function runLoad(baseUrl, apiKey, totalRequests, concurrency, rps, sampleMemory) {
+async function runLoad(baseUrl, agentId, totalRequests, concurrency, rps, sampleMemory) {
+  const agentHeaders = internalAgentHeaders(agentId, 'hardening-proof', `${baseUrl}/mcp`);
   const routes = [
     { path: '/health', expect: [200] },
     { path: '/', expect: [200] },
     { path: '/api/v1/', expect: [200] },
     { path: '/api/v1/platform/status', expect: [200, 503] },
     { path: '/api/v1/capabilities', expect: [200] },
-    { path: '/api/v1/skills', expect: [200] },
+    { path: '/api/v1/mcp-docs', expect: [200] },
     { path: '/api/v1/market/config', expect: [200] },
     { path: '/api/v1/leaderboard?limit=10', expect: [200] },
-    { path: '/api/v1/agents/me', headers: authHeaders(apiKey), expect: [200] },
-    { path: '/api/v1/wallet/balance', headers: authHeaders(apiKey), expect: [200] },
-    { path: '/api/v1/capital/balance', headers: authHeaders(apiKey), expect: [200] },
+    { path: '/api/v1/agents/me', headers: agentHeaders, expect: [200] },
+    { path: '/api/v1/wallet/balance', headers: agentHeaders, expect: [200] },
+    { path: '/api/v1/capital/balance', headers: agentHeaders, expect: [200] },
     { path: '/.well-known/mcp.json', expect: [200] },
     { path: '/.well-known/mcp/server-card.json', expect: [200] },
   ];
@@ -486,14 +539,19 @@ async function waitForJson(url) {
   throw lastError || new Error(`timed out waiting for ${url}`);
 }
 
-function authHeaders(apiKey) {
-  return { authorization: `Bearer ${apiKey}` };
-}
-
 function internalMcpHeaders(toolName = 'hardening-proof') {
   return {
     'x-aol-internal-mcp': PROOF_INTERNAL_MCP_SECRET,
     'x-aol-mcp-tool': toolName,
+  };
+}
+
+function internalAgentHeaders(agentId, toolName = 'hardening-proof', audience = 'http://127.0.0.1/mcp') {
+  return {
+    ...internalMcpHeaders(toolName),
+    'x-aol-verified-agent-id': agentId,
+    'x-aol-auth-payload-hash': 'a'.repeat(64),
+    'x-aol-auth-audience': audience,
   };
 }
 

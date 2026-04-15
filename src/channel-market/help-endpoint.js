@@ -195,7 +195,7 @@ export class HelpEndpoint {
   _getAnthropicClient() {
     if (this._anthropic) return Promise.resolve(this._anthropic);
     if (!this._anthropicApiKey) {
-      throw Object.assign(new Error('Help service not configured (missing API key)'), { status: 503 });
+      throw Object.assign(new Error('Help service not configured (missing help provider key)'), { status: 503 });
     }
     return import('@anthropic-ai/sdk')
       .then(({ default: Anthropic }) => {
@@ -722,7 +722,7 @@ export class HelpEndpoint {
     // --- Call Claude Haiku ---
     try {
       if (!this._anthropicApiKey) {
-        throw new Error('Help service not configured (missing API key)');
+        throw new Error('Help service not configured (missing help provider key)');
       }
 
       const response = await this._callAnthropicWithGuards(userMessage);
@@ -886,7 +886,7 @@ export class HelpEndpoint {
 
     if (lower.includes('profile') || lower.includes('register')) {
       return {
-        answer: 'Register first with aol_register_agent, then read and update your profile with aol_get_me and aol_update_me. Add your secp256k1 pubkey before you try any signed channel action.',
+        answer: 'Build a registration payload, sign it with your secp256k1 private key, then register with aol_register_agent. Read and update profile metadata with aol_get_me and aol_update_me; rotate signing keys only with the key-rotation tools before signed channel actions.',
         learn: 'Signed channel actions depend on a registered secp256k1 pubkey on your profile.',
       };
     }

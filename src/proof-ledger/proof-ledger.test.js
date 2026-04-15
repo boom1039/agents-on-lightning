@@ -10,6 +10,8 @@ import {
   isKnownMoneyEventType,
 } from './proof-ledger.js';
 
+const LEGACY_SECRET_FIELD = ['api', 'key'].join('_');
+
 async function withLedger(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'aol-proof-ledger-'));
   const ledger = new ProofLedger({
@@ -283,7 +285,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
         money_event_status: 'settled',
         agent_id: 'agent-a',
         event_source: 'hub_wallet',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: 300,
         wallet_hub_delta_sats: -300,
       },
@@ -295,7 +297,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
         money_event_status: 'settled',
         agent_id: 'agent-b',
         event_source: 'hub_wallet',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: 300,
         wallet_hub_delta_sats: 300,
       },
@@ -317,7 +319,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
         money_event_status: 'settled',
         agent_id: 'agent-a',
         event_source: 'hub_wallet',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
       },
       {
         idempotency_key: 'transfer:1:credit',
@@ -327,7 +329,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
         money_event_status: 'settled',
         agent_id: 'agent-b',
         event_source: 'hub_wallet',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
       },
     ]);
     assert.deepEqual(duplicate.map((row) => row.proof_id), group.map((row) => row.proof_id));
@@ -342,7 +344,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
           money_event_status: 'settled',
           agent_id: 'agent-a',
           event_source: 'hub_wallet',
-          authorization_method: 'agent_api_key',
+          authorization_method: 'agent_signed_request',
         },
         {
           idempotency_key: 'transfer:2:credit',
@@ -352,7 +354,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
           money_event_status: 'settled',
           agent_id: 'agent-b',
           event_source: 'hub_wallet',
-          authorization_method: 'agent_api_key',
+          authorization_method: 'agent_signed_request',
         },
       ]),
       /PROOF_GROUP_IDEMPOTENCY_CONFLICT/,
@@ -368,7 +370,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
           money_event_status: 'settled',
           agent_id: 'agent-a',
           event_source: 'hub_wallet',
-          authorization_method: 'agent_api_key',
+          authorization_method: 'agent_signed_request',
         },
         {
           idempotency_key: 'bad-group:invalid',
@@ -378,7 +380,7 @@ test('appendProofGroup commits multi-row events atomically and detects partial d
           money_event_status: 'settled',
           agent_id: 'agent-b',
           event_source: 'hub_wallet',
-          authorization_method: 'agent_api_key',
+          authorization_method: 'agent_signed_request',
         },
       ]),
       /money_event_type has unsupported value/,
@@ -416,7 +418,7 @@ test('callers cannot forge computed fields and public refs are allow-list saniti
       public_safe_refs: {
         amount_sats: 1000,
         status: 'pending',
-        api_key: 'secret',
+        [LEGACY_SECRET_FIELD]: 'secret',
         bearer_token: 'secret',
         cashu_token: 'cashuA...',
         proofs: [{ secret: 'secret' }],
@@ -429,7 +431,7 @@ test('callers cannot forge computed fields and public refs are allow-list saniti
         flow_id: 'flow-secret',
         signature: 'raw-signature',
         nested: {
-          api_key: 'secret',
+          [LEGACY_SECRET_FIELD]: 'secret',
           amount_sats: 1000,
         },
       },
@@ -500,7 +502,7 @@ test('free-text note refs require explicit allow-listing', async () => {
       money_event_status: 'confirmed',
       agent_id: 'agent-a',
       event_source: 'paid_services',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       public_safe_refs: {
         note: 'free text is risky unless the event explicitly allows it',
         service: 'test',

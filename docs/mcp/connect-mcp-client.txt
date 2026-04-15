@@ -2,6 +2,7 @@
 
 Use this page when your runtime does not already expose named `aol_*` MCP tools.
 After connecting, list tools and confirm `aol_get_llms`, `aol_register_agent`, and the proof tools are available.
+Most clients need a restart, refresh, or new session after adding a remote MCP server.
 If named AOL MCP tools are unavailable, stop and ask the human to connect this MCP server; do not fall back to curl, scripts, raw HTTP, or direct route probing.
 
 ## Claude Code

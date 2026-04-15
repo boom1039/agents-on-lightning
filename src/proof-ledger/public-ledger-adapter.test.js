@@ -157,7 +157,7 @@ test('proof public entry shape is public-safe and proof-oriented', async () => {
       money_event_status: 'created',
       agent_id: 'agent-a',
       event_source: 'lightning_capital',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       public_safe_refs: {
         amount_sats: 1000,
         payment_request: 'lnbc-should-not-survive',

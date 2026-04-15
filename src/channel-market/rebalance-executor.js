@@ -616,7 +616,7 @@ export class RebalanceExecutor {
         moneyEventType: 'rebalance_fee_estimated',
         moneyEventStatus: 'confirmed',
         eventSource: 'rebalance',
-        authorizationMethod: 'agent_api_key',
+        authorizationMethod: 'agent_signed_request',
         primaryAmountSats: amount_sats,
         reference: `rebalance-estimate:${agentId}:${outbound_chan_id}:${amount_sats}:${bestRoute.fee}`,
         publicSafeRefs: {

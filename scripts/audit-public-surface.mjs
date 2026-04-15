@@ -48,7 +48,6 @@ const ALLOWED_SENSITIVE_FIELDS = new Map([
   ['GET /.well-known/agent-card.json', new Set(['version'])],
   ['GET /api/v1/', new Set(['version'])],
   ['GET /api/v1/capabilities', new Set(['tiers.invoice'])],
-  ['POST /api/v1/agents/register', new Set(['api_key'])],
 ]);
 
 function isAllowedSensitiveField(routeKey, field) {

@@ -7,18 +7,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
 const ROUTES_DIR = resolve(ROOT, 'src', 'routes');
 const DOCS_DIR = resolve(ROOT, 'docs');
-const SKILLS_DIR = resolve(DOCS_DIR, 'skills');
+const MCP_DOCS_DIR = resolve(DOCS_DIR, 'mcp');
 
-export const CANONICAL_SKILL_NAMES = [
-  'discovery',
-  'identity',
-  'wallet',
-  'analysis',
+export const CANONICAL_MCP_DOC_FILES = [
+  'connect-mcp-client.txt',
+  'money.txt',
+  'market.txt',
   'social',
-  'channels',
-  'market',
-  'analytics',
-  'capital',
+  'reference.txt',
 ];
 
 export const DOMAIN_ORDER = [
@@ -554,36 +550,15 @@ function routeMatchesPath(routePath, candidatePath) {
 
 function classifyDocDomain(path) {
   if (path === '/llms.txt' || path.startsWith('/docs/')) return 'app-level';
-  if (path === '/api/v1/skills') return 'discovery';
+  if (path === '/api/v1/mcp-docs') return 'discovery';
   return classifyDomain(path) || 'other';
 }
 
 function docKindForFile(filename) {
   if (filename === 'llms.txt') return 'root';
-  if (CANONICAL_SKILL_NAMES.includes(filename.replace(/\.txt$/, ''))) return 'skill-map';
-  if (filename === 'signing-secp256k1.txt') return 'skill-helper';
-  if (filename.includes('signed') || filename.includes('compatibility') || filename.includes('market-swap') || filename.includes('market-close')) {
-    return 'skill-group';
-  }
-  return 'skill-group';
-}
-
-function deriveLegacySkillApiPaths(filename) {
-  const base = filename.replace(/\.txt$/, '');
-  if (base === 'signing-secp256k1') {
-    return [`/api/v1/skills/${base}`];
-  }
-  if (CANONICAL_SKILL_NAMES.includes(base)) {
-    return [`/api/v1/skills/${base}`];
-  }
-  const [group, ...rest] = base.split('-');
-  if (CANONICAL_SKILL_NAMES.includes(group) && rest.length > 0) {
-    return [
-      `/api/v1/skills/${group}/${rest.join('-')}.txt`,
-      `/api/v1/skills/${base}`,
-    ];
-  }
-  return [`/api/v1/skills/${base}`];
+  if (filename === 'reference.txt') return 'mcp-reference';
+  if (filename === 'connect-mcp-client.txt') return 'mcp-client-setup';
+  return 'mcp-workflow';
 }
 
 function extractDocTitle(text, fallback) {
@@ -630,27 +605,27 @@ function extractDocMentions(text) {
 
 function buildInitialDocNodes() {
   const docs = [];
-  const skillsIndexDoc = {
-    doc_id: 'skills-index',
-    title: 'Skills Index',
-    summary: 'List of canonical skill files agents can open.',
-    kind: 'skill-index',
+  const mcpDocsIndexDoc = {
+    doc_id: 'mcp-docs-index',
+    title: 'MCP Docs Index',
+    summary: 'List of canonical MCP files agents can open.',
+    kind: 'mcp-doc-index',
     source_file: 'src/routes/agent-discovery-routes.js',
     source_path: null,
     text: '',
     surfaces: [
       {
-        key: 'GET /api/v1/skills',
+        key: 'GET /api/v1/mcp-docs',
         method: 'GET',
-        path: '/api/v1/skills',
-        label: '/api/v1/skills',
-        type: 'skill-index',
+        path: '/api/v1/mcp-docs',
+        label: '/api/v1/mcp-docs',
+        type: 'mcp-doc-index',
       },
     ],
     route_keys: [],
-    linked_doc_ids: CANONICAL_SKILL_NAMES.map((name) => `skills/${name}.txt`),
+    linked_doc_ids: CANONICAL_MCP_DOC_FILES.map((filename) => `mcp/${filename}`),
   };
-  docs.push(skillsIndexDoc);
+  docs.push(mcpDocsIndexDoc);
 
   const llmsPath = resolve(DOCS_DIR, 'llms.txt');
   if (existsSync(llmsPath)) {
@@ -671,20 +646,20 @@ function buildInitialDocNodes() {
     });
   }
 
-  if (!existsSync(SKILLS_DIR)) return docs;
+  if (!existsSync(MCP_DOCS_DIR)) return docs;
 
-  const files = readdirSync(SKILLS_DIR).filter((file) => extname(file) === '.txt').sort();
+  const files = readdirSync(MCP_DOCS_DIR).filter((file) => extname(file) === '.txt').sort();
   for (const filename of files) {
-    const filepath = resolve(SKILLS_DIR, filename);
+    const filepath = resolve(MCP_DOCS_DIR, filename);
     const text = readFileSync(filepath, 'utf8');
-    const docId = `skills/${filename}`;
+    const docId = `mcp/${filename}`;
     const surfaces = [
       {
-        key: `GET /docs/skills/${filename}`,
+        key: `GET /docs/mcp/${filename}`,
         method: 'GET',
-        path: `/docs/skills/${filename}`,
-        label: `/docs/skills/${filename}`,
-        type: 'skill-static',
+        path: `/docs/mcp/${filename}`,
+        label: `/docs/mcp/${filename}`,
+        type: 'mcp-doc',
       },
     ];
 
@@ -904,16 +879,6 @@ const LEGACY_DOC_ALIASES = (() => {
       continue;
     }
 
-    if (!doc.doc_id.startsWith('skills/')) continue;
-    const filename = doc.doc_id.replace(/^skills\//, '');
-    for (const path of deriveLegacySkillApiPaths(filename)) {
-      aliases.push({
-        method: 'GET',
-        path,
-        docKind: null,
-        canonicalKey: `GET /docs/skills/${filename}`,
-      });
-    }
   }
 
   return aliases;

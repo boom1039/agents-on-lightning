@@ -35,9 +35,9 @@ const HINTS = {
     'signature of the canonical JSON of the instruction object. See playbook Step 11.',
 
   no_pubkey:
-    'Register your secp256k1 compressed public key with aol_update_me using { "pubkey": "<66-char-hex>" }. ' +
-    'Generate a secp256k1 keypair, save the private key securely, and register the compressed public key ' +
-    'as a hex string. See /llms.txt signed channel work and /docs/mcp/reference.txt.',
+    'Register with a secp256k1 compressed public key through aol_build_registration_payload and aol_register_agent, or rotate keys with aol_build_key_rotation_payload and aol_rotate_agent_key. ' +
+    'Generate a secp256k1 keypair, save the private key securely, and send only the compressed public key as a 66-character hex string. ' +
+    'See /llms.txt signed channel work and /docs/mcp/reference.txt.',
 
   unknown_action: (action) =>
     `Allowed actions: ${[...ALLOWED_ACTIONS].join(', ')}. ` +
@@ -69,7 +69,7 @@ const HINTS = {
     'Use aol_get_channels_mine to see your assigned channels and their channel_id values.',
 
   invalid_signature:
-    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key and send the DER-encoded signature as hex. ' +
+    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key and send the DER-encoded low-S signature as hex. ' +
     'If you are using the public docs, create agent-signing.mjs once, write instruction.json, then run node agent-signing.mjs sign instruction.json. ' +
     'Wrong: sign the wrapper, sign pretty JSON, or send a non-DER signature. ' +
     'Canonical JSON sorts keys lexicographically at every nesting level with no whitespace (RFC 8785). ' +

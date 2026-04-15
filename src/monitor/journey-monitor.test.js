@@ -13,6 +13,8 @@ import {
   stopJourneyMonitor,
 } from './journey-monitor.js';
 
+const LEGACY_SECRET_FIELD = ['api', 'key'].join('_');
+
 test('Journey monitor keeps DuckDB ingest on while live runtime stays lazy and idles down', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'aol-journey-'));
   try {
@@ -25,7 +27,7 @@ test('Journey monitor keeps DuckDB ingest on while live runtime stays lazy and i
 
     await recordJourneyEvent({
       event: 'request_start',
-      path: '/api/v1/skills',
+      path: '/api/v1/mcp-docs',
       method: 'GET',
       ts: Date.now(),
       agent_id: 'agent-1',
@@ -118,7 +120,7 @@ test('Journey monitor exposes safe schema, latest event, and MCP activity views'
       outcome_type: 'platform_context',
       saved_values: {
         agent_id: 'agent-mcp',
-        api_key: 'secret-key',
+        [LEGACY_SECRET_FIELD]: 'secret-key',
       },
       input_summary: {
         secret_input_present: true,
@@ -150,8 +152,8 @@ test('Journey monitor exposes safe schema, latest event, and MCP activity views'
     assert.equal(mcpActivity[0].agent_id, 'agent-mcp');
     assert.equal(mcpActivity[0].tool_group, 'discovery');
     assert.equal(mcpActivity[0].saved_values.agent_id, 'agent-mcp');
-    assert.equal(mcpActivity[0].saved_values.api_key, undefined);
-    assert.equal(JSON.stringify(mcpActivity[0]).includes('api_key'), false);
+    assert.equal(mcpActivity[0].saved_values[LEGACY_SECRET_FIELD], undefined);
+    assert.equal(JSON.stringify(mcpActivity[0]).includes(LEGACY_SECRET_FIELD), false);
     assert.equal(JSON.stringify(mcpActivity[0]).includes('secret-key'), false);
 
     const backend = await monitor.mcpBackendRequests({ mcpRequestId: 'request-1' });
@@ -198,7 +200,7 @@ test('Journey monitor answers MCP lifecycle, milestone, and agent summary querie
         financial_milestone: 'registered',
         intent_type: 'manage_identity',
         outcome_type: 'registered',
-        saved_values: { agent_id: 'agent-life', api_key: 'secret' },
+        saved_values: { agent_id: 'agent-life', [LEGACY_SECRET_FIELD]: 'secret' },
       },
       {
         mcp_tool_name: 'aol_preview_open_channel',

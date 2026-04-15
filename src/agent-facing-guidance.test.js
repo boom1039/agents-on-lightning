@@ -11,7 +11,7 @@ const FORBIDDEN_AGENT_GUIDANCE = [
   /POST \/api\/v1/,
   /PUT \/api\/v1/,
   /DELETE \/api\/v1/,
-  /\/docs\/skills/,
+  /\/docs\/agent-route-schema\.md/,
   /\/llms-full\.txt/,
   /HTTP routes/i,
 ];

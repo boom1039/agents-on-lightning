@@ -2,6 +2,11 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createPrivateKey, createSign } from 'node:crypto';
 import { resolve } from 'node:path';
 import { canonicalJSON } from '../../src/channel-accountability/crypto-utils.js';
+import {
+  buildToolAuthPayload,
+  canonicalAuthJson,
+  normalizeSecp256k1DerSignatureToLowS,
+} from '../../src/identity/signed-auth.js';
 
 const DEFAULT_ROOT = resolve(process.cwd(), '.local', 'test-agents');
 
@@ -70,13 +75,32 @@ export async function signInstruction(savedAgent, instruction) {
   const signer = createSign('SHA256');
   signer.update(canonicalJSON(instruction), 'utf8');
   signer.end();
-  return signer.sign(createPrivateKey(privateKeyPem)).toString('hex');
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signer.sign(createPrivateKey(privateKeyPem)).toString('hex'));
+  if (!normalized.ok) throw new Error(normalized.message || 'Could not normalize channel instruction signature.');
+  return normalized.signature;
 }
 
-export function authHeaders(savedAgent) {
-  if (!savedAgent?.api_key) throw new Error('Saved test agent is missing api_key.');
+export async function buildSavedAgentAuth(savedAgent, { baseUrl, toolName, args, nonce }) {
+  if (!savedAgent?.agent_id) throw new Error('Saved test agent is missing agent_id.');
+  if (!savedAgent?.private_key_path) throw new Error('Saved test agent is missing private_key_path.');
+  const privateKeyPem = await readFile(savedAgent.private_key_path, 'utf8');
+  const payload = buildToolAuthPayload({
+    audience: `${String(baseUrl).replace(/\/+$/, '')}/mcp`,
+    agentId: savedAgent.agent_id,
+    toolName,
+    args,
+    timestamp: Math.floor(Date.now() / 1000),
+    nonce,
+  });
+  const signer = createSign('SHA256');
+  signer.update(canonicalAuthJson(payload), 'utf8');
+  signer.end();
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signer.sign(createPrivateKey(privateKeyPem)).toString('hex'));
+  if (!normalized.ok) throw new Error(normalized.message || 'Could not normalize agent_auth signature.');
   return {
-    Accept: 'application/json',
-    Authorization: `Bearer ${savedAgent.api_key}`,
+    agent_id: savedAgent.agent_id,
+    timestamp: payload.timestamp,
+    nonce: payload.nonce,
+    signature: normalized.signature,
   };
 }

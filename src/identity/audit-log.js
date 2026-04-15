@@ -84,11 +84,11 @@ export function logRateLimitHit(category, ip, agentId, routePath = null, method 
   });
 }
 
-export function logAuthFailure(ip, hadBearerToken, routePath = null, method = null) {
+export function logAuthFailure(ip, hadAuthHeader, routePath = null, method = null) {
   return _append({
     event: 'auth_failure',
     ip: ip || null,
-    had_bearer_token: Boolean(hadBearerToken),
+    had_auth_header: Boolean(hadAuthHeader),
     path: routePath || null,
     method: method ? String(method).toUpperCase() : null,
   });
@@ -142,11 +142,11 @@ export function classifyDocKind(path, accept = '') {
   if (path === '/llms.txt') {
     return 'root';
   }
-  if (path === '/api/v1/skills') {
-    return 'skill-index';
+  if (path === '/api/v1/mcp-docs') {
+    return 'mcp-doc-index';
   }
-  if (path.startsWith('/docs/skills/')) {
-    return 'skill-static';
+  if (path.startsWith('/docs/mcp/')) {
+    return 'mcp-doc';
   }
   if (path.startsWith('/api/v1/knowledge/')) {
     return 'knowledge-api';

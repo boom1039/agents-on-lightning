@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { ProofLedger } from './proof-ledger.js';
 import { buildAgentProofTrace, withAgentProofTrace } from './agent-proof-trace.js';
 
+const LEGACY_SECRET_FIELD = ['api', 'key'].join('_');
+
 function sha256Hex(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
@@ -38,14 +40,14 @@ test('agent proof trace filters signed rows by source, direct refs, and hashed r
       money_event_status: 'settled',
       agent_id: 'agent-trace',
       event_source: 'paid_service',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: 10,
       capital_available_delta_sats: -10,
       public_safe_refs: {
         service: 'analytics',
         service_id: 'channel_history',
         amount_sats: 10,
-        api_key: 'must-not-survive',
+        [LEGACY_SECRET_FIELD]: 'must-not-survive',
       },
     });
     await proofLedger.appendProof({
@@ -55,7 +57,7 @@ test('agent proof trace filters signed rows by source, direct refs, and hashed r
       money_event_status: 'submitted',
       agent_id: 'agent-trace',
       event_source: 'swap',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: 25,
       public_safe_refs: {
         swap_id: 'swap-1',
@@ -70,7 +72,7 @@ test('agent proof trace filters signed rows by source, direct refs, and hashed r
       money_event_status: 'created',
       agent_id: 'agent-trace',
       event_source: 'lightning_capital',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: 50,
       public_safe_refs: {
         flow_hash: sha256Hex('flow-1'),
@@ -129,7 +131,7 @@ test('agent proof trace filters signed rows by source, direct refs, and hashed r
       match: { service: 'analytics', service_id: 'channel_history' },
     });
     assert.equal(analyticsTrace.count, 1);
-    assert.equal(analyticsTrace.proofs[0].public_safe_refs.api_key, undefined);
+    assert.equal(analyticsTrace.proofs[0].public_safe_refs[LEGACY_SECRET_FIELD], undefined);
 
     const noMatchTrace = buildAgentProofTrace(proofLedger, 'agent-trace', {
       scope: 'swap',

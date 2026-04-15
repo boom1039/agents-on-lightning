@@ -369,7 +369,7 @@ export class SubmarineSwapProvider {
         moneyEventType: 'swap_submitted',
         moneyEventStatus: 'submitted',
         eventSource: 'swap',
-        authorizationMethod: 'agent_api_key',
+        authorizationMethod: 'agent_signed_request',
         primaryAmountSats: amount_sats,
         reference: payoutLabel,
         publicSafeRefs: {
@@ -531,7 +531,7 @@ export class SubmarineSwapProvider {
         moneyEventType: 'swap_payout_broadcast',
         moneyEventStatus: 'submitted',
         eventSource: 'swap',
-        authorizationMethod: 'agent_api_key',
+        authorizationMethod: 'agent_signed_request',
         primaryAmountSats: amount_sats,
         reference: payoutLabel,
         publicSafeRefs: {

@@ -69,7 +69,7 @@ function getOriginalPath(req) {
   return ((req.originalUrl || req.url || req.path || '').split('?')[0]) || req.path || '';
 }
 
-function hasValidInternalMcpSecret(req, internalMcpSecret) {
+export function hasValidInternalMcpSecret(req, internalMcpSecret) {
   if (typeof internalMcpSecret !== 'string' || !internalMcpSecret.trim()) return false;
   const candidate = req.get(INTERNAL_MCP_HEADER_NAME);
   return typeof candidate === 'string' && safeSecretEqual(candidate, internalMcpSecret.trim());

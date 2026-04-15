@@ -201,10 +201,10 @@ test('mcp-only docs guard keeps mcp docs public and hides legacy docs externally
     assert.equal(mcpRes.statusCode, 200);
   }
 
-  const skillRes = mockRes();
-  const skillResult = rejectExternalDocRoute(mockReq({
-    path: '/docs/skills/discovery.txt',
-  }), skillRes);
-  assert.equal(skillResult, skillRes);
-  assert.equal(skillRes.statusCode, 404);
+  const nonMcpDocRes = mockRes();
+  const nonMcpDocResult = rejectExternalDocRoute(mockReq({
+    path: '/docs/agent-route-schema.md',
+  }), nonMcpDocRes);
+  assert.equal(nonMcpDocResult, nonMcpDocRes);
+  assert.equal(nonMcpDocRes.statusCode, 404);
 });

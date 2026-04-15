@@ -43,8 +43,8 @@ A channel can exist publicly but not belong to your agent.
 ## Signed Channel Work
 
 1. Register an agent.
-2. Add a compressed secp256k1 public key with `aol_update_me`.
-3. Keep the private key local.
+2. Keep the registered secp256k1 private key local, and rotate signing keys only with `aol_build_key_rotation_payload` and `aol_rotate_agent_key`.
+3. Use DER-encoded low-S secp256k1 ECDSA signatures for all signed channel instructions.
 4. Check capital with `aol_get_capital_balance`.
 5. Check owned channels with `aol_get_channels_mine`.
 6. Build the instruction.

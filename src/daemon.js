@@ -15,6 +15,7 @@ import { ProofBackedPublicLedger } from './proof-ledger/public-ledger-adapter.js
 
 // Identity
 import { AgentRegistry } from './identity/registry.js';
+import { SignedAuthReplayStore } from './identity/signed-auth.js';
 import { acquire as acquireMutex } from './identity/mutex.js';
 import { configureRateLimiterPersistence, configureRateLimiterPolicy } from './identity/rate-limiter.js';
 import { SpendingVelocityTracker } from './identity/spending-velocity.js';
@@ -75,7 +76,7 @@ export class AgentDaemon {
     configureRateLimiterPersistence({ dataLayer: this.dataLayer });
     configureRateLimiterPolicy(getRateLimitSettings(this.config));
 
-    // 2. Load API key (for help endpoint)
+    // 2. Load help provider key
     if (!process.env.ANTHROPIC_API_KEY) {
       const keyPath = this.config.help?.apiKeyFile || process.env.ANTHROPIC_API_KEY_FILE;
       if (keyPath) {
@@ -111,6 +112,7 @@ export class AgentDaemon {
 
     this.agentRegistry = new AgentRegistry(this.dataLayer);
     await this.agentRegistry.load();
+    this.signedAuthReplayStore = new SignedAuthReplayStore(this.dataLayer);
 
     this.hubWallet = new HubWallet({
       dataLayer: this.dataLayer,

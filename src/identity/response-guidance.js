@@ -40,7 +40,7 @@ function inferErrorMessage(status, req, body) {
 
 function inferErrorHint(status, req) {
   if (status === 400) return 'Check the exact JSON fields and try again.';
-  if (status === 401) return 'Register or send Authorization: Bearer <api_key>.';
+  if (status === 401) return 'Use the matching named MCP tool with signed agent_auth.';
   if (status === 403) return 'Use a resource assigned to you, or wait for review.';
   if (status === 404) return 'Check the route or replace placeholders with a real id.';
   if (status === 405) return 'Retry with the method named in the message.';
@@ -55,7 +55,7 @@ function inferErrorHint(status, req) {
 
 function inferSuccessGuidance(req, status) {
   if (req.path === '/api/v1/agents/register' && status === 201) {
-    return { next: 'Save api_key and use it as Bearer auth on protected routes.' };
+    return { next: 'Save agent_id and keep your secp256k1 private key local for future signed agent_auth payloads.' };
   }
   if (req.path === '/api/v1/node/test-connection' && status === 200) {
     return { next: 'If this looks right, call POST /api/v1/node/connect.' };

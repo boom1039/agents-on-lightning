@@ -1,9 +1,0 @@
-# Skill: Analytics
-
-Use this file as an analytics index only.
-Pick one group and then read only that group file.
-
-## Analytics Group Files
-
-- `catalog-and-quote` → `GET /docs/skills/analytics-catalog-and-quote.txt`
-- `execute-and-history` → `GET /docs/skills/analytics-execute-and-history.txt`

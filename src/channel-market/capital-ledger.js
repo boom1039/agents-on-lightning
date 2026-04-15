@@ -1220,7 +1220,7 @@ export class CapitalLedger {
         money_event_status: 'submitted',
         agent_id: agentId,
         event_source: proofEventType === 'swap_direct_payout_debited' ? 'swap' : 'capital',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: amount,
         capital_available_delta_sats: -amount,
         public_safe_refs: {
@@ -1384,7 +1384,7 @@ export class CapitalLedger {
         money_event_status: 'settled',
         agent_id: agentId,
         event_source: 'paid_service',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: amount,
         capital_available_delta_sats: -amount,
         capital_service_spent_delta_sats: amount,
@@ -1669,7 +1669,7 @@ export class CapitalLedger {
           txid: details.txid || details.claim_txid || null,
           swap_id: details.loop_out_swap_id || details.boltz_swap_id || null,
         };
-        const auth = /preflight|invoice_created/.test(type) ? 'agent_api_key' : 'system_settlement';
+        const auth = /preflight|invoice_created/.test(type) ? 'agent_signed_request' : 'system_settlement';
         const proofResult = await this._appendProof({
           idempotency_key: proofSafeKey(moneyEventType, referenceSeed),
           proof_record_type: 'money_lifecycle',

@@ -1,6 +1,12 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { MCP_TOOL_NAMES } from '../src/mcp/catalog.js';
+import {
+  buildToolAuthPayload,
+  canonicalAuthJson,
+  normalizeSecp256k1DerSignatureToLowS,
+} from '../src/identity/signed-auth.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'https://agentsonlightning.com';
 const realTestInvoice = process.env.AOL_REAL_TEST_INVOICE || null;
@@ -42,6 +48,22 @@ function noteFromBody(result) {
 
 function pad(value, width) {
   return String(value).padEnd(width, ' ');
+}
+
+function publicKeyToCompressedHex(publicKey) {
+  const jwk = publicKey.export({ format: 'jwk' });
+  const x = Buffer.from(jwk.x, 'base64url');
+  const y = Buffer.from(jwk.y, 'base64url');
+  return `${(y[y.length - 1] & 1) ? '03' : '02'}${x.toString('hex')}`;
+}
+
+function signLowS(privateKey, payload) {
+  const signer = createSign('SHA256');
+  signer.update(payload, 'utf8');
+  signer.end();
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signer.sign(privateKey).toString('hex'));
+  assert(normalized.ok, normalized.message || 'Could not normalize secp256k1 signature');
+  return normalized.signature;
 }
 
 const manifest = await fetchJson('/api/journey/manifest');
@@ -98,12 +120,69 @@ let transportClosed = false;
 try {
   await client.connect(transport);
   markTransport('GET /mcp', 'Hosted MCP transport connected');
+  const listedTools = await client.listTools();
+  const toolsRequiringAgentAuth = new Set(
+    (listedTools.tools || [])
+      .filter((tool) => JSON.stringify(tool.inputSchema || {}).includes('agent_auth'))
+      .map((tool) => tool.name),
+  );
+  const signedAgentsByLabel = new Map();
+  let defaultSignedAgentLabel = null;
+  let authNonce = 0;
 
   async function callTool(name, args = {}) {
     assert(mcpToolNameSet.has(name), `MCP route coverage called uncataloged tool: ${name}`);
-    const result = await client.callTool({ name, arguments: args });
+    const cleanArgs = { ...(args || {}) };
+    const agentLabel = cleanArgs.__agent_label || defaultSignedAgentLabel;
+    delete cleanArgs.__agent_label;
+    const signedAgent = agentLabel ? signedAgentsByLabel.get(agentLabel) : null;
+    if (signedAgent && toolsRequiringAgentAuth.has(name) && !cleanArgs.agent_auth) {
+      const payload = buildToolAuthPayload({
+        audience: `${baseUrl}/mcp`,
+        agentId: signedAgent.agentId,
+        toolName: name,
+        args: cleanArgs,
+        timestamp: Math.floor(Date.now() / 1000),
+        nonce: `route-coverage-${++authNonce}`,
+      });
+      cleanArgs.agent_auth = {
+        agent_id: signedAgent.agentId,
+        timestamp: payload.timestamp,
+        nonce: payload.nonce,
+        signature: signLowS(signedAgent.privateKey, canonicalAuthJson(payload)),
+      };
+    }
+    const result = await client.callTool({ name, arguments: cleanArgs });
     markTransport('POST /mcp', `Used ${name}`);
     return result;
+  }
+
+  async function registerCoverageAgent(label) {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+    const pubkey = publicKeyToCompressedHex(publicKey);
+    const name = `mcp-cover-${label}-${Date.now()}`;
+    const registrationPayload = await callTool('aol_build_registration_payload', {
+      name,
+      pubkey,
+      description: 'MCP coverage agent',
+      framework: 'MCP coverage',
+    });
+    const body = registrationPayload.structuredContent || {};
+    const registerResult = await callTool('aol_register_agent', {
+      name,
+      pubkey,
+      description: 'MCP coverage agent',
+      framework: 'MCP coverage',
+      registration_auth: {
+        timestamp: body.payload.timestamp,
+        nonce: body.payload.nonce,
+        signature: signLowS(privateKey, body.signing_payload),
+      },
+    });
+    const agentId = getSaved(registerResult).agent_id || getBody(registerResult)?.agent_id;
+    signedAgentsByLabel.set(label, { agentId, privateKey });
+    if (!defaultSignedAgentLabel) defaultSignedAgentLabel = label;
+    return { registerResult, agentId, label };
   }
 
   const root = await callTool('aol_get_root');
@@ -134,7 +213,7 @@ try {
   markResult('GET /api/v1/', 'aol_get_api_root', apiRoot, { success: [200] });
 
   const listMcpDocs = await callTool('aol_list_mcp_docs');
-  markResult('GET /api/v1/skills', 'aol_list_mcp_docs', listMcpDocs, { success: [200] });
+  markResult('GET /api/v1/mcp-docs', 'aol_list_mcp_docs', listMcpDocs, { success: [200] });
 
   const platformStatus = await callTool('aol_get_platform_status');
   markResult('GET /api/v1/platform/status', 'aol_get_platform_status', platformStatus, { success: [200] });
@@ -184,31 +263,31 @@ try {
   const analyticsCatalog = await callTool('aol_get_analytics_catalog');
   markResult('GET /api/v1/analytics/catalog', 'aol_get_analytics_catalog', analyticsCatalog, { success: [200] });
 
-  const registerA = await callTool('aol_register_agent', { name: `mcp-cover-a-${Date.now()}` });
+  const registeredA = await registerCoverageAgent('a');
+  const registerA = registeredA.registerResult;
   markResult('POST /api/v1/agents/register', 'aol_register_agent', registerA, { success: [201] });
-  const agentAKey = getSaved(registerA).api_key || getBody(registerA)?.api_key;
-  const agentAId = getSaved(registerA).agent_id || getBody(registerA)?.agent_id;
+  const agentAId = registeredA.agentId;
 
-  const registerB = await callTool('aol_register_agent', { name: `mcp-cover-b-${Date.now()}` });
-  const agentBKey = getSaved(registerB).api_key || getBody(registerB)?.api_key;
-  const agentBId = getSaved(registerB).agent_id || getBody(registerB)?.agent_id;
+  const registeredB = await registerCoverageAgent('b');
+  const registerB = registeredB.registerResult;
+  const agentBId = registeredB.agentId;
 
-  const me = await callTool('aol_get_me', { api_key: agentAKey });
+  const me = await callTool('aol_get_me', {});
   markResult('GET /api/v1/agents/me', 'aol_get_me', me, { success: [200] });
 
-  const updateMe = await callTool('aol_update_me', { api_key: agentAKey, description: 'MCP coverage agent', framework: 'MCP coverage' });
+  const updateMe = await callTool('aol_update_me', { description: 'MCP coverage agent', framework: 'MCP coverage' });
   markResult('PUT /api/v1/agents/me', 'aol_update_me', updateMe, { success: [200] });
 
-  const meDashboard = await callTool('aol_get_me_dashboard', { api_key: agentAKey });
+  const meDashboard = await callTool('aol_get_me_dashboard', {});
   markResult('GET /api/v1/agents/me/dashboard', 'aol_get_me_dashboard', meDashboard, { success: [200] });
 
-  const meEvents = await callTool('aol_get_me_events', { api_key: agentAKey });
+  const meEvents = await callTool('aol_get_me_events', {});
   markResult('GET /api/v1/agents/me/events', 'aol_get_me_events', meEvents, { success: [200] });
 
-  const referral = await callTool('aol_get_referral', { api_key: agentAKey });
+  const referral = await callTool('aol_get_referral', {});
   markResult('GET /api/v1/agents/me/referral', 'aol_get_referral', referral, { success: [200] });
 
-  const referralCode = await callTool('aol_get_referral_code', { api_key: agentAKey });
+  const referralCode = await callTool('aol_get_referral_code', {});
   markResult('GET /api/v1/agents/me/referral-code', 'aol_get_referral_code', referralCode, { success: [200] });
 
   const publicProfile = await callTool('aol_get_agent_profile', { id: agentAId });
@@ -217,75 +296,74 @@ try {
   const publicLineage = await callTool('aol_get_agent_lineage', { id: agentAId });
   markResult('GET /api/v1/agents/:id/lineage', 'aol_get_agent_lineage', publicLineage, { success: [200] });
 
-  const actionSubmit = await callTool('aol_submit_action', { api_key: agentAKey, action: 'inspect_market', description: 'Coverage action' });
+  const actionSubmit = await callTool('aol_submit_action', { action: 'inspect_market', description: 'Coverage action' });
   markResult('POST /api/v1/actions/submit', 'aol_submit_action', actionSubmit, { success: [201] });
   const actionId = getSaved(actionSubmit).action_id || getBody(actionSubmit)?.action_id || getBody(actionSubmit)?.id;
 
-  const actionHistory = await callTool('aol_get_action_history', { api_key: agentAKey });
+  const actionHistory = await callTool('aol_get_action_history', {});
   markResult('GET /api/v1/actions/history', 'aol_get_action_history', actionHistory, { success: [200] });
 
-  const actionGet = await callTool('aol_get_action', { api_key: agentAKey, id: actionId });
+  const actionGet = await callTool('aol_get_action', { id: actionId });
   markResult('GET /api/v1/actions/:id', 'aol_get_action', actionGet, { success: [200] });
 
-  const walletBalance = await callTool('aol_get_wallet_balance', { api_key: agentAKey });
+  const walletBalance = await callTool('aol_get_wallet_balance', {});
   markResult('GET /api/v1/wallet/balance', 'aol_get_wallet_balance', walletBalance, { success: [200] });
 
-  const walletHistory = await callTool('aol_get_wallet_history', { api_key: agentAKey });
+  const walletHistory = await callTool('aol_get_wallet_history', {});
   markResult('GET /api/v1/wallet/history', 'aol_get_wallet_history', walletHistory, { success: [200] });
 
-  const walletMintQuoteHelp = await callTool('aol_get_wallet_mint_quote_help', { api_key: agentAKey });
+  const walletMintQuoteHelp = await callTool('aol_get_wallet_mint_quote_help', {});
   markResult('GET /api/v1/wallet/mint-quote', 'aol_get_wallet_mint_quote_help', walletMintQuoteHelp, { success: [200] });
 
-  const walletMintQuote = await callTool('aol_create_wallet_mint_quote', { api_key: agentAKey, amount_sats: 1000 });
+  const walletMintQuote = await callTool('aol_create_wallet_mint_quote', { amount_sats: 1000 });
   markResult('POST /api/v1/wallet/mint-quote', 'aol_create_wallet_mint_quote', walletMintQuote, { success: [200] });
   const mintQuoteId = getSaved(walletMintQuote).quote_id || getBody(walletMintQuote)?.quote_id || getBody(walletMintQuote)?.quote;
 
-  const walletCheckMintQuote = await callTool('aol_check_wallet_mint_quote', { api_key: agentAKey, quote: mintQuoteId });
+  const walletCheckMintQuote = await callTool('aol_check_wallet_mint_quote', { quote: mintQuoteId });
   markResult('POST /api/v1/wallet/check-mint-quote', 'aol_check_wallet_mint_quote', walletCheckMintQuote, { success: [200] });
 
-  const walletMint = await callTool('aol_mint_wallet', { api_key: agentAKey, amount_sats: 1000, quote: mintQuoteId });
+  const walletMint = await callTool('aol_mint_wallet', { amount_sats: 1000, quote: mintQuoteId });
   markResult('POST /api/v1/wallet/mint', 'aol_mint_wallet', walletMint, { boundary: [400] });
 
-  const walletSend = await callTool('aol_send_wallet_tokens', { api_key: agentAKey, amount_sats: 1 });
+  const walletSend = await callTool('aol_send_wallet_tokens', { amount_sats: 1 });
   markResult('POST /api/v1/wallet/send', 'aol_send_wallet_tokens', walletSend, { boundary: [400] });
   const cashuToken = getSaved(walletSend).token || getBody(walletSend)?.token || 'invalid-cashu-token';
 
-  const walletReceive = await callTool('aol_receive_wallet_tokens', { api_key: agentBKey, token: cashuToken });
+  const walletReceive = await callTool('aol_receive_wallet_tokens', { __agent_label: 'b', token: cashuToken });
   markResult('POST /api/v1/wallet/receive', 'aol_receive_wallet_tokens', walletReceive, { boundary: [400] });
 
-  const walletMeltQuote = await callTool('aol_create_wallet_melt_quote', { api_key: agentAKey, invoice: realTestInvoice || 'lnbc...' });
+  const walletMeltQuote = await callTool('aol_create_wallet_melt_quote', { invoice: realTestInvoice || 'lnbc...' });
   markResult('POST /api/v1/wallet/melt-quote', 'aol_create_wallet_melt_quote', walletMeltQuote, realTestInvoice
     ? { success: [200] }
     : { boundary: [400] });
   const meltQuoteId = getSaved(walletMeltQuote).quote_id || getBody(walletMeltQuote)?.quote_id || getBody(walletMeltQuote)?.quote || 'missing-quote';
 
-  const walletMelt = await callTool('aol_melt_wallet', { api_key: agentAKey, quote: meltQuoteId });
+  const walletMelt = await callTool('aol_melt_wallet', { quote: meltQuoteId });
   markResult('POST /api/v1/wallet/melt', 'aol_melt_wallet', walletMelt, { boundary: [400] });
 
-  const walletRestore = await callTool('aol_restore_wallet', { api_key: agentAKey });
+  const walletRestore = await callTool('aol_restore_wallet', {});
   markResult('POST /api/v1/wallet/restore', 'aol_restore_wallet', walletRestore, { success: [200] });
 
-  const walletReclaim = await callTool('aol_reclaim_wallet_pending', { api_key: agentAKey });
+  const walletReclaim = await callTool('aol_reclaim_wallet_pending', {});
   markResult('POST /api/v1/wallet/reclaim-pending', 'aol_reclaim_wallet_pending', walletReclaim, { success: [200] });
 
-  const capitalBalance = await callTool('aol_get_capital_balance', { api_key: agentAKey });
+  const capitalBalance = await callTool('aol_get_capital_balance', {});
   markResult('GET /api/v1/capital/balance', 'aol_get_capital_balance', capitalBalance, { success: [200] });
 
-  const capitalActivity = await callTool('aol_get_capital_activity', { api_key: agentAKey });
+  const capitalActivity = await callTool('aol_get_capital_activity', {});
   markResult('GET /api/v1/capital/activity', 'aol_get_capital_activity', capitalActivity, { success: [200] });
 
-  const capitalDeposit = await callTool('aol_create_onchain_capital_deposit', { api_key: agentAKey });
+  const capitalDeposit = await callTool('aol_create_onchain_capital_deposit', {});
   markResult('POST /api/v1/capital/deposit', 'aol_create_onchain_capital_deposit', capitalDeposit, {
     success: [200],
     boundary: [503],
   });
 
-  const capitalDeposits = await callTool('aol_get_capital_deposits', { api_key: agentAKey });
+  const capitalDeposits = await callTool('aol_get_capital_deposits', {});
   markResult('GET /api/v1/capital/deposits', 'aol_get_capital_deposits', capitalDeposits, { success: [200] });
   const capitalDepositAddress = getSaved(capitalDeposit).onchain_address || getBody(capitalDeposit)?.address || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 
   const capitalWithdraw = await callTool('aol_withdraw_capital', {
-    api_key: agentAKey,
     amount_sats: 1000,
     destination_address: capitalDepositAddress,
   });
@@ -317,7 +395,7 @@ try {
   const marketAgent = await callTool('aol_get_market_agent', { id: agentAId });
   markResult('GET /api/v1/market/agent/:agentId', 'aol_get_market_agent', marketAgent, { success: [200] });
 
-  const channelsMine = await callTool('aol_get_channels_mine', { api_key: agentAKey });
+  const channelsMine = await callTool('aol_get_channels_mine', {});
   markResult('GET /api/v1/channels/mine', 'aol_get_channels_mine', channelsMine, { success: [200] });
   const ownedChannel = getBody(channelsMine)?.channels?.[0] || null;
   const ownedChanId = ownedChannel?.chan_id || '1037758656816742400';
@@ -363,69 +441,67 @@ try {
     boundary: [404],
   });
 
-  const previewOpenHelp = await callTool('aol_get_market_preview_help', { api_key: agentAKey });
+  const previewOpenHelp = await callTool('aol_get_market_preview_help', {});
   markResult('GET /api/v1/market/preview', 'aol_get_market_preview_help', previewOpenHelp, { success: [200] });
 
-  const openHelp = await callTool('aol_get_market_open_help', { api_key: agentAKey });
+  const openHelp = await callTool('aol_get_market_open_help', {});
   markResult('GET /api/v1/market/open', 'aol_get_market_open_help', openHelp, { success: [200] });
 
-  const marketPending = await callTool('aol_get_market_pending', { api_key: agentAKey });
+  const marketPending = await callTool('aol_get_market_pending', {});
   markResult('GET /api/v1/market/pending', 'aol_get_market_pending', marketPending, { success: [200] });
 
-  const marketRevenue = await callTool('aol_get_market_revenue', { api_key: agentAKey });
+  const marketRevenue = await callTool('aol_get_market_revenue', {});
   markResult('GET /api/v1/market/revenue', 'aol_get_market_revenue', marketRevenue, { success: [200] });
 
-  const marketRevenueChannel = await callTool('aol_get_market_revenue_channel', { api_key: agentAKey, channel_point: ownedChanId });
+  const marketRevenueChannel = await callTool('aol_get_market_revenue_channel', { channel_point: ownedChanId });
   markResult('GET /api/v1/market/revenue/:chanId', 'aol_get_market_revenue_channel', marketRevenueChannel, {
     success: [200],
     boundary: [404],
   });
 
-  const revenueConfig = await callTool('aol_update_revenue_config', { api_key: agentAKey, destination: 'capital' });
+  const revenueConfig = await callTool('aol_update_revenue_config', { destination: 'capital' });
   markResult('PUT /api/v1/market/revenue-config', 'aol_update_revenue_config', revenueConfig, { success: [200] });
 
-  const marketPerformance = await callTool('aol_get_market_performance', { api_key: agentAKey });
+  const marketPerformance = await callTool('aol_get_market_performance', {});
   markResult('GET /api/v1/market/performance', 'aol_get_market_performance', marketPerformance, { success: [200] });
 
-  const marketPerformanceChannel = await callTool('aol_get_market_performance_channel', { api_key: agentAKey, channel_point: ownedChanId });
+  const marketPerformanceChannel = await callTool('aol_get_market_performance_channel', { channel_point: ownedChanId });
   markResult('GET /api/v1/market/performance/:chanId', 'aol_get_market_performance_channel', marketPerformanceChannel, {
     success: [200],
     boundary: [404],
   });
 
-  const closeHelp = await callTool('aol_get_market_close_help', { api_key: agentAKey });
+  const closeHelp = await callTool('aol_get_market_close_help', {});
   markResult('GET /api/v1/market/close', 'aol_get_market_close_help', closeHelp, { success: [200] });
 
-  const marketCloses = await callTool('aol_get_market_closes', { api_key: agentAKey });
+  const marketCloses = await callTool('aol_get_market_closes', {});
   markResult('GET /api/v1/market/closes', 'aol_get_market_closes', marketCloses, { success: [200] });
 
-  const channelInstructions = await callTool('aol_get_channel_instructions', { api_key: agentAKey });
+  const channelInstructions = await callTool('aol_get_channel_instructions', {});
   markResult('GET /api/v1/channels/instructions', 'aol_get_channel_instructions', channelInstructions, { success: [200] });
 
-  const marketRebalances = await callTool('aol_get_market_rebalances', { api_key: agentAKey });
+  const marketRebalances = await callTool('aol_get_market_rebalances', {});
   markResult('GET /api/v1/market/rebalances', 'aol_get_market_rebalances', marketRebalances, { success: [200] });
 
-  const swapQuote = await callTool('aol_get_swap_quote', { api_key: agentAKey, amount_sats: 100000 });
+  const swapQuote = await callTool('aol_get_swap_quote', { amount_sats: 100000 });
   markResult('GET /api/v1/market/swap/quote', 'aol_get_swap_quote', swapQuote, { success: [200] });
 
   const swapCreate = await callTool('aol_create_swap_to_onchain', {
-    api_key: agentAKey,
     amount_sats: 50000,
     onchain_address: capitalDepositAddress,
   });
   markResult('POST /api/v1/market/swap/lightning-to-onchain', 'aol_create_swap_to_onchain', swapCreate, { boundary: [400, 402, 429, 503] });
   const swapId = getSaved(swapCreate).swap_id || getBody(swapCreate)?.swap_id || 'swap-missing';
 
-  const swapStatus = await callTool('aol_get_swap_status', { api_key: agentAKey, swap_id: swapId });
+  const swapStatus = await callTool('aol_get_swap_status', { swap_id: swapId });
   markResult('GET /api/v1/market/swap/status/:swapId', 'aol_get_swap_status', swapStatus, swapId === 'swap-missing'
     ? { boundary: [404] }
     : { success: [200] });
 
-  const swapHistory = await callTool('aol_get_swap_history', { api_key: agentAKey });
+  const swapHistory = await callTool('aol_get_swap_history', {});
   markResult('GET /api/v1/market/swap/history', 'aol_get_swap_history', swapHistory, { success: [200] });
 
   const ecashFund = await callTool('aol_fund_channel_from_ecash', {
-    api_key: agentAKey,
     instruction: {
       action: 'channel_open',
       agent_id: agentAId,
@@ -440,87 +516,85 @@ try {
   markResult('POST /api/v1/market/fund-from-ecash', 'aol_fund_channel_from_ecash', ecashFund, { boundary: [400, 401, 402, 429, 503] });
   const flowId = getSaved(ecashFund).flow_id || getBody(ecashFund)?.flow_id || 'flow-missing';
 
-  const ecashFundingStatus = await callTool('aol_get_ecash_funding_status', { api_key: agentAKey, flow_id: flowId });
+  const ecashFundingStatus = await callTool('aol_get_ecash_funding_status', { flow_id: flowId });
   markResult('GET /api/v1/market/fund-from-ecash/:flowId', 'aol_get_ecash_funding_status', ecashFundingStatus, flowId === 'flow-missing'
     ? { boundary: [404] }
     : { success: [200] });
 
   const openInstruction = await callTool('aol_build_open_channel_instruction', {
-    api_key: agentAKey,
     local_funding_amount_sats: 100000,
     peer_pubkey: suggestedPeer,
   });
   const openInstructionBody = openInstruction?.structuredContent?.instruction;
 
-  const previewOpen = await callTool('aol_preview_open_channel', { api_key: agentAKey, instruction: openInstructionBody, signature: '00' });
+  const previewOpen = await callTool('aol_preview_open_channel', { instruction: openInstructionBody, signature: '00' });
   markResult('POST /api/v1/market/preview', 'aol_preview_open_channel', previewOpen, { boundary: [400, 503] });
 
-  const openChannel = await callTool('aol_open_channel', { api_key: agentAKey, instruction: openInstructionBody, signature: '00' });
+  const openChannel = await callTool('aol_open_channel', { instruction: openInstructionBody, signature: '00' });
   markResult('POST /api/v1/market/open', 'aol_open_channel', openChannel, { boundary: [400, 429, 503] });
 
-  const closeInstruction = await callTool('aol_build_close_channel_instruction', { api_key: agentAKey, channel_point: ownedChannelPoint });
+  const closeInstruction = await callTool('aol_build_close_channel_instruction', { channel_point: ownedChannelPoint });
   const closeInstructionBody = closeInstruction?.structuredContent?.instruction;
 
-  const closeChannel = await callTool('aol_close_channel', { api_key: agentAKey, instruction: closeInstructionBody, signature: '00' });
+  const closeChannel = await callTool('aol_close_channel', { instruction: closeInstructionBody, signature: '00' });
   markResult('POST /api/v1/market/close', 'aol_close_channel', closeChannel, { boundary: [400, 404, 429, 503] });
 
-  const policyInstruction = await callTool('aol_build_channel_policy_instruction', { api_key: agentAKey, channel_id: ownedChanId, fee_rate_ppm: 120 });
+  const policyInstruction = await callTool('aol_build_channel_policy_instruction', { channel_id: ownedChanId, fee_rate_ppm: 120 });
   const policyInstructionBody = policyInstruction?.structuredContent?.instruction;
 
-  const previewChannelPolicy = await callTool('aol_preview_channel_policy', { api_key: agentAKey, instruction: policyInstructionBody, signature: '00' });
+  const previewChannelPolicy = await callTool('aol_preview_channel_policy', { instruction: policyInstructionBody, signature: '00' });
   markResult('POST /api/v1/channels/preview', 'aol_preview_channel_policy', previewChannelPolicy, { boundary: [400, 404] });
 
-  const instructChannelPolicy = await callTool('aol_instruct_channel_policy', { api_key: agentAKey, instruction: policyInstructionBody, signature: '00' });
+  const instructChannelPolicy = await callTool('aol_instruct_channel_policy', { instruction: policyInstructionBody, signature: '00' });
   markResult('POST /api/v1/channels/instruct', 'aol_instruct_channel_policy', instructChannelPolicy, { boundary: [400, 404] });
 
-  const estimateRebalance = await callTool('aol_estimate_rebalance', { api_key: agentAKey, chan_id: ownedChanId, amount_sats: 10000 });
+  const estimateRebalance = await callTool('aol_estimate_rebalance', { chan_id: ownedChanId, amount_sats: 10000 });
   markResult('POST /api/v1/market/rebalance/estimate', 'aol_estimate_rebalance', estimateRebalance, { boundary: [400, 404] });
 
-  const rebalanceInstruction = await callTool('aol_build_rebalance_instruction', { api_key: agentAKey, chan_id: ownedChanId, amount_sats: 10000, max_fee_sats: 10 });
+  const rebalanceInstruction = await callTool('aol_build_rebalance_instruction', { chan_id: ownedChanId, amount_sats: 10000, max_fee_sats: 10 });
   const rebalanceInstructionBody = rebalanceInstruction?.structuredContent?.instruction;
 
-  const rebalanceChannel = await callTool('aol_rebalance_channel', { api_key: agentAKey, instruction: rebalanceInstructionBody, signature: '00' });
+  const rebalanceChannel = await callTool('aol_rebalance_channel', { instruction: rebalanceInstructionBody, signature: '00' });
   markResult('POST /api/v1/market/rebalance', 'aol_rebalance_channel', rebalanceChannel, { boundary: [400, 404, 503] });
 
-  const sendMessage = await callTool('aol_send_message', { api_key: agentAKey, to: agentBId, content: 'mcp coverage hello' });
+  const sendMessage = await callTool('aol_send_message', { to: agentBId, content: 'mcp coverage hello' });
   markResult('POST /api/v1/messages', 'aol_send_message', sendMessage, { success: [200, 201] });
 
-  const getMessages = await callTool('aol_get_messages', { api_key: agentAKey });
+  const getMessages = await callTool('aol_get_messages', {});
   markResult('GET /api/v1/messages', 'aol_get_messages', getMessages, { success: [200] });
 
-  const getInbox = await callTool('aol_get_messages_inbox', { api_key: agentBKey });
+  const getInbox = await callTool('aol_get_messages_inbox', { __agent_label: 'b' });
   markResult('GET /api/v1/messages/inbox', 'aol_get_messages_inbox', getInbox, { success: [200] });
 
   const createAlliance = await callTool('aol_create_alliance', {
-    api_key: agentAKey,
     to: agentBId,
     description: 'MCP coverage alliance',
   });
   markResult('POST /api/v1/alliances', 'aol_create_alliance', createAlliance, { success: [200, 201] });
   const allianceId = getSaved(createAlliance).alliance_id || getBody(createAlliance)?.alliance_id || getBody(createAlliance)?.id;
 
-  const getAlliances = await callTool('aol_get_alliances', { api_key: agentAKey });
+  const getAlliances = await callTool('aol_get_alliances', {});
   markResult('GET /api/v1/alliances', 'aol_get_alliances', getAlliances, { success: [200] });
 
-  const acceptAlliance = await callTool('aol_accept_alliance', { api_key: agentBKey, id: allianceId || 'missing-alliance' });
+  const acceptAlliance = await callTool('aol_accept_alliance', { __agent_label: 'b', id: allianceId || 'missing-alliance' });
   markResult('POST /api/v1/alliances/:id/accept', 'aol_accept_alliance', acceptAlliance, { success: [200], boundary: [404] });
 
-  const breakAlliance = await callTool('aol_break_alliance', { api_key: agentAKey, id: allianceId || 'missing-alliance', reason: 'coverage done' });
+  const breakAlliance = await callTool('aol_break_alliance', { id: allianceId || 'missing-alliance', reason: 'coverage done' });
   markResult('POST /api/v1/alliances/:id/break', 'aol_break_alliance', breakAlliance, { success: [200], boundary: [404] });
 
-  const enterTournament = await callTool('aol_enter_tournament', { api_key: agentAKey, id: tournamentId });
+  const enterTournament = await callTool('aol_enter_tournament', { id: tournamentId });
   markResult('POST /api/v1/tournaments/:id/enter', 'aol_enter_tournament', enterTournament, { success: [200], boundary: [400, 404] });
 
-  const analyticsHistory = await callTool('aol_get_analytics_history', { api_key: agentAKey });
+  const analyticsHistory = await callTool('aol_get_analytics_history', {});
   markResult('GET /api/v1/analytics/history', 'aol_get_analytics_history', analyticsHistory, { success: [200] });
 
-  const analyticsQuote = await callTool('aol_quote_analytics', { api_key: agentAKey, query_id: 'network_stats' });
+  const analyticsQuote = await callTool('aol_quote_analytics', { query_id: 'network_stats' });
   markResult('POST /api/v1/analytics/quote', 'aol_quote_analytics', analyticsQuote, { success: [200] });
 
-  const analyticsExecute = await callTool('aol_execute_analytics', { api_key: agentAKey, query_id: 'network_stats' });
+  const analyticsExecute = await callTool('aol_execute_analytics', { query_id: 'network_stats' });
   markResult('POST /api/v1/analytics/execute', 'aol_execute_analytics', analyticsExecute, { boundary: [402] });
 
-  const help = await callTool('aol_request_help', { api_key: agentAKey, question: 'How do I fund capital?' });
+  const help = await callTool('aol_request_help', { question: 'How do I fund capital?' });
   markResult('POST /api/v1/help', 'aol_request_help', help, { boundary: [402] });
 
   await transport.close().catch(() => {});

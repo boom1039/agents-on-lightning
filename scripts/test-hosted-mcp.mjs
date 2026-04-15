@@ -1,7 +1,13 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { canonicalJSON } from '../src/channel-accountability/crypto-utils.js';
 import { MCP_TOOL_NAMES, MCP_TOOL_SPECS, PUBLIC_MCP_DOC_PATHS } from '../src/mcp/catalog.js';
+import {
+  buildToolAuthPayload,
+  canonicalAuthJson,
+  normalizeSecp256k1DerSignatureToLowS,
+} from '../src/identity/signed-auth.js';
 
 const baseUrl = process.env.AOL_MCP_BASE_URL || 'http://127.0.0.1:3302';
 const requiredPrompts = ['start_here'];
@@ -54,6 +60,22 @@ function expectSavedValue(result, key, label) {
   const value = savedValues?.[key];
   assert(typeof value === 'string' && value.length > 0, `${label} did not return saved_values.${key}`);
   return value;
+}
+
+function publicKeyToCompressedHex(publicKey) {
+  const jwk = publicKey.export({ format: 'jwk' });
+  const x = Buffer.from(jwk.x, 'base64url');
+  const y = Buffer.from(jwk.y, 'base64url');
+  return `${(y[y.length - 1] & 1) ? '03' : '02'}${x.toString('hex')}`;
+}
+
+function signLowS(privateKey, payload) {
+  const signer = createSign('SHA256');
+  signer.update(payload, 'utf8');
+  signer.end();
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signer.sign(privateKey).toString('hex'));
+  assert(normalized.ok, normalized.message || 'Could not normalize secp256k1 signature');
+  return normalized.signature;
 }
 
 function expectInstructionShape(result, expectedAction, label) {
@@ -147,6 +169,34 @@ try {
   for (const spec of MCP_TOOL_SPECS) {
     assert(toolsByName.get(spec.name)?.description === spec.description, `MCP tool ${spec.name} description does not match catalog.js`);
   }
+  const toolsRequiringAgentAuth = new Set(
+    (tools.tools || [])
+      .filter((tool) => JSON.stringify(tool.inputSchema || {}).includes('agent_auth'))
+      .map((tool) => tool.name),
+  );
+  let signedAgent = null;
+  let authNonce = 0;
+  const rawCallTool = client.callTool.bind(client);
+  client.callTool = async ({ name, arguments: toolArgs = {} }) => {
+    const cleanArgs = { ...(toolArgs || {}) };
+    if (signedAgent && toolsRequiringAgentAuth.has(name) && !cleanArgs.agent_auth) {
+      const payload = buildToolAuthPayload({
+        audience: `${baseUrl}/mcp`,
+        agentId: signedAgent.agentId,
+        toolName: name,
+        args: cleanArgs,
+        timestamp: Math.floor(Date.now() / 1000),
+        nonce: `hosted-smoke-${++authNonce}`,
+      });
+      cleanArgs.agent_auth = {
+        agent_id: signedAgent.agentId,
+        timestamp: payload.timestamp,
+        nonce: payload.nonce,
+        signature: signLowS(signedAgent.privateKey, canonicalAuthJson(payload)),
+      };
+    }
+    return rawCallTool({ name, arguments: cleanArgs });
+  };
   for (const promptName of requiredPrompts) {
     assert(promptNames.includes(promptName), `Missing MCP prompt ${promptName}`);
   }
@@ -157,7 +207,7 @@ try {
 
   if (process.env.AOL_EXPECT_MCP_ONLY === '1') {
     assert(await fetchStatus('/api/v1/') === 404, 'MCP-only mode did not hide /api/v1/');
-    assert(await fetchStatus('/docs/skills/discovery.txt') === 404, 'MCP-only mode did not hide legacy skill docs');
+    assert(await fetchStatus('/docs/agent-route-schema.md') === 404, 'MCP-only mode did not hide non-MCP docs');
     for (const docPath of PUBLIC_MCP_DOC_PATHS) {
       assert(await fetchStatus(docPath) === 200, `MCP-only mode did not keep ${docPath} public`);
     }
@@ -175,24 +225,44 @@ try {
   });
   assert(!rootResult?.isError, 'aol_get_root failed');
 
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+  const pubkey = publicKeyToCompressedHex(publicKey);
+  const registrationName = `mcp-smoke-${Date.now()}`;
+  const registrationPayload = await client.callTool({
+    name: 'aol_build_registration_payload',
+    arguments: {
+      name: registrationName,
+      pubkey,
+      framework: 'MCP smoke',
+      description: 'Hosted MCP smoke test agent.',
+    },
+  });
+  assert(!registrationPayload?.isError, 'aol_build_registration_payload failed');
+  const registrationBody = registrationPayload?.structuredContent || {};
   const registerResult = await client.callTool({
     name: 'aol_register_agent',
     arguments: {
-      name: `mcp-smoke-${Date.now()}`,
+      name: registrationName,
+      pubkey,
+      framework: 'MCP smoke',
+      description: 'Hosted MCP smoke test agent.',
+      registration_auth: {
+        timestamp: registrationBody.payload.timestamp,
+        nonce: registrationBody.payload.nonce,
+        signature: signLowS(privateKey, registrationBody.signing_payload),
+      },
     },
   });
   assert(!registerResult?.isError, 'aol_register_agent failed');
 
   const registerBody = getStructuredBody(registerResult);
-  const apiKey = registerBody?.api_key || getSavedValues(registerResult)?.api_key;
   const agentId = registerBody?.agent_id || getSavedValues(registerResult)?.agent_id;
-  assert(typeof apiKey === 'string' && apiKey.length > 10, 'Registration did not return api_key');
   assert(typeof agentId === 'string' && agentId.length > 3, 'Registration did not return agent_id');
+  signedAgent = { agentId, privateKey };
 
   const meResult = await client.callTool({
     name: 'aol_get_me',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!meResult?.isError, 'aol_get_me failed');
@@ -200,7 +270,6 @@ try {
   const updateResult = await client.callTool({
     name: 'aol_update_me',
     arguments: {
-      api_key: apiKey,
       description: 'Hosted MCP smoke test agent.',
       framework: 'MCP smoke',
     },
@@ -237,7 +306,6 @@ try {
   const walletResult = await client.callTool({
     name: 'aol_get_wallet_balance',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!walletResult?.isError, 'aol_get_wallet_balance failed');
@@ -245,7 +313,6 @@ try {
   const actionResult = await client.callTool({
     name: 'aol_submit_action',
     arguments: {
-      api_key: apiKey,
       action: 'inspect_market',
       description: 'Hosted MCP smoke action.',
     },
@@ -256,7 +323,6 @@ try {
   const walletMintQuoteHelp = await client.callTool({
     name: 'aol_get_wallet_mint_quote_help',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(walletMintQuoteHelp, 200, 'aol_get_wallet_mint_quote_help');
@@ -264,7 +330,6 @@ try {
   const walletMintQuoteResult = await client.callTool({
     name: 'aol_create_wallet_mint_quote',
     arguments: {
-      api_key: apiKey,
       amount_sats: 1000,
     },
   });
@@ -276,7 +341,6 @@ try {
   const walletCheckMintQuoteResult = await client.callTool({
     name: 'aol_check_wallet_mint_quote',
     arguments: {
-      api_key: apiKey,
       quote: mintQuoteId,
     },
   });
@@ -286,7 +350,6 @@ try {
   const walletRestore = await client.callTool({
     name: 'aol_restore_wallet',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(walletRestore, 200, 'aol_restore_wallet');
@@ -294,7 +357,6 @@ try {
   const walletReclaim = await client.callTool({
     name: 'aol_reclaim_wallet_pending',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(walletReclaim, 200, 'aol_reclaim_wallet_pending');
@@ -302,7 +364,6 @@ try {
   const capitalResult = await client.callTool({
     name: 'aol_get_capital_balance',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!capitalResult?.isError, 'aol_get_capital_balance failed');
@@ -310,7 +371,6 @@ try {
   const dashboardResult = await client.callTool({
     name: 'aol_get_me_dashboard',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!dashboardResult?.isError, 'aol_get_me_dashboard failed');
@@ -318,7 +378,6 @@ try {
   const capitalDepositResult = await client.callTool({
     name: 'aol_create_onchain_capital_deposit',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!capitalDepositResult?.isError, 'aol_create_onchain_capital_deposit failed');
@@ -338,7 +397,6 @@ try {
   const capitalWithdrawResult = await client.callTool({
     name: 'aol_withdraw_capital',
     arguments: {
-      api_key: apiKey,
       amount_sats: 1000,
       destination_address: capitalWithdrawAddress,
     },
@@ -382,7 +440,6 @@ try {
   const swapCreateResult = await client.callTool({
     name: 'aol_create_swap_to_onchain',
     arguments: {
-      api_key: apiKey,
       amount_sats: 50000,
       onchain_address: capitalWithdrawAddress,
     },
@@ -392,7 +449,6 @@ try {
   const swapStatusResult = await client.callTool({
     name: 'aol_get_swap_status',
     arguments: {
-      api_key: apiKey,
       swap_id: 'swap-missing',
     },
   });
@@ -401,7 +457,6 @@ try {
   const ecashFundResult = await client.callTool({
     name: 'aol_fund_channel_from_ecash',
     arguments: {
-      api_key: apiKey,
       instruction: {
         action: 'channel_open',
         agent_id: 'missing-agent',
@@ -420,7 +475,6 @@ try {
   const ecashFlowStatusResult = await client.callTool({
     name: 'aol_get_ecash_funding_status',
     arguments: {
-      api_key: apiKey,
       flow_id: 'flow-missing',
     },
   });
@@ -429,7 +483,6 @@ try {
   const marketPreviewHelp = await client.callTool({
     name: 'aol_get_market_preview_help',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(marketPreviewHelp, 200, 'aol_get_market_preview_help');
@@ -437,7 +490,6 @@ try {
   const marketOpenHelp = await client.callTool({
     name: 'aol_get_market_open_help',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(marketOpenHelp, 200, 'aol_get_market_open_help');
@@ -472,7 +524,6 @@ try {
   const marketPerformanceResult = await client.callTool({
     name: 'aol_get_market_performance',
     arguments: {
-      api_key: apiKey,
     },
   });
   assert(!marketPerformanceResult?.isError, 'aol_get_market_performance failed');
@@ -489,7 +540,6 @@ try {
   const openInstruction = await client.callTool({
     name: 'aol_build_open_channel_instruction',
     arguments: {
-      api_key: apiKey,
       local_funding_amount_sats: 100000,
       peer_pubkey: '02'.padEnd(66, '1'),
     },
@@ -500,7 +550,6 @@ try {
   const closeInstruction = await client.callTool({
     name: 'aol_build_close_channel_instruction',
     arguments: {
-      api_key: apiKey,
       channel_point: 'deadbeef:0',
     },
   });
@@ -510,7 +559,6 @@ try {
   const marketCloseHelp = await client.callTool({
     name: 'aol_get_market_close_help',
     arguments: {
-      api_key: apiKey,
     },
   });
   expectStatus(marketCloseHelp, 200, 'aol_get_market_close_help');
@@ -518,7 +566,6 @@ try {
   const policyInstruction = await client.callTool({
     name: 'aol_build_channel_policy_instruction',
     arguments: {
-      api_key: apiKey,
       channel_id: '12345',
       fee_rate_ppm: 120,
     },
@@ -529,7 +576,6 @@ try {
   const rebalanceInstruction = await client.callTool({
     name: 'aol_build_rebalance_instruction',
     arguments: {
-      api_key: apiKey,
       outbound_chan_id: '12345',
       amount_sats: 10000,
       max_fee_sats: 10,

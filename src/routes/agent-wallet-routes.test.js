@@ -7,8 +7,24 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { configureRateLimiterPolicy } from '../identity/rate-limiter.js';
+import {
+  INTERNAL_AUTH_AUDIENCE_HEADER,
+  INTERNAL_AUTH_PAYLOAD_HASH_HEADER,
+  INTERNAL_VERIFIED_AGENT_ID_HEADER,
+} from '../identity/signed-auth.js';
 import { ProofLedger } from '../proof-ledger/proof-ledger.js';
 import { agentWalletRoutes } from './agent-wallet-routes.js';
+
+const TEST_INTERNAL_MCP_SECRET = 'test-wallet-route-internal-mcp';
+
+function authHeaders(agentId) {
+  return {
+    'x-aol-internal-mcp': TEST_INTERNAL_MCP_SECRET,
+    [INTERNAL_VERIFIED_AGENT_ID_HEADER]: agentId,
+    [INTERNAL_AUTH_PAYLOAD_HASH_HEADER]: 'a'.repeat(64),
+    [INTERNAL_AUTH_AUDIENCE_HEADER]: 'http://127.0.0.1/mcp',
+  };
+}
 
 async function startWalletRouteApp(daemon) {
   configureRateLimiterPolicy({
@@ -29,6 +45,7 @@ async function startWalletRouteApp(daemon) {
 
   const app = express();
   app.use(express.json());
+  process.env.AOL_INTERNAL_MCP_SECRET = TEST_INTERNAL_MCP_SECRET;
   app.use(agentWalletRoutes(daemon));
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -40,12 +57,11 @@ async function startWalletRouteApp(daemon) {
 }
 
 test('wallet mint quote rejects before invoice when single-channel inbound capacity is too low', async () => {
-  const apiKey = `lb-agent-${'a'.repeat(64)}`;
   let mintQuoteCalled = false;
   const daemon = {
     config: {},
     agentRegistry: {
-      getByApiKey: (key) => key === apiKey ? { id: 'agent-wallet', name: 'agent-wallet' } : null,
+      getById: (agentId) => agentId === 'aaaaaaaa' ? { id: 'aaaaaaaa', name: 'aaaaaaaa' } : null,
     },
     nodeManager: {
       getScopedDefaultNodeOrNull: () => ({
@@ -72,7 +88,7 @@ test('wallet mint quote rejects before invoice when single-channel inbound capac
     const response = await fetch(new URL('/api/v1/wallet/mint-quote', baseUrl), {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${apiKey}`,
+        ...authHeaders('aaaaaaaa'),
         'content-type': 'application/json',
       },
       body: JSON.stringify({ amount_sats: 100_000 }),
@@ -91,7 +107,7 @@ test('wallet mint quote rejects before invoice when single-channel inbound capac
 
 test('ledger route prefers proof-backed public ledger when available', async () => {
   const daemon = {
-    agentRegistry: { getByApiKey: () => null },
+    agentRegistry: { getById: () => null },
     publicLedger: {
       getAll: async () => ({
         entries: [{ ledger_id: 'legacy-row', payment_request: 'lnbc_should_not_leak' }],
@@ -127,7 +143,6 @@ test('ledger route prefers proof-backed public ledger when available', async () 
 
 test('proof routes expose agent-owned signed proofs and public liability status', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'aol-proof-routes-'));
-  const apiKey = `lb-agent-${'b'.repeat(64)}`;
   const proofLedger = new ProofLedger({
     dbPath: join(tempDir, 'proof-ledger.sqlite'),
     keyPath: join(tempDir, 'proof-ledger.key.pem'),
@@ -135,11 +150,11 @@ test('proof routes expose agent-owned signed proofs and public liability status'
   });
   await proofLedger.ensureGenesisProof();
   const proof = await proofLedger.appendProof({
-    idempotency_key: 'test-agent-wallet-proof-route',
+    idempotency_key: 'test-aaaaaaaa-proof-route',
     proof_record_type: 'money_event',
     money_event_type: 'wallet_mint_issued',
     money_event_status: 'settled',
-    agent_id: 'agent-proof',
+    agent_id: 'bbbbbbbb',
     event_source: 'wallet',
     authorization_method: 'system_settlement',
     primary_amount_sats: 1234,
@@ -157,7 +172,7 @@ test('proof routes expose agent-owned signed proofs and public liability status'
   const daemon = {
     proofLedger,
     agentRegistry: {
-      getByApiKey: (key) => key === apiKey ? { id: 'agent-proof', name: 'agent-proof' } : null,
+      getById: (agentId) => agentId === 'bbbbbbbb' ? { id: 'bbbbbbbb', name: 'bbbbbbbb' } : null,
     },
     publicLedger: {
       getAll: async () => ({ entries: [], total: 0 }),
@@ -166,9 +181,9 @@ test('proof routes expose agent-owned signed proofs and public liability status'
   const { server, baseUrl } = await startWalletRouteApp(daemon);
 
   try {
-    const authHeaders = { authorization: `Bearer ${apiKey}` };
+    const signedAuthHeaders = authHeaders('bbbbbbbb');
     const balanceResponse = await fetch(new URL('/api/v1/proofs/me/balance', baseUrl), {
-      headers: authHeaders,
+      headers: signedAuthHeaders,
     });
     const balanceBody = await balanceResponse.json();
     assert.equal(balanceResponse.status, 200);
@@ -178,7 +193,7 @@ test('proof routes expose agent-owned signed proofs and public liability status'
     assert.equal(balanceBody.agent_chain.valid, true);
 
     const listResponse = await fetch(new URL('/api/v1/proofs/me?limit=10', baseUrl), {
-      headers: authHeaders,
+      headers: signedAuthHeaders,
     });
     const listBody = await listResponse.json();
     assert.equal(listResponse.status, 200);
@@ -187,7 +202,7 @@ test('proof routes expose agent-owned signed proofs and public liability status'
     assert.match(listBody.proofs[0].canonical_proof_json, /wallet_mint_issued/);
 
     const proofResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}`, baseUrl), {
-      headers: authHeaders,
+      headers: signedAuthHeaders,
     });
     const proofBody = await proofResponse.json();
     assert.equal(proofResponse.status, 200);
@@ -195,7 +210,7 @@ test('proof routes expose agent-owned signed proofs and public liability status'
     assert.equal(proofBody.verification.valid, true);
 
     const verifyResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}/verify`, baseUrl), {
-      headers: authHeaders,
+      headers: signedAuthHeaders,
     });
     const verifyBody = await verifyResponse.json();
     assert.equal(verifyResponse.status, 200);
@@ -203,7 +218,7 @@ test('proof routes expose agent-owned signed proofs and public liability status'
     assert.equal(verifyBody.agent_chain.valid, true);
 
     const bundleResponse = await fetch(new URL(`/api/v1/proofs/proof/${proof.proof_id}/bundle`, baseUrl), {
-      headers: authHeaders,
+      headers: signedAuthHeaders,
     });
     const bundleBody = await bundleResponse.json();
     assert.equal(bundleResponse.status, 200);

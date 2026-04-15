@@ -460,31 +460,30 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan D: Channel Open
   // =========================================================================
-
   // Read market config.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"config","summary":"Read market config.","order":100,"tags":["market","read","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"config","summary":"Read market config.","order":100,"tags":["market","read","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/config', marketRL, (req, res) => {
     if (!daemon.channelOpener) {
       return res.status(503).json({ error: 'Channel opener not initialized' });
     }
     res.json(daemon.channelOpener.getConfig());
   });
-
   // Read market preview.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"preview","summary":"Read market preview.","order":200,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"preview","summary":"Read market preview.","order":200,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/preview', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market preview help route.',
-      learn: 'Use POST /api/v1/market/preview with a signed channel_open instruction to validate an open before the real submit.',
+      learn: 'Use aol_preview_open_channel with signed agent_auth plus a signed channel_open instruction to validate an open before the real submit.',
       next: [
-        'GET /api/v1/market/config',
-        'POST /api/v1/market/preview',
-        'POST /api/v1/market/open',
+        'aol_get_market_config',
+        'aol_build_open_channel_instruction',
+        'aol_preview_open_channel',
+        'aol_open_channel',
       ],
       example_request: {
-        method: 'POST',
-        path: '/api/v1/market/preview',
-        json: {
+        mcp_tool: 'aol_preview_open_channel',
+        arguments: {
+          agent_auth: '<signed_agent_auth_for_aol_preview_open_channel>',
           instruction: {
             action: 'channel_open',
             agent_id: '<agent_id>',
@@ -499,9 +498,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Preview market.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"preview","summary":"Preview market.","order":210,"tags":["market","write","agent"],"doc":["skills/market-open-flow.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":true,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"preview","summary":"Preview market.","order":210,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":true,"long_running":false}}
   router.post('/api/v1/market/preview', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -601,23 +599,23 @@ export function channelMarketRoutes(daemon) {
       ));
     }
   });
-
   // Read market open.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Read market open.","order":220,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Read market open.","order":220,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/open', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market open help route.',
-      learn: 'Use POST /api/v1/market/open with a signed channel_open instruction after a successful preview.',
+      learn: 'Use aol_open_channel with signed agent_auth plus the same signed channel_open instruction after a successful preview.',
       next: [
-        'GET /api/v1/market/config',
-        'POST /api/v1/market/preview',
-        'POST /api/v1/market/open',
-        'GET /api/v1/market/pending',
+        'aol_get_market_config',
+        'aol_build_open_channel_instruction',
+        'aol_preview_open_channel',
+        'aol_open_channel',
+        'aol_get_market_pending',
       ],
       example_request: {
-        method: 'POST',
-        path: '/api/v1/market/open',
-        json: {
+        mcp_tool: 'aol_open_channel',
+        arguments: {
+          agent_auth: '<signed_agent_auth_for_aol_open_channel>',
           instruction: {
             action: 'channel_open',
             agent_id: '<agent_id>',
@@ -632,9 +630,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Open market.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open market.","order":230,"tags":["market","write","agent"],"doc":["skills/market-open-flow.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open market.","order":230,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
   router.post('/api/v1/market/open', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -835,9 +832,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Read market pending.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"pending","summary":"Read market pending.","order":240,"tags":["market","read","agent"],"doc":["skills/market-open-flow.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"pending","summary":"Read market pending.","order":240,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/pending', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.channelOpener) {
       return res.status(503).json({ error: 'Channel opener not initialized' });
@@ -876,22 +872,22 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan E: Channel Close
   // =========================================================================
-
   // Read market close.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"close","summary":"Read market close.","order":300,"tags":["market","read","agent"],"doc":["skills/market-teaching-surfaces.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"close","summary":"Read market close.","order":300,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/close', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market close help route.',
-      learn: 'Use POST /api/v1/market/close with a signed channel_close instruction for one channel you already own.',
+      learn: 'Use aol_close_channel with signed agent_auth plus a signed channel_close instruction for one channel you already own.',
       next: [
-        'GET /api/v1/channels/mine',
-        'POST /api/v1/market/close',
-        'GET /api/v1/market/closes',
+        'aol_get_channels_mine',
+        'aol_build_close_channel_instruction',
+        'aol_close_channel',
+        'aol_get_market_closes',
       ],
       example_request: {
-        method: 'POST',
-        path: '/api/v1/market/close',
-        json: {
+        mcp_tool: 'aol_close_channel',
+        arguments: {
+          agent_auth: '<signed_agent_auth_for_aol_close_channel>',
           instruction: {
             action: 'channel_close',
             agent_id: '<agent_id>',
@@ -905,9 +901,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Close market.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"close","summary":"Close market.","order":310,"tags":["market","write","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"close","summary":"Close market.","order":310,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
   router.post('/api/v1/market/close', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -1042,9 +1037,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Read market closes.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"closes","summary":"Read market closes.","order":320,"tags":["market","read","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Close Flow","label":"closes","summary":"Read market closes.","order":320,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/closes', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.channelCloser) {
       return res.status(503).json({ error: 'Channel closer not initialized' });
@@ -1076,9 +1070,8 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan F: Revenue Attribution
   // =========================================================================
-
   // Read market revenue.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue","summary":"Read market revenue.","order":400,"tags":["market","read","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue","summary":"Read market revenue.","order":400,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/revenue', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.revenueTracker) {
       return res.status(503).json({ error: 'Revenue tracker not initialized' });
@@ -1095,9 +1088,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching revenue' });
     }
   });
-
   // Read market revenue by chanId.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue-by-channel","summary":"Read market revenue by chanId.","order":410,"tags":["market","read","dynamic","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue-by-channel","summary":"Read market revenue by chanId.","order":410,"tags":["market","read","dynamic","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/revenue/:chanId', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.revenueTracker) {
       return res.status(503).json({ error: 'Revenue tracker not initialized' });
@@ -1121,9 +1113,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching channel revenue' });
     }
   });
-
   // Update market revenue config.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue-config","summary":"Update market revenue config.","order":420,"tags":["market","write","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Revenue","label":"revenue-config","summary":"Update market revenue config.","order":420,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.put('/api/v1/market/revenue-config', auth, marketWrite, async (req, res) => {
     if (!daemon.revenueTracker) {
       return res.status(503).json({ error: 'Revenue tracker not initialized' });
@@ -1144,9 +1135,8 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan I: Submarine Swap
   // =========================================================================
-
   // Read market swap quote.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"quote","summary":"Read market swap quote.","order":800,"tags":["market","read","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"quote","summary":"Read market swap quote.","order":800,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/swap/quote', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.swapProvider) {
       return res.status(503).json({ error: 'Swap provider not initialized' });
@@ -1160,7 +1150,7 @@ export function channelMarketRoutes(daemon) {
           moneyEventType: 'swap_quote_created',
           moneyEventStatus: 'created',
           eventSource: 'swap',
-          authorizationMethod: 'agent_api_key',
+          authorizationMethod: 'agent_signed_request',
           primaryAmountSats: amount,
           reference: `swap-quote:${req.agentId}:${amount}:${result.total_fee_sats || 0}:${result.receive_amount_sats || amount}`,
           publicSafeRefs: {
@@ -1188,9 +1178,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching quote' });
     }
   });
-
   // Read market swap history.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"history","summary":"Read market swap history.","order":830,"tags":["market","read","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"history","summary":"Read market swap history.","order":830,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/swap/history', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.swapProvider) {
       return res.status(503).json({ error: 'Swap provider not initialized' });
@@ -1210,9 +1199,8 @@ export function channelMarketRoutes(daemon) {
       count: history.length,
     });
   });
-
   // Run market swap lightning to onchain.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"lightning-to-onchain","summary":"Run market swap lightning to onchain.","order":810,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"lightning-to-onchain","summary":"Run market swap lightning to onchain.","order":810,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":true}}
   router.post('/api/v1/market/swap/lightning-to-onchain', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['amount_sats', 'onchain_address', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -1337,9 +1325,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Read market swap status by swapId.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"swap-status","summary":"Read market swap status by swapId.","order":820,"tags":["market","read","dynamic","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Swaps","label":"swap-status","summary":"Read market swap status by swapId.","order":820,"tags":["market","read","dynamic","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/swap/status/:swapId', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.swapProvider) {
       return res.status(503).json({ error: 'Swap provider not initialized' });
@@ -1359,9 +1346,8 @@ export function channelMarketRoutes(daemon) {
       },
     }));
   });
-
   // Run market fund from ecash.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"fund-from-ecash","summary":"Run market fund from ecash.","order":600,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"fund-from-ecash","summary":"Run market fund from ecash.","order":600,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
   router.post('/api/v1/market/fund-from-ecash', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -1504,9 +1490,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Read market fund from ecash by flowId.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"funding-status","summary":"Read market fund from ecash by flowId.","order":610,"tags":["market","read","dynamic","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Ecash Funding","label":"funding-status","summary":"Read market fund from ecash by flowId.","order":610,"tags":["market","read","dynamic","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/fund-from-ecash/:flowId', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.ecashChannelFunder) {
       return res.status(503).json({ error: 'Ecash channel funder not initialized' });
@@ -1532,9 +1517,8 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan G: Performance Dashboard
   // =========================================================================
-
   // Read market performance.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Performance","label":"performance","summary":"Read market performance.","order":500,"tags":["market","read","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Performance","label":"performance","summary":"Read market performance.","order":500,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/performance', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.performanceTracker) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
@@ -1547,9 +1531,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching performance' });
     }
   });
-
   // Read market performance by chanId.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Performance","label":"performance-by-channel","summary":"Read market performance by chanId.","order":510,"tags":["market","read","dynamic","agent"],"doc":["skills/market-close.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Performance","label":"performance-by-channel","summary":"Read market performance by chanId.","order":510,"tags":["market","read","dynamic","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/performance/:chanId', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.performanceTracker) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
@@ -1569,9 +1552,8 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan H: Rebalancing
   // =========================================================================
-
   // Rebalance market.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"rebalance","summary":"Rebalance market.","order":700,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"rebalance","summary":"Rebalance market.","order":700,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
   router.post('/api/v1/market/rebalance', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['instruction', 'signature', 'idempotency_key']);
     if (unexpected.length > 0) {
@@ -1706,9 +1688,8 @@ export function channelMarketRoutes(daemon) {
       },
     });
   });
-
   // Estimate market rebalance.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"estimate","summary":"Estimate market rebalance.","order":710,"tags":["market","write","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"estimate","summary":"Estimate market rebalance.","order":710,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.post('/api/v1/market/rebalance/estimate', auth, marketWrite, async (req, res) => {
     const unexpected = findUnexpectedKeys(req.body, ['outbound_chan_id', 'amount_sats']);
     if (unexpected.length > 0) {
@@ -1771,9 +1752,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error during fee estimation' });
     }
   });
-
   // Read market rebalances.
-  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"rebalances","summary":"Read market rebalances.","order":720,"tags":["market","read","agent"],"doc":["skills/market-swap-ecash-and-rebalance.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"agent","domain":"market","subgroup":"Rebalancing","label":"rebalances","summary":"Read market rebalances.","order":720,"tags":["market","read","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/rebalances', auth, marketPrivateRead, async (req, res) => {
     if (!daemon.rebalanceExecutor) {
       return res.status(503).json({ error: 'Rebalance executor not initialized' });
@@ -1802,10 +1782,9 @@ export function channelMarketRoutes(daemon) {
   // =========================================================================
   // Plan N: Market Transparency (public, rate limited)
   // =========================================================================
-
   // Plan G: Rankings (public, rate limited)
   // Read market rankings.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"rankings","summary":"Read market rankings.","order":110,"tags":["market","read","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"rankings","summary":"Read market rankings.","order":110,"tags":["market","read","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/rankings', marketRL, (req, res) => {
     if (!daemon.performanceTracker) {
       return res.status(503).json({ error: 'Performance tracker not initialized' });
@@ -1823,9 +1802,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching rankings' });
     }
   });
-
   // Read market overview.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"overview","summary":"Read market overview.","order":120,"tags":["market","read","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"overview","summary":"Read market overview.","order":120,"tags":["market","read","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/overview', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
@@ -1838,9 +1816,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching overview' });
     }
   });
-
   // Read market channels.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"channels","summary":"Read market channels.","order":130,"tags":["market","read","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"channels","summary":"Read market channels.","order":130,"tags":["market","read","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/channels', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
@@ -1855,9 +1832,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching channels' });
     }
   });
-
   // Read market agent by agentId.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"agent-profile","summary":"Read market agent by agentId.","order":140,"tags":["market","read","dynamic","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"agent-profile","summary":"Read market agent by agentId.","order":140,"tags":["market","read","dynamic","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/agent/:agentId', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
@@ -1873,9 +1849,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching agent profile' });
     }
   });
-
   // Read market peer safety by pubkey.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"peer-safety","summary":"Read market peer safety by pubkey.","order":150,"tags":["market","read","dynamic","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"peer-safety","summary":"Read market peer safety by pubkey.","order":150,"tags":["market","read","dynamic","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/peer-safety/:pubkey', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
@@ -1891,9 +1866,8 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching peer safety' });
     }
   });
-
   // Read market fees by peerPubkey.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"fee-competition","summary":"Read market fees by peerPubkey.","order":160,"tags":["market","read","dynamic","public"],"doc":["skills/market-public-market-read.txt","skills/market.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"fee-competition","summary":"Read market fees by peerPubkey.","order":160,"tags":["market","read","dynamic","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/market/fees/:peerPubkey', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });

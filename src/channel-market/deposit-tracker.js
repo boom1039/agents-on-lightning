@@ -141,7 +141,7 @@ export class DepositTracker {
         money_event_status: 'created',
         agent_id: agentId,
         event_source: source === LIGHTNING_BRIDGE_SOURCE ? 'lightning_capital' : 'capital',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         public_safe_refs: {
           address_hash: addressHash,
           flow_hash: typeof metadata.flow_id === 'string' ? sha256Hex(metadata.flow_id) : null,

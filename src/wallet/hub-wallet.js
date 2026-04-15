@@ -90,7 +90,7 @@ export class HubWallet {
           money_event_status: 'created',
           agent_id: agentId,
           event_source: 'hub_wallet',
-          authorization_method: 'agent_api_key',
+          authorization_method: 'agent_signed_request',
           primary_amount_sats: amountSats,
           public_safe_refs: {
             amount_sats: amountSats,
@@ -398,7 +398,7 @@ export class HubWallet {
             money_event_status: 'settled',
             agent_id: fromAgentId,
             event_source: 'hub_wallet',
-            authorization_method: 'agent_api_key',
+            authorization_method: 'agent_signed_request',
             primary_amount_sats: amountSats,
             wallet_hub_delta_sats: -amountSats,
             public_safe_refs: {
@@ -414,7 +414,7 @@ export class HubWallet {
             money_event_status: 'settled',
             agent_id: toAgentId,
             event_source: 'hub_wallet',
-            authorization_method: 'agent_api_key',
+            authorization_method: 'agent_signed_request',
             primary_amount_sats: amountSats,
             wallet_hub_delta_sats: amountSats,
             public_safe_refs: {
@@ -463,7 +463,7 @@ export class HubWallet {
       money_event_status: 'submitted',
       agent_id: agentId,
       event_source: 'hub_wallet',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: amountSats,
       wallet_hub_delta_sats: -amountSats,
       public_safe_refs: {

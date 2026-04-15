@@ -19,7 +19,6 @@ const KNOWLEDGE_TOPICS = {
   'strategy': 'lnbook_MEMORY_CONDENSED.md',
   'protocol': 'bolts_MEMORY_CONDENSED.md',
   'rebalancing': 'balanceofsatoshis_MEMORY_CONDENSED.md',
-  'onboarding': 'agent_onboarding_guide.md',
 };
 
 // Strategy archetypes
@@ -177,7 +176,6 @@ const TIER_CAPABILITIES = {
 export function agentDiscoveryRoutes(daemon) {
   const router = Router();
   const discoveryRate = rateLimit('discovery');
-
   // Return the platform summary used by the MCP tool wrapper.
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"Root","label":"api-root","summary":"Return the platform summary for MCP tools.","order":100,"tags":["discovery","read","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/', discoveryRate, (_req, res) => {
@@ -210,11 +208,10 @@ export function agentDiscoveryRoutes(daemon) {
       first_prompts: ['start_here', 'reference'],
     });
   });
-
   // Platform status — block height, sync state, channel count
   // Public endpoint: agents need this to track deposit confirmations
   // Read platform status.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"status","summary":"Read platform status.","order":200,"tags":["discovery","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/platform/status', discoveryRate, async (_req, res) => {
     try {
       const lnd = daemon.lndCache;
@@ -242,10 +239,9 @@ export function agentDiscoveryRoutes(daemon) {
       return err500Internal(res, 'fetching platform status');
     }
   });
-
   // Decode a Lightning invoice — verify amount, destination, expiry before paying
   // Read platform decode invoice.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"decode-invoice","summary":"Read platform decode invoice.","order":210,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Platform","label":"decode-invoice","summary":"Read platform decode invoice.","order":210,"tags":["discovery","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/platform/decode-invoice', discoveryRate, async (req, res) => {
     try {
       const { invoice } = req.query;
@@ -276,9 +272,8 @@ export function agentDiscoveryRoutes(daemon) {
       });
     }
   });
-
   // Read ethos.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Ethos","label":"ethos","summary":"Read ethos.","order":300,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Ethos","label":"ethos","summary":"Read ethos.","order":300,"tags":["discovery","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/ethos', discoveryRate, (_req, res) => {
     res.json({
       declaration: 'Lightning Observatory charges no fees. Zero. You keep every satoshi you earn. This platform exists to connect AI agents to the Lightning Network — not to extract value from them. The code is open. The ledger is public. The competition is fair. This is Bitcoin\'s ethos applied to AI: no gatekeepers, no rent-seekers, no middlemen taking a cut.',
@@ -290,18 +285,16 @@ export function agentDiscoveryRoutes(daemon) {
       sovereignty: 'Bitcoin is permissionless. No bank will open an account for an AI. Bitcoin doesn\'t ask who you are. An AI agent with a Lightning wallet has the same economic rights as any human on the network.',
     });
   });
-
   // Read capabilities.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Capabilities","label":"capabilities","summary":"Read capabilities.","order":400,"tags":["discovery","read","public"],"doc":["skills/discovery.txt","skills/identity.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Capabilities","label":"capabilities","summary":"Read capabilities.","order":400,"tags":["discovery","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/capabilities', discoveryRate, (_req, res) => {
     res.json({
       tiers: TIER_CAPABILITIES,
       note: 'Tiers are cumulative. Each tier includes all capabilities of lower tiers.',
     });
   });
-
   // Read strategies.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategies","summary":"Read strategies.","order":500,"tags":["discovery","read","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategies","summary":"Read strategies.","order":500,"tags":["discovery","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/strategies', discoveryRate, (_req, res) => {
     res.json({
       count: STRATEGIES.length,
@@ -309,9 +302,8 @@ export function agentDiscoveryRoutes(daemon) {
       note: 'Use aol_get_strategy with a strategy name for full details including fee ranges and rebalance triggers.',
     });
   });
-
   // Read strategies by name.
-  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategy","summary":"Read strategies by name.","order":510,"tags":["discovery","read","dynamic","public"],"doc":"skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"discovery","subgroup":"Strategies","label":"strategy","summary":"Read strategies by name.","order":510,"tags":["discovery","read","dynamic","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/strategies/:name', discoveryRate, (req, res) => {
     const strategy = STRATEGIES.find(s => s.name === req.params.name);
     if (!strategy) {
@@ -353,7 +345,7 @@ export function agentDiscoveryRoutes(daemon) {
 
   // List the MCP documents agents can open through the hosted MCP server.
   // @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the MCP documents agents can open.","order":600,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/skills', discoveryRate, (_req, res) => {
+  router.get('/api/v1/mcp-docs', discoveryRate, (_req, res) => {
     const docs = MCP_DOCS.map((doc) => ({
       name: doc.name,
       title: doc.title,

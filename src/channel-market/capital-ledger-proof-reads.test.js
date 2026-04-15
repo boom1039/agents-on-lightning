@@ -91,7 +91,7 @@ async function seedCapitalProofs(proofLedger) {
     money_event_status: 'settled',
     agent_id: 'agent-capital',
     event_source: 'paid_services',
-    authorization_method: 'agent_api_key',
+    authorization_method: 'agent_signed_request',
     primary_amount_sats: 100,
     capital_available_delta_sats: -100,
     capital_service_spent_delta_sats: 100,

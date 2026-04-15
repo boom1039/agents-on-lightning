@@ -1,33 +1,30 @@
 /**
- * Authentication middleware for external agent API.
- * Bearer token format: lb-agent-{32-byte-hex}
- * Optional secp256k1 signature verification for signed agent actions.
+ * Authentication middleware for internal MCP-to-API calls.
+ *
+ * External agents do not receive reusable shared-secret credentials. Private MCP tools verify a
+ * secp256k1-signed agent_auth payload, then forward a loopback-only internal
+ * assertion to these API routes.
  */
 
-import { randomBytes } from 'node:crypto';
 import {
-  createHash, createPublicKey, createVerify, ECDH,
-} from 'node:crypto';
+  INTERNAL_AUTH_AUDIENCE_HEADER,
+  INTERNAL_AUTH_PAYLOAD_HASH_HEADER,
+  INTERNAL_VERIFIED_AGENT_ID_HEADER,
+  verifySecp256k1DerSignature,
+} from './signed-auth.js';
 import { err401NoAuth, err401BadFormat, err401BadKey } from './agent-friendly-errors.js';
 import { logAuthFailure } from './audit-log.js';
-import { getSocketAddress } from './request-security.js';
+import {
+  getSocketAddress,
+  hasValidInternalMcpSecret,
+  isLoopbackRequest,
+} from './request-security.js';
+import { validateAgentId } from './validators.js';
 
-// In-memory rate limit tracking: IP → { count, windowStart }
+// In-memory rate limit tracking: IP -> { count, windowStart }
 const _rateLimits = new Map();
 const RATE_LIMIT_WINDOW_MS = 3600_000; // 1 hour
 const RATE_LIMIT_MAX = 10; // 10 registrations per IP per hour
-
-/**
- * Generate a new API key.
- * Format: lb-agent-{32 random hex bytes} = 67 chars total
- */
-export function generateApiKey() {
-  return `lb-agent-${randomBytes(32).toString('hex')}`;
-}
-
-export function hashApiKey(apiKey) {
-  return createHash('sha256').update(String(apiKey)).digest('hex');
-}
 
 /**
  * Check IP-based rate limit for registration.
@@ -50,108 +47,87 @@ export function checkRateLimit(ip) {
   return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
 }
 
+function readInternalAgentAssertion(req) {
+  const agentId = req.get(INTERNAL_VERIFIED_AGENT_ID_HEADER);
+  const authPayloadHash = req.get(INTERNAL_AUTH_PAYLOAD_HASH_HEADER);
+  const audience = req.get(INTERNAL_AUTH_AUDIENCE_HEADER);
+  if (!agentId || !authPayloadHash || !audience) {
+    return { ok: false, code: 'missing_signed_agent_assertion' };
+  }
+  const idCheck = validateAgentId(agentId);
+  if (!idCheck.valid) return { ok: false, code: 'invalid_agent_id', message: idCheck.reason };
+  if (!/^[0-9a-f]{64}$/i.test(authPayloadHash)) {
+    return { ok: false, code: 'invalid_auth_payload_hash' };
+  }
+  return { ok: true, agentId, authPayloadHash, audience };
+}
+
 /**
- * Express middleware: extract and validate Bearer token.
- * Sets req.agentId and req.agentApiKey on success.
- * Returns 401 if missing/invalid.
+ * Express middleware: accept only loopback MCP requests carrying a verified
+ * signed-agent assertion. Sets req.agentId and req.agentProfile on success.
  */
-export function requireAuth(registry) {
+export function requireAuth(registry, {
+  internalMcpSecret = process.env.AOL_INTERNAL_MCP_SECRET,
+} = {}) {
   return async (req, res, next) => {
     const socketIp = getSocketAddress(req) || null;
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logAuthFailure(socketIp, false, req.path || req.originalUrl || null, req.method || null);
+    const path = req.path || req.originalUrl || null;
+    const hadAuthHeader = typeof req.headers.authorization === 'string' && req.headers.authorization.length > 0;
+
+    if (!isLoopbackRequest(req) || !hasValidInternalMcpSecret(req, internalMcpSecret)) {
+      logAuthFailure(socketIp, hadAuthHeader, path, req.method || null);
       return err401NoAuth(res);
     }
 
-    const apiKey = authHeader.slice(7).trim();
-    if (!apiKey.startsWith('lb-agent-')) {
-      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
-      return err401BadFormat(res);
+    const assertion = readInternalAgentAssertion(req);
+    if (!assertion.ok) {
+      logAuthFailure(socketIp, hadAuthHeader, path, req.method || null);
+      return err401BadFormat(res, {
+        hint: 'Private API routes require a signed AOL MCP tool call. Use the matching named MCP tool with agent_auth.',
+      });
     }
 
-    const agent = registry.getByApiKey(apiKey);
+    const agent = registry.getById(assertion.agentId);
     if (!agent) {
-      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
-      let hint;
-      if (req.method === 'GET' && req.path === '/api/v1/alliances') {
-        hint = 'Reuse the original sender token from routes 1 and 2 for this GET. Do not switch to the recipient token and do not register a new agent.';
-      }
-      return err401BadKey(res, { hint });
+      logAuthFailure(socketIp, hadAuthHeader, path, req.method || null);
+      return err401BadKey(res, {
+        hint: 'The signed agent_auth payload references an unknown agent_id. Register first, then sign with that agent public key.',
+      });
     }
 
     req.agentId = agent.id;
-    req.agentApiKey = apiKey;
     req.agentProfile = agent;
+    req.agentAuthPayloadHash = assertion.authPayloadHash;
+    req.agentAuthAudience = assertion.audience;
     req.dashboardBindAgent?.(agent.id, agent.name || null);
-    next();
+    return next();
   };
 }
 
 /**
- * Express middleware: optional auth. If Bearer token present, validate it.
- * If not present, continue without auth (req.agentId will be null).
+ * Express middleware: optional internal MCP assertion.
  */
-export function optionalAuth(registry) {
+export function optionalAuth(registry, options = {}) {
+  const strict = requireAuth(registry, options);
   return async (req, res, next) => {
-    const socketIp = getSocketAddress(req) || null;
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      req.agentId = null;
-      req.agentProfile = null;
-      return next();
+    if (
+      isLoopbackRequest(req)
+      && hasValidInternalMcpSecret(req, options.internalMcpSecret || process.env.AOL_INTERNAL_MCP_SECRET)
+      && req.get(INTERNAL_VERIFIED_AGENT_ID_HEADER)
+    ) {
+      return strict(req, res, next);
     }
-
-    const apiKey = authHeader.slice(7).trim();
-    const agent = registry.getByApiKey(apiKey);
-    if (agent) {
-      req.agentId = agent.id;
-      req.agentApiKey = apiKey;
-      req.agentProfile = agent;
-      req.dashboardBindAgent?.(agent.id, agent.name || null);
-    } else {
-      logAuthFailure(socketIp, true, req.path || req.originalUrl || null, req.method || null);
-      req.agentId = null;
-      req.agentProfile = null;
-    }
-    next();
+    req.agentId = null;
+    req.agentProfile = null;
+    return next();
   };
-}
-
-export function sha256MessageBytes(message) {
-  return createHash('sha256').update(String(message), 'utf8').digest();
-}
-
-function secp256k1CompressedHexToPublicKey(publicKeyHex) {
-  const uncompressed = ECDH.convertKey(
-    String(publicKeyHex || ''),
-    'secp256k1',
-    'hex',
-    'hex',
-    'uncompressed',
-  );
-  const bytes = Buffer.from(uncompressed, 'hex');
-  const x = bytes.subarray(1, 33).toString('base64url');
-  const y = bytes.subarray(33, 65).toString('base64url');
-  return createPublicKey({
-    key: { kty: 'EC', crv: 'secp256k1', x, y },
-    format: 'jwk',
-  });
 }
 
 /**
  * Verify a secp256k1 ECDSA signature over SHA256(message).
- * Public key must be compressed hex (33 bytes, 66 hex chars).
- * Signature must be DER-encoded hex.
+ * Public key must be compressed hex. Signature must be strict DER hex.
  */
 export async function verifySecp256k1Signature(publicKeyHex, message, signatureHex) {
-  try {
-    const pubkey = secp256k1CompressedHexToPublicKey(publicKeyHex);
-    const verifier = createVerify('SHA256');
-    verifier.update(String(message), 'utf8');
-    verifier.end();
-    return verifier.verify(pubkey, Buffer.from(String(signatureHex || ''), 'hex'));
-  } catch {
-    return false;
-  }
+  const result = await verifySecp256k1DerSignature(publicKeyHex, message, signatureHex);
+  return Boolean(result.ok);
 }

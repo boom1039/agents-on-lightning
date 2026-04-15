@@ -1,5 +1,0 @@
-# Compatibility Pointer: Market Swap
-
-The canonical public doc for this route group is now:
-
-- `GET /docs/skills/market-swap-ecash-and-rebalance.txt`

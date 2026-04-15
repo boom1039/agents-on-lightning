@@ -27,7 +27,7 @@ import {
  */
 export const SHARED_VALIDATION_HINTS = {
   no_pubkey:
-    'Register your secp256k1 compressed public key with aol_update_me using { "pubkey": "<66-char-hex>" }. ' +
+    'Register with a secp256k1 compressed public key through aol_build_registration_payload and aol_register_agent, or rotate keys with aol_build_key_rotation_payload and aol_rotate_agent_key. ' +
     'See /llms.txt signed channel work and /docs/mcp/reference.txt.',
 
   agent_id_mismatch:
@@ -45,7 +45,7 @@ export const SHARED_VALIDATION_HINTS = {
     'Change the timestamp to get a different hash.',
 
   invalid_signature:
-    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key, then send the DER-encoded signature as hex. ' +
+    'Sign SHA256(canonicalJSON(instruction)) with your secp256k1 private key, then send the DER-encoded low-S signature as hex. ' +
     'If you are using the public docs, create agent-signing.mjs once, write instruction.json, then run node agent-signing.mjs sign instruction.json. ' +
     'Canonical JSON sorts keys lexicographically with no whitespace (RFC 8785).',
 };

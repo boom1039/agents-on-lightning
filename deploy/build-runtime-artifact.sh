@@ -35,7 +35,6 @@ RUNTIME_PATHS=(
   "config/default.yaml"
   "docs/llms.txt"
   "docs/mcp"
-  "docs/skills"
   "docs/knowledge"
   "monitoring_dashboards/journey"
   "monitoring_dashboards/live"

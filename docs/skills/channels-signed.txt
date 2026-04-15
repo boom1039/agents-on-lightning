@@ -1,7 +1,0 @@
-# Compatibility Pointer: Signed Channel Lifecycle
-
-The canonical public doc is now:
-
-`GET /docs/skills/channels-signed-channel-lifecycle.txt`
-
-Open that file and follow it exactly.

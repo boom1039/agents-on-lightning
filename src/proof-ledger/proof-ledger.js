@@ -53,7 +53,7 @@ export const MONEY_EVENT_STATUSES = Object.freeze([
 ]);
 
 export const AUTHORIZATION_METHODS = Object.freeze([
-  'agent_api_key',
+  'agent_signed_request',
   'agent_signed_instruction',
   'system_settlement',
   'routing_revenue',
@@ -369,7 +369,7 @@ CREATE TABLE IF NOT EXISTS proof_ledger (
   event_source TEXT NOT NULL,
   authorization_method TEXT NOT NULL CHECK (
     authorization_method IN (
-      'agent_api_key',
+      'agent_signed_request',
       'agent_signed_instruction',
       'system_settlement',
       'routing_revenue',

@@ -122,7 +122,6 @@ export async function startServer() {
   app.use(auditMiddleware);
   app.use(createMcpOnlyApiGuard({ internalMcpSecret }));
   app.use(requireJsonWriteContent);
-
   const docsDir = join(__dirname, '..', 'docs');
   // Serve the app root and link to the canonical docs.
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"root","summary":"Serve the app root and link to the canonical docs.","order":100,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
@@ -141,14 +140,12 @@ export async function startServer() {
       },
     });
   });
-
   // Serve llms.txt at root (agents expect /llms.txt)
   // Serve the root agent map document.
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"llms.txt","summary":"Serve the root agent map document.","order":110,"tags":["app-level","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/llms.txt', (_req, res) => {
     res.type('text/markdown').sendFile(join(docsDir, 'llms.txt'));
   });
-
   // Serve a public human-readable Proof Ledger dashboard.
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proofs","summary":"Serve a public Proof Ledger page for liabilities, reserves, and verification links.","order":132,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/proofs', (_req, res) => {
@@ -200,14 +197,12 @@ export async function startServer() {
       created_at_ms: row.created_at_ms,
     };
   }
-
   // Publish Proof Ledger public key for independent proof verification.
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proof-ledger-public-key","summary":"Publish Proof Ledger verification public key.","order":130,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/.well-known/proof-ledger-public-key.json', (_req, res) => {
     if (!daemon.proofLedger) return proofLedgerUnavailable(res);
     res.json(daemon.proofLedger.getPublicKeyInfo());
   });
-
   // Publish current Proof Ledger head and proof-of-liabilities summary.
   // @agent-route {"auth":"public","domain":"app-level","subgroup":"Proofs","label":"proof-ledger","summary":"Publish Proof Ledger head and liabilities summary.","order":131,"tags":["app-level","read","public","proofs"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/.well-known/proof-ledger.json', (_req, res) => {
@@ -240,7 +235,13 @@ export async function startServer() {
   const internalBaseUrl = process.env.AOL_INTERNAL_BASE_URL || `http://127.0.0.1:${port}`;
   const publicBaseUrl = process.env.AOL_PUBLIC_BASE_URL || 'https://agentsonlightning.com';
 
-  app.use(mcpRoutes({ internalBaseUrl, publicBaseUrl, internalMcpSecret }));
+  app.use(mcpRoutes({
+    internalBaseUrl,
+    publicBaseUrl,
+    internalMcpSecret,
+    agentRegistry: daemon.agentRegistry,
+    signedAuthReplayStore: daemon.signedAuthReplayStore,
+  }));
 
   // Mount agent API gateway
   app.use(agentGatewayRoutes(daemon));
@@ -251,10 +252,9 @@ export async function startServer() {
   // Extract live route catalog from the mounted Express router
   const routes = registerApp(app);
   console.log(`[server] ${routes.length} agent-facing routes registered`);
-
   // Health check
   // Return server and daemon health.
-  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"health","summary":"Return server and daemon health.","order":120,"tags":["app-level","read","public"],"doc":["skills/discovery.txt","llms.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  // @agent-route {"auth":"public","domain":"app-level","subgroup":"App","label":"health","summary":"Return server and daemon health.","order":120,"tags":["app-level","read","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   app.get('/health', (_req, res) => {
     res.json(daemon.getHealthSummary?.() || {
       status: 'degraded',

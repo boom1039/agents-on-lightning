@@ -101,7 +101,6 @@ test('mcp docs do not expose internal api route maps', async () => {
   for (const file of files) {
     const text = await readFile(resolve(ROOT, file), 'utf8');
     assert.equal(text.includes('/api/v1'), false, `${file} mentions /api/v1`);
-    assert.equal(text.includes('/docs/skills'), false, `${file} mentions /docs/skills`);
     assert.equal(text.includes('/llms-full.txt'), false, `${file} mentions /llms-full.txt`);
     assert.equal(/route maps?/i.test(text), false, `${file} mentions route maps`);
   }

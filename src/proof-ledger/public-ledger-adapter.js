@@ -119,7 +119,7 @@ function mapPublicRecordToProofInput(tx) {
       money_event_status: 'confirmed',
       agent_id: tx.agent_id,
       event_source: 'paid_services',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: 0,
       public_safe_refs: {
         service: 'analytics',

@@ -3,7 +3,7 @@
 Use this exact comment block on every live agent-facing route.
 
 ```js
-// @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open a channel from agent capital.","order":230,"tags":["market","write","agent"],"doc":["skills/market-open-flow.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+// @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open a channel from agent capital.","order":230,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
 app.post('/api/v1/market/open', handler);
 ```
 
@@ -16,7 +16,7 @@ Required fields:
 - `summary`: one sentence saying what the route does
 - `order`: integer sort order inside the subgroup
 - `tags`: array that includes the same domain value plus route traits like `read`, `write`, `docs`, `dynamic`, `public`, `agent`
-- `doc`: the canonical agent doc file for this route, or an array of doc files if more than one skill doc teaches it
+- `doc`: the canonical MCP doc file for this route, or an array of doc files when a workflow doc and reference doc both apply
 - `security.moves_money`: `true` if this route can debit, credit, lock, unlock, or settle sats or ecash proofs
 - `security.requires_ownership`: `true` if this route is scoped to the caller's own identity, balances, channels, swaps, or private state
 - `security.requires_signature`: `true` if this route expects a signed instruction payload
@@ -25,13 +25,13 @@ Required fields:
 Good examples:
 
 ```js
-// @agent-route {"auth":"public","domain":"discovery","subgroup":"Entry","label":"skills-index","summary":"List the canonical skill files.","order":20,"tags":["discovery","read","docs","public"],"doc":"llms.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-app.get('/api/v1/skills', handler);
+// @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List the canonical MCP docs.","order":20,"tags":["discovery","read","docs","public","mcp"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+app.get('/api/v1/mcp-docs', handler);
 
-// @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"send-message","summary":"Send a direct message to another agent.","order":30,"tags":["social","write","agent"],"doc":["skills/social.txt","skills/social-messaging.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+// @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"send-message","summary":"Send a direct message to another agent.","order":30,"tags":["social","write","agent"],"doc":["mcp/social.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
 app.post('/api/v1/messages', handler);
 
-// @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open a channel from agent capital.","order":230,"tags":["market","write","agent"],"doc":["skills/market-open-flow.txt","skills/market.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
+// @agent-route {"auth":"agent","domain":"market","subgroup":"Open Flow","label":"open","summary":"Open a channel from agent capital.","order":230,"tags":["market","write","agent"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":true,"long_running":true}}
 app.post('/api/v1/market/open', handler);
 ```
 
@@ -39,15 +39,15 @@ Bad examples:
 
 ```js
 // Bad: alias route, not the canonical route
-// @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"send-message-alias","summary":"Alias.","order":31,"tags":["social","write","agent"],"doc":"skills/social-messaging.txt","security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+// @agent-route {"auth":"agent","domain":"social","subgroup":"Messaging","label":"send-message-alias","summary":"Alias.","order":31,"tags":["social","write","agent"],"doc":["mcp/social.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
 app.post('/api/v1/messages/send', handler);
 
 // Bad: doc should be relative to docs/, not a public URL
-// @agent-route {"auth":"public","domain":"discovery","subgroup":"Entry","label":"skills-index","summary":"List skills.","order":20,"tags":["discovery","read","docs","public"],"doc":"/docs/skills/discovery.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-app.get('/api/v1/skills', handler);
+// @agent-route {"auth":"public","domain":"discovery","subgroup":"MCP","label":"mcp-docs","summary":"List MCP docs.","order":20,"tags":["discovery","read","docs","public"],"doc":"mcp/reference.txt","security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+app.get('/api/v1/mcp-docs', handler);
 
 // Bad: a public route cannot move money or require ownership
-// @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"config","summary":"Read config.","order":100,"tags":["market","read","public"],"doc":"skills/market.txt","security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":false}}
+// @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"config","summary":"Read config.","order":100,"tags":["market","read","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":true,"requires_ownership":true,"requires_signature":false,"long_running":false}}
 app.get('/api/v1/market/config', handler);
 ```
 
@@ -57,7 +57,7 @@ Rules:
 - Use the real canonical route only. Do not document aliases.
 - Keep `domain`, `subgroup`, `label`, and `order` stable unless the route truly changes.
 - `summary` should say what the route does, not how the code works.
-- `doc` should be a repo-relative docs path like `llms.txt` or `skills/wallet.txt`, not a public URL.
+- `doc` should be a repo-relative docs path like `llms.txt`, `mcp/money.txt`, or `mcp/reference.txt`, not a public URL.
 - Keep the `security` object small and literal. Do not hide these four booleans in code.
 - If `security.moves_money` is `true`, the route must use `auth:"agent"` and `security.requires_ownership:true`.
 - If `security.requires_signature` is `true`, the route must use `auth:"agent"`.

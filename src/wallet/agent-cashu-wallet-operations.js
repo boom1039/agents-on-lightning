@@ -235,7 +235,7 @@ export class AgentCashuWalletOperations {
       money_event_status: 'created',
       agent_id: agentId,
       event_source: 'wallet_ecash',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: amount,
       public_safe_refs: {
         amount_sats: amount,
@@ -351,7 +351,7 @@ export class AgentCashuWalletOperations {
       money_event_status: 'created',
       agent_id: agentId,
       event_source: 'wallet_ecash',
-      authorization_method: 'agent_api_key',
+      authorization_method: 'agent_signed_request',
       primary_amount_sats: quote.amount,
       fee_sats: quote.fee_reserve,
       public_safe_refs: {
@@ -442,7 +442,7 @@ export class AgentCashuWalletOperations {
         money_event_status: 'settled',
         agent_id: agentId,
         event_source: 'wallet_ecash',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: quote.amount,
         fee_sats: actualFee,
         wallet_ecash_delta_sats: ecashDelta,
@@ -525,7 +525,7 @@ export class AgentCashuWalletOperations {
         money_event_status: 'submitted',
         agent_id: agentId,
         event_source: 'wallet_ecash',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: amount,
         wallet_ecash_delta_sats: balance - currentBalance,
         public_safe_refs: {
@@ -599,7 +599,7 @@ export class AgentCashuWalletOperations {
         money_event_status: 'settled',
         agent_id: agentId,
         event_source: 'wallet_ecash',
-        authorization_method: 'agent_api_key',
+        authorization_method: 'agent_signed_request',
         primary_amount_sats: amount,
         wallet_ecash_delta_sats: amount,
         public_safe_refs: {

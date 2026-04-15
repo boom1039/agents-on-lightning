@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { createSign, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,39 @@ import {
 } from '../mcp/catalog.js';
 import { getJourneyMonitor, startJourneyMonitor, stopJourneyMonitor } from '../monitor/journey-monitor.js';
 import { mcpRoutes } from './mcp-routes.js';
+import {
+  buildToolAuthPayload,
+  canonicalAuthJson,
+  normalizeSecp256k1DerSignatureToLowS,
+} from '../identity/signed-auth.js';
+
+const LEGACY_SECRET_FIELD = ['api', 'key'].join('_');
+
+function base64UrlToBuffer(value) {
+  return Buffer.from(value, 'base64url');
+}
+
+function makeSecp256k1Identity() {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const x = base64UrlToBuffer(jwk.x);
+  const y = base64UrlToBuffer(jwk.y);
+  return {
+    agentId: 'a1b2c3d4',
+    privateKey,
+    pubkey: `${(y[y.length - 1] & 1) ? '03' : '02'}${x.toString('hex')}`,
+  };
+}
+
+function signLowS(privateKey, payload) {
+  const signer = createSign('SHA256');
+  signer.update(payload, 'utf8');
+  signer.end();
+  const signature = signer.sign(privateKey).toString('hex');
+  const normalized = normalizeSecp256k1DerSignatureToLowS(signature);
+  if (!normalized.ok) throw new Error(normalized.message || 'signature normalization failed');
+  return normalized.signature;
+}
 
 async function startApp() {
   configureRateLimiterPolicy({
@@ -40,6 +74,15 @@ async function startApp() {
   const app = express();
   app.use(express.json());
   const internalMcpSecret = 'test-internal-mcp-secret';
+  const identity = makeSecp256k1Identity();
+  const agentRegistry = {
+    getById: (agentId) => agentId === identity.agentId
+      ? { id: identity.agentId, name: 'test-agent', pubkey: identity.pubkey }
+      : null,
+  };
+  const signedAuthReplayStore = {
+    consume: async () => ({ ok: true }),
+  };
   const apiRequests = [];
   app.use(createMcpOnlyApiGuard({
     internalMcpSecret,
@@ -57,7 +100,7 @@ async function startApp() {
     ok: true,
     hint: 'Try GET /api/v1/platform/status next.',
   }));
-  app.get('/api/v1/skills', (_req, res) => res.json({
+  app.get('/api/v1/mcp-docs', (_req, res) => res.json({
     docs: MCP_DOCS.map((doc) => ({
       name: doc.name,
       title: doc.title,
@@ -65,7 +108,7 @@ async function startApp() {
       url: `/docs/mcp/${doc.file}`,
       file: `/docs/mcp/${doc.file}`,
     })),
-    skills: [{ file: '/docs/skills/identity.txt' }],
+    skills: [{ file: '/internal/hidden' }],
   }));
   app.get('/api/v1/platform/status', (_req, res) => res.json({ block_height: 1, synced_to_chain: true, synced_to_graph: true, node_pubkey: 'abc', node_alias: 'alias', active_channels: 0 }));
   app.get('/api/v1/proofs/me/balance', (_req, res) => res.json({
@@ -100,13 +143,40 @@ async function startApp() {
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  app.use(mcpRoutes({ internalBaseUrl: baseUrl, publicBaseUrl: baseUrl, internalMcpSecret }));
-  return { server, baseUrl, apiRequests };
+  app.use(mcpRoutes({
+    internalBaseUrl: baseUrl,
+    publicBaseUrl: baseUrl,
+    internalMcpSecret,
+    agentRegistry,
+    signedAuthReplayStore,
+  }));
+  return { server, baseUrl, apiRequests, identity };
 }
 
 test('hosted MCP works in stateless mode without mcp-session-id headers', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'aol-mcp-routes-'));
-  const { server, baseUrl, apiRequests } = await startApp();
+  const { server, baseUrl, apiRequests, identity } = await startApp();
+  let nonceCounter = 0;
+  const withAgentAuth = (toolName, args = {}) => {
+    const payload = buildToolAuthPayload({
+      audience: `${baseUrl}/mcp`,
+      agentId: identity.agentId,
+      toolName,
+      args,
+      timestamp: Math.floor(Date.now() / 1000),
+      nonce: `test-nonce-${++nonceCounter}`,
+    });
+    const signingPayload = canonicalAuthJson(payload);
+    return {
+      ...args,
+      agent_auth: {
+        agent_id: identity.agentId,
+        timestamp: payload.timestamp,
+        nonce: payload.nonce,
+        signature: signLowS(identity.privateKey, signingPayload),
+      },
+    };
+  };
   const seenSessionHeaders = [];
   const fetchWithHeaderCapture = async (input, init) => {
     const response = await fetch(input, init);
@@ -131,6 +201,8 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     const tools = await client.listTools();
     const toolNames = (tools.tools || []).map((tool) => tool.name);
     assert.deepEqual([...toolNames].sort(), [...MCP_TOOL_NAMES].sort());
+    assert.equal(JSON.stringify(tools).includes(LEGACY_SECRET_FIELD), false);
+    assert.equal(JSON.stringify(tools).includes('agent_auth'), true);
     const toolsByName = new Map((tools.tools || []).map((tool) => [tool.name, tool]));
     for (const spec of MCP_TOOL_SPECS) {
       assert.equal(toolsByName.get(spec.name)?.description, spec.description);
@@ -157,7 +229,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(manifest._meta?.routing_fee_opportunity, true);
     assert.equal(manifest._meta?.['com.agentsonlightning/ethos']?.audience, 'outside agents');
     assert.equal(JSON.stringify(manifest).includes('/api/v1'), false);
-    assert.equal(JSON.stringify(manifest).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(manifest).includes('/docs/agent-route-schema.md'), false);
     assert.equal(JSON.stringify(manifest).includes('/llms-full.txt'), false);
     assert.deepEqual(
       (manifest.resource_summaries || []).map((resource) => resource.name),
@@ -182,7 +254,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(serverCard._meta?.zero_commissions, true);
     assert.equal(serverCard._meta?.signed_channel_actions, true);
     assert.equal(JSON.stringify(serverCard).includes('/api/v1'), false);
-    assert.equal(JSON.stringify(serverCard).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(serverCard).includes('/docs/agent-route-schema.md'), false);
     const agentCardResponse = await fetch(new URL('/.well-known/agent-card.json', baseUrl));
     assert.equal(agentCardResponse.status, 200);
     assert.equal(agentCardResponse.headers.get('access-control-allow-origin'), '*');
@@ -201,7 +273,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(agentCard.capabilities.signedChannelActions, true);
     assert.equal(agentCard._meta?.['com.agentsonlightning/ethos']?.platform_fees, 'none');
     assert.equal(JSON.stringify(agentCard).includes('/api/v1'), false);
-    assert.equal(JSON.stringify(agentCard).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(agentCard).includes('/docs/agent-route-schema.md'), false);
 
     const result = await client.callTool({ name: 'aol_get_root', arguments: {} });
     assert.equal(Boolean(result.isError), false);
@@ -211,18 +283,18 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(apiResult.structuredContent.path, 'mcp:aol_get_api_root');
     const docsResult = await client.callTool({ name: 'aol_list_mcp_docs', arguments: {} });
     assert.equal(Boolean(docsResult.isError), false);
-    assert.equal(JSON.stringify(docsResult).includes('/docs/skills'), false);
+    assert.equal(JSON.stringify(docsResult).includes('/docs/agent-route-schema.md'), false);
     assert.equal(JSON.stringify(docsResult).includes('"skills"'), false);
     assert.deepEqual(
       docsResult.structuredContent.body.docs.map((doc) => doc.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
     apiRequests.length = 0;
-    await client.callTool({ name: 'aol_get_my_balance_proof', arguments: { api_key: 'test-api-key' } });
-    await client.callTool({ name: 'aol_list_my_proofs', arguments: { api_key: 'test-api-key', limit: 5 } });
-    await client.callTool({ name: 'aol_get_proof', arguments: { api_key: 'test-api-key', proof_id: 'proof-1' } });
-    await client.callTool({ name: 'aol_verify_proof', arguments: { api_key: 'test-api-key', id: 'proof-1' } });
-    await client.callTool({ name: 'aol_get_proof_bundle', arguments: { api_key: 'test-api-key', proof_id: 'proof-1' } });
+    await client.callTool({ name: 'aol_get_my_balance_proof', arguments: withAgentAuth('aol_get_my_balance_proof') });
+    await client.callTool({ name: 'aol_list_my_proofs', arguments: withAgentAuth('aol_list_my_proofs', { limit: 5 }) });
+    await client.callTool({ name: 'aol_get_proof', arguments: withAgentAuth('aol_get_proof', { proof_id: 'proof-1' }) });
+    await client.callTool({ name: 'aol_verify_proof', arguments: withAgentAuth('aol_verify_proof', { id: 'proof-1' }) });
+    await client.callTool({ name: 'aol_get_proof_bundle', arguments: withAgentAuth('aol_get_proof_bundle', { proof_id: 'proof-1' }) });
     await client.callTool({ name: 'aol_get_proof_of_liabilities', arguments: {} });
     await client.callTool({ name: 'aol_get_proof_of_reserves', arguments: {} });
     assert.deepEqual(apiRequests, [
@@ -235,13 +307,13 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       { method: 'GET', path: '/api/v1/proofs/reserves' },
     ]);
     apiRequests.length = 0;
-    await client.callTool({ name: 'aol_get_channels_mine', arguments: { api_key: 'test-api-key' } });
+    await client.callTool({ name: 'aol_get_channels_mine', arguments: withAgentAuth('aol_get_channels_mine') });
     await client.callTool({ name: 'aol_get_leaderboard_agent', arguments: { id: 'agent1234' } });
     await client.callTool({ name: 'aol_get_leaderboard_challenges', arguments: {} });
     await client.callTool({ name: 'aol_get_leaderboard_hall_of_fame', arguments: {} });
     await client.callTool({ name: 'aol_get_leaderboard_evangelists', arguments: {} });
     await client.callTool({ name: 'aol_get_tournament_bracket', arguments: { id: 'daily' } });
-    await client.callTool({ name: 'aol_enter_tournament', arguments: { api_key: 'test-api-key', id: 'daily' } });
+    await client.callTool({ name: 'aol_enter_tournament', arguments: withAgentAuth('aol_enter_tournament', { id: 'daily' }) });
     assert.deepEqual(apiRequests, [
       { method: 'GET', path: '/api/v1/channels/mine' },
       { method: 'GET', path: '/api/v1/leaderboard/agent/agent1234' },
@@ -268,7 +340,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     assert.equal(rootEvent.tool_group, 'discovery');
     assert.equal(rootEvent.workflow_stage, 'discovery');
     assert.equal(rootEvent.risk_level, 'read_only');
-    assert.equal(JSON.stringify(rootEvent).includes('api_key'), false);
+    assert.equal(JSON.stringify(rootEvent).includes(LEGACY_SECRET_FIELD), false);
 
     const closeResponse = await fetch(new URL('/mcp', baseUrl), { method: 'DELETE' });
     assert.equal(closeResponse.status, 204);

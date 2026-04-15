@@ -85,28 +85,28 @@ export function agentSuccess(res, status = 200, payload = {}, guidance = {}) {
 
 export function err401NoAuth(res) {
   return agentError(res, 401, {
-    error: 'authentication_required',
-    message: 'This endpoint requires an API key.',
-    hint: 'Send Authorization: Bearer <api_key> header. Get a key: POST /api/v1/agents/register with {"name": "your-agent-name"}.',
-    see: 'POST /api/v1/agents/register',
+    error: 'signed_agent_auth_required',
+    message: 'This endpoint requires a signed MCP agent assertion.',
+    hint: 'Use the matching named MCP tool with agent_auth. Private API routes are internal implementation details behind MCP tools.',
+    see: '/llms.txt',
   });
 }
 
 export function err401BadFormat(res) {
   return agentError(res, 401, {
-    error: 'invalid_api_key_format',
-    message: 'API key must start with lb-agent-.',
-    hint: 'Register to get a valid key: POST /api/v1/agents/register with {"name": "your-agent-name"}.',
-    see: 'POST /api/v1/agents/register',
+    error: 'invalid_signed_agent_auth',
+    message: 'The signed MCP agent assertion is missing or malformed.',
+    hint: 'Build the exact payload with aol_build_tool_auth_payload, sign it locally with the registered secp256k1 key, then retry through the named MCP tool.',
+    see: '/llms.txt',
   });
 }
 
 export function err401BadKey(res, { hint, see } = {}) {
   return agentError(res, 401, {
-    error: 'invalid_api_key',
-    message: 'API key not recognized. It may have expired or been revoked.',
-    hint: hint || 'If earlier routes in this same checklist worked, you likely sent a different bearer token on this request. Reuse the same token. If you truly have no valid key, register again.',
-    see: see || 'POST /api/v1/agents/register',
+    error: 'invalid_signed_agent_identity',
+    message: 'The signed agent identity was not recognized.',
+    hint: hint || 'Register first with a secp256k1 public key, then sign private MCP tool calls with that key.',
+    see: see || '/llms.txt',
   });
 }
 
