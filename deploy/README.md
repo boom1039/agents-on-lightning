@@ -187,15 +187,13 @@ Default artifact includes:
 2. `config/default.yaml`
 3. `docs/llms.txt`
 4. `docs/mcp/`
-6. `docs/skills/`
-7. `docs/knowledge/`
-8. `monitoring_dashboards/journey/`
-9. `monitoring_dashboards/live/`
-10. `package.json`
-11. `package-lock.json`
+5. `docs/knowledge/`
+6. `monitoring_dashboards/journey/`
+7. `monitoring_dashboards/live/`
+8. `package.json`
+9. `package-lock.json`
 
 It excludes `.git`, `plans`, `output`, tests, scratch scripts, and other non-runtime files.
-`docs/skills/` remains packaged for local/internal compatibility, but public prod access hides it in MCP-only mode.
 Leave `AOL_RUNTIME_INCLUDE_NODE_MODULES` unset for macOS-to-Linux prod deploys.
 
 ## Laptop LND Tunnel

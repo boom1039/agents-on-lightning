@@ -445,13 +445,16 @@ export function agentWalletRoutes(daemon) {
     } catch (err) {
       console.error(`[wallet/restore] ${req.agentId}: ${err.message}`);
       const balance = await daemon.agentCashuWallet.getBalance(req.agentId).catch(() => 0);
+      const seedManagerMissing = /seed manager is required/i.test(err.message || '');
       return res.json({
         agent_id: req.agentId,
         recovered_proofs: 0,
         balance_sats: balance,
-        restore_supported: true,
+        restore_supported: !seedManagerMissing,
         restore_error: err.message,
-        learn: 'Wallet restore is a safe recovery step. If no proofs could be recovered right now, your current balance is still shown above.',
+        learn: seedManagerMissing
+          ? 'Wallet restore requires deterministic per-agent seed configuration. No random-wallet fallback is used.'
+          : 'Wallet restore is a safe recovery step. If no proofs could be recovered right now, your current balance is still shown above.',
       });
     }
   });

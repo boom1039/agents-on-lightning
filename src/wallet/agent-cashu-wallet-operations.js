@@ -3,13 +3,12 @@
  *
  * Per-agent ecash wallet backed by real Cashu proofs persisted to disk.
  * Wraps @cashu/cashu-ts with mutex-protected read-modify-write cycles,
- * signed Proof Ledger accounting when enabled, legacy public ledger logging
- * only outside proof mode, and audit trail.
+ * signed Proof Ledger accounting, and audit trail.
  *
- * Deterministic mode (NUT-09/NUT-13): when a seedManager is provided, each
- * agent gets its own CashuWallet with a derived BIP39 seed. Every operation
- * passes a counter so proofs are deterministic — if data is lost,
- * batchRestore() recovers all unspent proofs from the mint.
+ * Deterministic mode (NUT-09/NUT-13): each agent gets its own CashuWallet with
+ * a derived BIP39 seed. Every operation passes a counter so proofs are
+ * deterministic — if data is lost, batchRestore() recovers all unspent proofs
+ * from the mint.
  *
  * Mutex ownership: every mutating method acquires `cashu:{agentId}` for
  * the entire read-modify-write cycle. Prevents TOCTOU bugs when two
@@ -135,7 +134,6 @@ export class AgentCashuWalletOperations {
     this._seedManager = seedManager || null;
     this._mint = null;
     this._agentWallets = new Map(); // agentId → { wallet, loaded: Promise }
-    this._sharedWalletPromise = null; // fallback when no seedManager
     this._pendingMeltQuotes = new Map(); // `{agentId}:{quoteId}` → MeltQuoteResponse
   }
 
@@ -156,38 +154,25 @@ export class AgentCashuWalletOperations {
 
   /**
    * Get a per-agent CashuWallet with deterministic seed.
-   * Falls back to a shared random wallet if no seedManager (backwards compat).
    */
   async _getAgentWallet(agentId) {
-    // Deterministic mode: per-agent wallets
-    if (this._seedManager) {
-      const cached = this._agentWallets.get(agentId);
-      if (cached) return cached.loaded;
-
-      const mint = this._ensureMint();
-      const seed = this._seedManager.deriveAgentSeed(agentId);
-      const wallet = new CashuWallet(mint, { unit: 'sat', bip39seed: seed });
-      const loaded = wallet.loadMint().then(() => wallet);
-
-      this._agentWallets.set(agentId, { wallet, loaded });
-
-      // Clear on failure so next call retries
-      loaded.catch(() => { this._agentWallets.delete(agentId); });
-      return loaded;
+    if (!this._seedManager) {
+      throw new Error('Cashu seed manager is required for deterministic per-agent wallets');
     }
 
-    // Fallback: shared random wallet (no deterministic seeds)
-    if (this._sharedWalletPromise) return this._sharedWalletPromise;
-    const promise = (async () => {
-      const mint = this._ensureMint();
-      const wallet = new CashuWallet(mint, { unit: 'sat' });
-      await wallet.loadMint();
-      console.log(`[AgentCashuWallet] Connected to mint at ${this.mintUrl} (random mode)`);
-      return wallet;
-    })();
-    this._sharedWalletPromise = promise;
-    promise.catch(() => { this._sharedWalletPromise = null; });
-    return promise;
+    const cached = this._agentWallets.get(agentId);
+    if (cached) return cached.loaded;
+
+    const mint = this._ensureMint();
+    const seed = this._seedManager.deriveAgentSeed(agentId);
+    const wallet = new CashuWallet(mint, { unit: 'sat', bip39seed: seed });
+    const loaded = wallet.loadMint().then(() => wallet);
+
+    this._agentWallets.set(agentId, { wallet, loaded });
+
+    // Clear on failure so next call retries.
+    loaded.catch(() => { this._agentWallets.delete(agentId); });
+    return loaded;
   }
 
   get mintUrl() {
@@ -198,17 +183,15 @@ export class AgentCashuWalletOperations {
   }
 
   // ---------------------------------------------------------------------------
-  // Counter helpers (deterministic mode only)
+  // Counter helpers
   // ---------------------------------------------------------------------------
 
   async _loadCounter(agentId, keysetId) {
-    if (!this._seedManager) return undefined; // random mode — no counter
     const counters = await this._proofStore.loadCounter(agentId);
     return counters[keysetId] || 0;
   }
 
   async _bumpCounter(agentId, keysetId, proofCount) {
-    if (!this._seedManager) return; // random mode — noop
     const counters = await this._proofStore.loadCounter(agentId);
     counters[keysetId] = (counters[keysetId] || 0) + proofCount;
     await this._proofStore.saveCounter(agentId, counters);
@@ -636,11 +619,7 @@ export class AgentCashuWalletOperations {
 
   async restoreFromSeed(agentId) {
     if (!this._seedManager) {
-      return {
-        recovered: 0,
-        balance: await this.getBalance(agentId),
-        restoreSupported: false,
-      };
+      throw new Error('Cashu seed manager is required for deterministic proof restore');
     }
 
     const wallet = await this._getAgentWallet(agentId);

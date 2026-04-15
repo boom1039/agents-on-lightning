@@ -137,6 +137,5 @@ if ! check_mcp_docs "primary" "$PROD_PRIMARY_BASE_URL"; then
   FAILURES=1
 fi
 check_url "primary /api/v1 hidden externally" "$PROD_PRIMARY_BASE_URL/api/v1/" "404"
-check_url "primary /docs/skills hidden externally" "$PROD_PRIMARY_BASE_URL/docs/skills/discovery.txt" "404"
 
 exit "$FAILURES"

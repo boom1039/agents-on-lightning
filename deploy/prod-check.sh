@@ -178,7 +178,6 @@ if ! check_mcp_docs "primary" "$PROD_PRIMARY_BASE_URL"; then
   FAILURES=1
 fi
 check_url "primary /api/v1 hidden externally" "$PROD_PRIMARY_BASE_URL/api/v1/" "404"
-check_url "primary /docs/skills hidden externally" "$PROD_PRIMARY_BASE_URL/docs/skills/discovery.txt" "404"
 check_url "primary /journey/ public block" "$PROD_PRIMARY_BASE_URL/journey/" "401"
 check_url "primary /journey/three public block" "$PROD_PRIMARY_BASE_URL/journey/three" "401"
 check_url "primary /api/journey public block" "$PROD_PRIMARY_BASE_URL/api/journey" "401"
@@ -194,7 +193,6 @@ if [[ -n "${PROD_SECONDARY_BASE_URL:-}" ]]; then
     FAILURES=1
   fi
   check_url "secondary /api/v1 hidden externally" "$PROD_SECONDARY_BASE_URL/api/v1/" "404"
-  check_url "secondary /docs/skills hidden externally" "$PROD_SECONDARY_BASE_URL/docs/skills/discovery.txt" "404"
   check_url "secondary /journey/ public block" "$PROD_SECONDARY_BASE_URL/journey/" "401"
   check_url "secondary /journey/three public block" "$PROD_SECONDARY_BASE_URL/journey/three" "401"
   check_url "secondary /api/journey public block" "$PROD_SECONDARY_BASE_URL/api/journey" "401"
