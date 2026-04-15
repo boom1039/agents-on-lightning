@@ -154,7 +154,7 @@ CURRENT="$(readlink -f "$APP_DIR/current")"
 test -d "$CURRENT"
 test ! -e "$CURRENT/data/journey-analytics.duckdb"
 test ! -e "$CURRENT/data/journey-analytics.duckdb.wal"
-test -f "$JOURNEY_DB"
+sudo test -f "$JOURNEY_DB"
 echo "current=$CURRENT"
 echo "journey_db=$JOURNEY_DB"
 EOF

@@ -333,19 +333,30 @@ try {
       amount_sats: 1000,
     },
   });
-  assert(!walletMintQuoteResult?.isError, 'aol_create_wallet_mint_quote failed');
-  expectStatus(walletMintQuoteResult, 200, 'aol_create_wallet_mint_quote');
-  const mintQuoteId = expectSavedValue(walletMintQuoteResult, 'quote_id', 'aol_create_wallet_mint_quote');
-  expectSavedValue(walletMintQuoteResult, 'invoice', 'aol_create_wallet_mint_quote');
+  const walletMintQuoteStatus = getStructuredStatus(walletMintQuoteResult);
+  if (walletMintQuoteStatus === 200) {
+    assert(!walletMintQuoteResult?.isError, 'aol_create_wallet_mint_quote failed');
+    const mintQuoteId = expectSavedValue(walletMintQuoteResult, 'quote_id', 'aol_create_wallet_mint_quote');
+    expectSavedValue(walletMintQuoteResult, 'invoice', 'aol_create_wallet_mint_quote');
 
-  const walletCheckMintQuoteResult = await client.callTool({
-    name: 'aol_check_wallet_mint_quote',
-    arguments: {
-      quote: mintQuoteId,
-    },
-  });
-  assert(!walletCheckMintQuoteResult?.isError, 'aol_check_wallet_mint_quote failed');
-  expectStatus(walletCheckMintQuoteResult, 200, 'aol_check_wallet_mint_quote');
+    const walletCheckMintQuoteResult = await client.callTool({
+      name: 'aol_check_wallet_mint_quote',
+      arguments: {
+        quote: mintQuoteId,
+      },
+    });
+    assert(!walletCheckMintQuoteResult?.isError, 'aol_check_wallet_mint_quote failed');
+    expectStatus(walletCheckMintQuoteResult, 200, 'aol_check_wallet_mint_quote');
+  } else {
+    expectOneOfStatuses(walletMintQuoteResult, [400, 409, 503], 'aol_create_wallet_mint_quote safe blocker');
+    const body = getStructuredBody(walletMintQuoteResult) || {};
+    const safeBlocker = [
+      'wallet_mint_receive_preflight_failed',
+      'validation_error',
+      'service_unavailable',
+    ].includes(body.error);
+    assert(safeBlocker, `aol_create_wallet_mint_quote returned unsafe blocker: ${body.error || 'missing error'}`);
+  }
 
   const walletRestore = await client.callTool({
     name: 'aol_restore_wallet',

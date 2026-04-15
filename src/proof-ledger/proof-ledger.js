@@ -328,6 +328,47 @@ const GENESIS_NOTE =
   'They are archived and are not part of the public production proof chain. ' +
   'All production money proofs after this point derive from proof_ledger.';
 
+const PROOF_LEDGER_COLUMNS = Object.freeze([
+  'global_sequence',
+  'proof_id',
+  'proof_group_id',
+  'idempotency_key',
+  'proof_record_type',
+  'money_event_type',
+  'money_event_status',
+  'agent_id',
+  'agent_proof_sequence',
+  'event_source',
+  'authorization_method',
+  'primary_amount_sats',
+  'gross_amount_sats',
+  'fee_sats',
+  'net_amount_sats',
+  'asset',
+  ...DELTA_FIELDS,
+  'balance_snapshot_before_json',
+  'balance_snapshot_after_json',
+  'public_safe_refs_json',
+  'visibility_scope',
+  'issuer_domains_json',
+  'signing_key_id',
+  'canonicalization_version',
+  'previous_global_proof_hash',
+  'previous_agent_proof_hash',
+  'proof_hash',
+  'canonical_proof_json',
+  'platform_signature',
+  'created_at_ms',
+]);
+
+const PROOF_LEDGER_INDEX_NAMES = Object.freeze([
+  'idx_proof_ledger_agent_sequence',
+  'idx_proof_ledger_created_at',
+  'idx_proof_ledger_record_type_event',
+  'idx_proof_ledger_group',
+  'idx_proof_ledger_agent_created',
+]);
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS proof_ledger (
   global_sequence INTEGER PRIMARY KEY,
@@ -367,19 +408,7 @@ CREATE TABLE IF NOT EXISTS proof_ledger (
   agent_proof_sequence INTEGER,
 
   event_source TEXT NOT NULL,
-  authorization_method TEXT NOT NULL CHECK (
-    authorization_method IN (
-      'agent_signed_request',
-      'agent_signed_instruction',
-      'system_settlement',
-      'routing_revenue',
-      'refund',
-      'operator_adjustment',
-      'reserve_attestation',
-      'liability_checkpoint',
-      'key_rotation'
-    )
-  ),
+  authorization_method TEXT NOT NULL,
 
   primary_amount_sats INTEGER,
   gross_amount_sats INTEGER,
@@ -700,42 +729,38 @@ function normalizeReserveTotalsBySource(value) {
 }
 
 function buildInsertSql() {
-  const columns = [
-    'global_sequence',
-    'proof_id',
-    'proof_group_id',
-    'idempotency_key',
-    'proof_record_type',
-    'money_event_type',
-    'money_event_status',
-    'agent_id',
-    'agent_proof_sequence',
-    'event_source',
-    'authorization_method',
-    'primary_amount_sats',
-    'gross_amount_sats',
-    'fee_sats',
-    'net_amount_sats',
-    'asset',
-    ...DELTA_FIELDS,
-    'balance_snapshot_before_json',
-    'balance_snapshot_after_json',
-    'public_safe_refs_json',
-    'visibility_scope',
-    'issuer_domains_json',
-    'signing_key_id',
-    'canonicalization_version',
-    'previous_global_proof_hash',
-    'previous_agent_proof_hash',
-    'proof_hash',
-    'canonical_proof_json',
-    'platform_signature',
-    'created_at_ms',
-  ];
   return `
-    INSERT INTO proof_ledger (${columns.join(', ')})
-    VALUES (${columns.map((column) => `@${column}`).join(', ')})
+    INSERT INTO proof_ledger (${PROOF_LEDGER_COLUMNS.join(', ')})
+    VALUES (${PROOF_LEDGER_COLUMNS.map((column) => `@${column}`).join(', ')})
   `;
+}
+
+function getProofLedgerCreateSql(db) {
+  return db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proof_ledger'")
+    .get()?.sql || '';
+}
+
+function migrateAuthorizationMethodCheck(db) {
+  const currentSql = getProofLedgerCreateSql(db);
+  if (!/\bauthorization_method\s+TEXT\s+NOT\s+NULL\s+CHECK\b/i.test(currentSql)) {
+    return false;
+  }
+
+  const legacyTable = 'proof_ledger_auth_method_check_legacy';
+  const columns = PROOF_LEDGER_COLUMNS.join(', ');
+  db.transaction(() => {
+    db.exec(`DROP TABLE IF EXISTS ${legacyTable}`);
+    db.exec(`ALTER TABLE proof_ledger RENAME TO ${legacyTable}`);
+    for (const indexName of PROOF_LEDGER_INDEX_NAMES) {
+      db.exec(`DROP INDEX IF EXISTS ${indexName}`);
+    }
+    db.exec(SCHEMA_SQL);
+    db.exec(`INSERT INTO proof_ledger (${columns}) SELECT ${columns} FROM ${legacyTable}`);
+    db.exec(`DROP TABLE ${legacyTable}`);
+  })();
+
+  return true;
 }
 
 export class ProofLedger {
@@ -757,6 +782,9 @@ export class ProofLedger {
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(SCHEMA_SQL);
+    if (migrateAuthorizationMethodCheck(this.db)) {
+      this.db.exec(SCHEMA_SQL);
+    }
 
     this._appendLock = Promise.resolve();
     this._insert = this.db.prepare(buildInsertSql());

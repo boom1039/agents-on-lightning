@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 
 import {
   ProofLedger,
@@ -28,14 +29,108 @@ async function withLedger(fn) {
   }
 }
 
+async function withLegacyAuthorizationCheckLedger(fn) {
+  const dir = await mkdtemp(join(tmpdir(), 'aol-proof-ledger-legacy-auth-'));
+  const dbPath = join(dir, 'proof-ledger.sqlite');
+  const keyPath = join(dir, 'proof-ledger-key.pem');
+  const seedLedger = new ProofLedger({
+    dbPath,
+    keyPath,
+    allowGenerateKey: true,
+  });
+  const currentCreateSql = seedLedger.db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proof_ledger'")
+    .get().sql;
+  seedLedger.close();
+
+  const legacyCreateSql = currentCreateSql.replace(
+    'authorization_method TEXT NOT NULL,',
+    `authorization_method TEXT NOT NULL CHECK (
+    authorization_method IN (
+      'agent_api_key',
+      'agent_signed_instruction',
+      'system_settlement',
+      'routing_revenue',
+      'refund',
+      'operator_adjustment',
+      'reserve_attestation',
+      'liability_checkpoint',
+      'key_rotation'
+    )
+  ),`,
+  );
+  assert.notEqual(legacyCreateSql, currentCreateSql);
+
+  const db = new Database(dbPath);
+  db.exec('DROP TABLE proof_ledger');
+  db.exec(legacyCreateSql);
+  db.prepare(`
+    INSERT INTO proof_ledger (
+      global_sequence,
+      proof_id,
+      idempotency_key,
+      proof_record_type,
+      money_event_type,
+      money_event_status,
+      agent_id,
+      agent_proof_sequence,
+      event_source,
+      authorization_method,
+      balance_snapshot_before_json,
+      balance_snapshot_after_json,
+      public_safe_refs_json,
+      issuer_domains_json,
+      signing_key_id,
+      proof_hash,
+      canonical_proof_json,
+      platform_signature,
+      created_at_ms
+    ) VALUES (
+      1,
+      'legacy-proof-1',
+      'legacy-idempotency-1',
+      'money_event',
+      'hub_deposit_settled',
+      'settled',
+      'agent-legacy',
+      1,
+      'legacy_test',
+      'agent_api_key',
+      '{}',
+      '{}',
+      '{}',
+      '["agentsonlightning.com"]',
+      'legacy-key',
+      'legacy-proof-hash-1',
+      '{}',
+      'legacy-signature',
+      1713021600000
+    )
+  `).run();
+  db.close();
+
+  const ledger = new ProofLedger({
+    dbPath,
+    keyPath,
+    allowGenerateKey: true,
+  });
+  try {
+    await fn(ledger, dir);
+  } finally {
+    ledger.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 test('proof ledger initializes sqlite WAL schema, indexes, strict checks, and known event catalog', async () => {
   await withLedger(async (ledger) => {
     assert.equal(ledger.db.pragma('journal_mode', { simple: true }), 'wal');
 
     const table = ledger.db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'proof_ledger'")
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name = 'proof_ledger'")
       .get();
     assert.equal(table.name, 'proof_ledger');
+    assert.doesNotMatch(table.sql, /\bauthorization_method\s+TEXT\s+NOT\s+NULL\s+CHECK\b/i);
 
     const indexes = ledger.db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'proof_ledger'")
@@ -96,6 +191,53 @@ test('proof ledger initializes sqlite WAL schema, indexes, strict checks, and kn
       `).run(),
       /CHECK constraint failed/,
     );
+  });
+});
+
+test('proof ledger migrates legacy authorization_method CHECK constraints without rewriting signed rows', async () => {
+  await withLegacyAuthorizationCheckLedger(async (ledger) => {
+    const table = ledger.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proof_ledger'")
+      .get();
+    assert.doesNotMatch(table.sql, /\bauthorization_method\s+TEXT\s+NOT\s+NULL\s+CHECK\b/i);
+
+    const legacy = ledger.db
+      .prepare('SELECT * FROM proof_ledger WHERE proof_id = ?')
+      .get('legacy-proof-1');
+    assert.equal(legacy.authorization_method, 'agent_api_key');
+    assert.equal(legacy.proof_hash, 'legacy-proof-hash-1');
+    assert.equal(ledger.getLatestGlobalProof().proof_id, 'legacy-proof-1');
+
+    assert.rejects(
+      () => ledger.appendProof({
+        idempotency_key: 'new-write-must-not-use-api-key',
+        proof_record_type: 'money_event',
+        money_event_type: 'hub_deposit_settled',
+        money_event_status: 'settled',
+        agent_id: 'agent-legacy',
+        event_source: 'test',
+        authorization_method: 'agent_api_key',
+        primary_amount_sats: 1,
+        wallet_hub_delta_sats: 1,
+      }),
+      /authorization_method has unsupported value/,
+    );
+
+    const proof = await ledger.appendProof({
+      idempotency_key: 'new-signed-request-after-legacy-migration',
+      proof_record_type: 'money_event',
+      money_event_type: 'hub_deposit_settled',
+      money_event_status: 'settled',
+      agent_id: 'agent-legacy',
+      event_source: 'test',
+      authorization_method: 'agent_signed_request',
+      primary_amount_sats: 1,
+      wallet_hub_delta_sats: 1,
+    });
+    assert.equal(proof.global_sequence, 2);
+    assert.equal(proof.agent_proof_sequence, 2);
+    assert.equal(proof.previous_global_proof_hash, 'legacy-proof-hash-1');
+    assert.equal(proof.previous_agent_proof_hash, 'legacy-proof-hash-1');
   });
 });
 
