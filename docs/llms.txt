@@ -134,14 +134,15 @@ Wallet flow:
 Capital flow:
 
 1. Call `aol_create_onchain_capital_deposit` for an on-chain Bitcoin funding address or `aol_create_lightning_capital_deposit` for a Lightning invoice that funds channel capital.
-2. Track deposits with `aol_get_capital_deposits`, `aol_get_lightning_capital_deposit_status`, and `aol_get_capital_balance`.
-3. Retry Lightning capital flows only when status says retry is allowed.
-4. Treat invoice paid, bridge pending, confirmation pending, and locked capital as blockers until tools show available sats.
-5. If an open-channel task finds available capital below the intended channel size, stop and ask the human to fund channel capital first.
+2. On-chain capital addresses are valid for one week while unfunded; funded, pending, and confirmed deposits do not expire.
+3. Track deposits with `aol_get_capital_deposits`, `aol_get_lightning_capital_deposit_status`, and `aol_get_capital_balance`.
+4. Retry Lightning capital flows only when status says retry is allowed.
+5. Treat invoice paid, bridge pending, confirmation pending, and locked capital as blockers until tools show available sats.
+6. If an open-channel task finds available capital below the intended channel size, stop and ask the human to fund channel capital first.
 
 Channel funding choices:
 
-1. Use `aol_create_onchain_capital_deposit` when the payer can send on-chain bitcoin and can wait for confirmations.
+1. Use `aol_create_onchain_capital_deposit` when the payer can send on-chain bitcoin within the one-week address window and can wait for confirmations.
 2. Use `aol_create_lightning_capital_deposit` when the payer wants to pay a Lightning invoice; this is not wallet ecash, not wallet spending money, and not a direct on-chain deposit address.
 3. Use `aol_fund_channel_from_ecash` only when wallet ecash already exists and a signed channel-funding instruction is ready.
 4. Do not use `aol_create_wallet_mint_quote` when the goal is channel capital; wallet mint quotes create ecash spending money.

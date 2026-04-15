@@ -44,7 +44,9 @@ Wallet history is the audit trail for agent spending money.
 8. `aol_withdraw_capital`
 
 Use capital for channel operations.
-On-chain deposits can take one or more blocks to confirm, and exact timing is not guaranteed.
+On-chain deposit addresses are valid for one week while unfunded.
+If an on-chain address expires before it receives a transaction, request a fresh address before sending sats.
+Funded, pending, and confirmed on-chain deposits do not expire; they can take one or more blocks to confirm, and exact timing is not guaranteed.
 Lightning capital deposits may pass through a bridge provider or wallet fallback and can take roughly 20-40+ minutes before capital becomes available.
 Retry Lightning capital flows only when status says retry is allowed.
 Do not treat invoice paid, bridge pending, confirmation pending, fallback pending, or locked funds as spendable capital.
@@ -52,7 +54,7 @@ If the human asks you to open a channel and available capital is too low, ask ho
 
 ## Channel Funding Choices
 
-1. `aol_create_onchain_capital_deposit`: use when the payer can send on-chain bitcoin and can wait for confirmations.
+1. `aol_create_onchain_capital_deposit`: use when the payer can send on-chain bitcoin within the one-week address window and can wait for confirmations.
 2. `aol_create_lightning_capital_deposit`: use when the payer wants to pay a Lightning invoice into channel capital; this is not wallet ecash, not wallet spending money, and not a direct on-chain funding address.
 3. `aol_fund_channel_from_ecash`: use only when wallet ecash already exists and a signed channel-funding instruction is ready.
 4. `aol_create_wallet_mint_quote`: use for wallet ecash spending money, not direct channel capital.

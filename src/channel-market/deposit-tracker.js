@@ -18,11 +18,35 @@ import { createHash } from 'node:crypto';
 
 const STATE_PATH = 'data/channel-market/deposit-addresses.json';
 const DUST_THRESHOLD_SATS = 10_000;
+const ONCHAIN_DEPOSIT_VALID_MS = 7 * 24 * 60 * 60 * 1000;
 const LIGHTNING_BRIDGE_SOURCE = 'lightning_capital_bridge';
 const WALLET_BRIDGE_LABEL_PREFIX = 'lightning-capital-wallet:';
 
 function sha256Hex(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function toMs(value) {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function expiryForCreatedAt(createdAt) {
+  const createdAtMs = toMs(createdAt) || Date.now();
+  return new Date(createdAtMs + ONCHAIN_DEPOSIT_VALID_MS).toISOString();
+}
+
+function isPlainOnchain(entry) {
+  return (entry.source || 'onchain') === 'onchain';
+}
+
+function isUnfundedWatching(entry) {
+  return entry?.status === 'watching' && !entry.txid && isPlainOnchain(entry);
+}
+
+function isExpired(entry, now = Date.now()) {
+  const expiresAtMs = toMs(entry?.expires_at);
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= now;
 }
 
 export class DepositTracker {
@@ -71,6 +95,16 @@ export class DepositTracker {
         delete raw._lastPollBlockHeight;
       }
       this._state = raw;
+      let stateChanged = false;
+      for (const entry of Object.values(this._state)) {
+        if (isUnfundedWatching(entry) && !entry.expires_at) {
+          entry.expires_at = expiryForCreatedAt(entry.created_at);
+          stateChanged = true;
+        }
+      }
+      if (stateChanged) {
+        await this._persist();
+      }
       const addresses = Object.keys(this._state);
       const watching = addresses.filter(a => this._state[a].status === 'watching').length;
       const pending = addresses.filter(a => this._state[a].status === 'pending_deposit').length;
@@ -111,6 +145,12 @@ export class DepositTracker {
       throw new Error('generateAddress requires a valid agentId');
     }
 
+    const source = metadata.source || 'onchain';
+    if (source === 'onchain') {
+      const existing = await this._getReusableOnchainAddress(agentId);
+      if (existing) return existing;
+    }
+
     const client = this._nodeManager.getScopedDefaultNodeOrNull('wallet');
     if (!client) {
       throw new Error('No LND node available to generate deposit address');
@@ -119,15 +159,18 @@ export class DepositTracker {
     const result = await client.newAddress('TAPROOT_PUBKEY');
     const address = result.address;
 
+    const createdAt = new Date().toISOString();
+    const expiresAt = source === 'onchain' ? expiryForCreatedAt(createdAt) : null;
     this._state[address] = {
       agent_id: agentId,
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
       status: 'watching',
       amount_sats: null,
       txid: null,
       confirmations: 0,
-      source: metadata.source || 'onchain',
+      source,
       flow_id: metadata.flow_id || null,
+      ...(expiresAt ? { expires_at: expiresAt } : {}),
     };
 
     let proof = null;
@@ -150,6 +193,8 @@ export class DepositTracker {
         },
         allowed_public_ref_keys: ['address_hash', 'flow_hash'],
       });
+      this._state[address].proof_id = proof?.proof_id || null;
+      this._state[address].proof_hash = proof?.proof_hash || null;
     }
 
     await this._persist();
@@ -157,10 +202,70 @@ export class DepositTracker {
 
     return {
       address,
+      reused: false,
+      expires_at: expiresAt,
+      valid_for_seconds: expiresAt ? Math.floor(ONCHAIN_DEPOSIT_VALID_MS / 1000) : null,
       proof_id: proof?.proof_id || null,
       proof_hash: proof?.proof_hash || null,
       source_of_truth: proof ? 'proof_ledger' : null,
     };
+  }
+
+  async _getReusableOnchainAddress(agentId) {
+    const stateChanged = this._ensureOnchainExpirations();
+
+    let reusable = null;
+    for (const [address, entry] of Object.entries(this._state)) {
+      if (entry.agent_id !== agentId) continue;
+      if (!isUnfundedWatching(entry)) continue;
+      if (isExpired(entry)) continue;
+      if (!reusable || toMs(entry.created_at) < toMs(reusable.entry.created_at)) {
+        reusable = { address, entry };
+      }
+    }
+
+    if (stateChanged) await this._persist();
+    if (!reusable) return null;
+
+    return {
+      address: reusable.address,
+      reused: true,
+      expires_at: reusable.entry.expires_at || null,
+      valid_for_seconds: reusable.entry.expires_at
+        ? Math.max(0, Math.floor((toMs(reusable.entry.expires_at) - Date.now()) / 1000))
+        : null,
+      proof_id: reusable.entry.proof_id || null,
+      proof_hash: reusable.entry.proof_hash || null,
+      source_of_truth: reusable.entry.proof_id ? 'proof_ledger' : null,
+    };
+  }
+
+  _ensureOnchainExpirations() {
+    let changed = false;
+    for (const entry of Object.values(this._state)) {
+      if (isUnfundedWatching(entry) && !entry.expires_at) {
+        entry.expires_at = expiryForCreatedAt(entry.created_at);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  _expireUnfundedWatching(now) {
+    let changed = false;
+    for (const entry of Object.values(this._state)) {
+      if (!isUnfundedWatching(entry)) continue;
+      if (!entry.expires_at) {
+        entry.expires_at = expiryForCreatedAt(entry.created_at);
+        changed = true;
+      }
+      if (isExpired(entry, now)) {
+        entry.status = 'expired';
+        entry.expired_at = new Date(now).toISOString();
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   // ---------------------------------------------------------------------------
@@ -372,6 +477,8 @@ export class DepositTracker {
     // --- Purge confirmed entries older than 24h ---
     const PURGE_AGE_MS = 24 * 60 * 60 * 1000;
     const now = Date.now();
+    if (this._ensureOnchainExpirations()) stateChanged = true;
+    if (this._expireUnfundedWatching(now)) stateChanged = true;
     for (const [addr, entry] of Object.entries(this._state)) {
       if (entry.status === 'confirmed' && entry.confirmed_at) {
         if (now - new Date(entry.confirmed_at).getTime() > PURGE_AGE_MS) {
@@ -432,6 +539,8 @@ export class DepositTracker {
         confirmations: entry.confirmations,
         confirmations_required: this._confirmationsRequired,
         created_at: entry.created_at,
+        ...(entry.expires_at ? { expires_at: entry.expires_at } : {}),
+        ...(entry.expired_at ? { expired_at: entry.expired_at } : {}),
         source: entry.source || 'onchain',
         ...(entry.flow_id ? { flow_id: entry.flow_id } : {}),
         ...(entry.confirmed_at && { confirmed_at: entry.confirmed_at }),
@@ -444,7 +553,7 @@ export class DepositTracker {
    * Get counts of all tracked addresses by status.
    */
   getStats() {
-    const counts = { watching: 0, pending_deposit: 0, confirmed: 0, total: 0 };
+    const counts = { watching: 0, pending_deposit: 0, confirmed: 0, expired: 0, total: 0 };
     for (const entry of Object.values(this._state)) {
       counts[entry.status] = (counts[entry.status] || 0) + 1;
       counts.total++;

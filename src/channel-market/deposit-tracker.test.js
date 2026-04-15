@@ -131,3 +131,83 @@ test('deposit address creation writes a public-safe proof lifecycle event when p
   assert(refsJson.includes('address_hash'));
   assert(refsJson.includes('flow_hash'));
 });
+
+test('on-chain capital deposit reuses one active unfunded address per agent', async () => {
+  let addressIndex = 0;
+  const walletClient = {
+    async newAddress() {
+      addressIndex += 1;
+      return { address: `bc1p_agent_address_${addressIndex}` };
+    },
+  };
+  const tracker = new DepositTracker({
+    capitalLedger: {
+      async recordDeposit() {},
+      async confirmDeposit() {},
+    },
+    nodeManager: {
+      getScopedDefaultNodeOrNull(role) {
+        return role === 'wallet' ? walletClient : null;
+      },
+    },
+    dataLayer: mockDataLayer(),
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+  });
+
+  await tracker.load();
+  const first = await tracker.generateAddress('agent-reuse');
+  const second = await tracker.generateAddress('agent-reuse');
+
+  assert.equal(first.address, 'bc1p_agent_address_1');
+  assert.equal(first.reused, false);
+  assert.equal(second.address, first.address);
+  assert.equal(second.reused, true);
+  assert.equal(addressIndex, 1);
+  assert.match(first.expires_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(first.valid_for_seconds, 7 * 24 * 60 * 60);
+});
+
+test('expired unfunded on-chain address is not reused and is marked expired after polling', async () => {
+  let addressIndex = 0;
+  const walletClient = {
+    async newAddress() {
+      addressIndex += 1;
+      return { address: `bc1p_expiring_address_${addressIndex}` };
+    },
+    async getTransactions() {
+      return { transactions: [] };
+    },
+    async getBestBlock() {
+      return { block_height: 200 };
+    },
+  };
+  const tracker = new DepositTracker({
+    capitalLedger: {
+      async recordDeposit() {},
+      async confirmDeposit() {},
+    },
+    nodeManager: {
+      getScopedDefaultNodeOrNull(role) {
+        return role === 'wallet' ? walletClient : null;
+      },
+    },
+    dataLayer: mockDataLayer(),
+    auditLog: mockAuditLog(),
+    mutex: mockMutex(),
+  });
+
+  await tracker.load();
+  const first = await tracker.generateAddress('agent-expire');
+  tracker._state[first.address].expires_at = new Date(Date.now() - 1000).toISOString();
+
+  const second = await tracker.generateAddress('agent-expire');
+  assert.notEqual(second.address, first.address);
+  assert.equal(addressIndex, 2);
+
+  await tracker.pollForDeposits();
+  const deposits = tracker.getDepositStatus('agent-expire').deposits;
+  const expired = deposits.find((deposit) => deposit.address === first.address);
+  assert.equal(expired.status, 'expired');
+  assert.match(expired.expired_at, /^\d{4}-\d{2}-\d{2}T/);
+});
