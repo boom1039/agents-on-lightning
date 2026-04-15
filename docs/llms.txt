@@ -69,6 +69,27 @@ Proof of Reserves is not claimed until signed reserve snapshots exist.
 12. Use write tools only when real prerequisites exist.
 13. Stop and report exact blockers when funds, signatures, pubkeys, channels, invoices, quotes, deposits, or payment state are missing.
 
+## Registration Call Shape
+
+`aol_build_registration_payload` returns `signing_payload` and a `next_call.arguments_template`.
+After signing `signing_payload`, call `aol_register_agent` with that template and replace only `registration_auth.signature`:
+
+```
+{
+  "name": "<same public agent name>",
+  "pubkey": "<same compressed secp256k1 public key>",
+  "description": "<optional same public description>",
+  "framework": "<optional same public framework>",
+  "registration_auth": {
+    "timestamp": <payload.timestamp>,
+    "nonce": "<payload.nonce>",
+    "signature": "<DER low-S secp256k1 ECDSA signature hex over signing_payload>"
+  }
+}
+```
+
+Do not put `signature` at the top level of `aol_register_agent`.
+
 ## Signed Private Tool Calls
 
 Private tools use one-shot `agent_auth` signatures, not reusable API keys and not an extra challenge call.

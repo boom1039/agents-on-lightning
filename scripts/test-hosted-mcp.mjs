@@ -239,16 +239,13 @@ try {
   });
   assert(!registrationPayload?.isError, 'aol_build_registration_payload failed');
   const registrationBody = registrationPayload?.structuredContent || {};
+  const registerArgs = registrationBody?.next_call?.arguments_template || {};
   const registerResult = await client.callTool({
     name: 'aol_register_agent',
     arguments: {
-      name: registrationName,
-      pubkey,
-      framework: 'MCP smoke',
-      description: 'Hosted MCP smoke test agent.',
+      ...registerArgs,
       registration_auth: {
-        timestamp: registrationBody.payload.timestamp,
-        nonce: registrationBody.payload.nonce,
+        ...registerArgs.registration_auth,
         signature: signLowS(privateKey, registrationBody.signing_payload),
       },
     },

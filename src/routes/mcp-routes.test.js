@@ -289,6 +289,28 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
       docsResult.structuredContent.body.docs.map((doc) => doc.name),
       [...SIMPLIFIED_MCP_DOC_NAMES],
     );
+    const registrationPayload = await client.callTool({
+      name: 'aol_build_registration_payload',
+      arguments: {
+        name: 'shape-test-agent',
+        pubkey: identity.pubkey,
+        description: 'Shape test agent',
+        framework: 'node:test',
+      },
+    });
+    assert.equal(Boolean(registrationPayload.isError), false);
+    assert.equal(registrationPayload.structuredContent.next_call.tool_name, 'aol_register_agent');
+    assert.equal(registrationPayload.structuredContent.next_call.arguments_template.pubkey, identity.pubkey);
+    assert.equal(registrationPayload.structuredContent.next_call.arguments_template.signature, undefined);
+    assert.equal(
+      registrationPayload.structuredContent.next_call.arguments_template.registration_auth.signature,
+      '<DER low-S secp256k1 ECDSA signature hex over signing_payload>',
+    );
+    assert.equal(
+      registrationPayload.structuredContent.next_call.arguments_template.registration_auth.timestamp,
+      registrationPayload.structuredContent.payload.timestamp,
+    );
+    assert.match(registrationPayload.structuredContent.next_call.warning, /Do not send signature as a top-level/);
     apiRequests.length = 0;
     await client.callTool({ name: 'aol_get_my_balance_proof', arguments: withAgentAuth('aol_get_my_balance_proof') });
     await client.callTool({ name: 'aol_list_my_proofs', arguments: withAgentAuth('aol_list_my_proofs', { limit: 5 }) });

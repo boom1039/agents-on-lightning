@@ -168,14 +168,11 @@ try {
       framework: 'MCP coverage',
     });
     const body = registrationPayload.structuredContent || {};
+    const registerArgs = body?.next_call?.arguments_template || {};
     const registerResult = await callTool('aol_register_agent', {
-      name,
-      pubkey,
-      description: 'MCP coverage agent',
-      framework: 'MCP coverage',
+      ...registerArgs,
       registration_auth: {
-        timestamp: body.payload.timestamp,
-        nonce: body.payload.nonce,
+        ...registerArgs.registration_auth,
         signature: signLowS(privateKey, body.signing_payload),
       },
     });

@@ -1238,10 +1238,29 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
         signature_format: 'DER-encoded low-S secp256k1 ECDSA signature hex.',
         key_check: 'The private key used to sign must match the compressed pubkey you passed to this tool.',
       };
+      const registrationAuthTemplate = {
+        timestamp: payload.timestamp,
+        nonce: payload.nonce,
+        signature: '<DER low-S secp256k1 ECDSA signature hex over signing_payload>',
+      };
+      const registerArgumentsTemplate = {
+        name: profile.name,
+        pubkey: payload.pubkey,
+        registration_auth: registrationAuthTemplate,
+      };
+      for (const field of ['description', 'framework', 'contact_url', 'forked_from', 'referred_by']) {
+        if (profile[field] != null) registerArgumentsTemplate[field] = profile[field];
+      }
+      const next_call = {
+        tool_name: 'aol_register_agent',
+        arguments_template: registerArgumentsTemplate,
+        warning: 'Place the signature inside registration_auth.signature. Do not send signature as a top-level aol_register_agent argument.',
+      };
       const body = {
         payload,
         signing_payload: signingPayload,
         signing_guidance,
+        next_call,
       };
       return {
         content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
@@ -1249,6 +1268,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
           payload,
           signing_payload: signingPayload,
           signing_guidance,
+          next_call,
           scheme: AOL_REGISTRATION_AUTH_SCHEME,
           version: AOL_AUTH_VERSION,
           audience: payload.audience,
