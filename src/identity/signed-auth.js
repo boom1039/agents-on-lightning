@@ -2,7 +2,7 @@ import { createHash, createPublicKey, createVerify, ECDH } from 'node:crypto';
 import { validateAgentId, validateSecp256k1Pubkey } from './validators.js';
 import { acquire as acquireMutex } from './mutex.js';
 
-export const AOL_TOOL_AUTH_SCHEME = 'aol_mcp_tool_auth';
+export const AOL_TOOL_AUTH_SCHEME = 'agent_signed_mcp_tool_call';
 export const AOL_REGISTRATION_AUTH_SCHEME = 'aol_agent_registration';
 export const AOL_KEY_ROTATION_AUTH_SCHEME = 'aol_agent_key_rotation';
 export const AOL_AUTH_VERSION = 1;
@@ -78,7 +78,7 @@ export function stripAgentAuth(input = {}) {
   return out;
 }
 
-export function buildToolAuthPayload({
+export function buildSignedToolCallPayload({
   audience,
   agentId,
   toolName,
@@ -353,7 +353,7 @@ export async function verifyToolAgentAuth({
   const profile = registry?.getById?.(agentAuth.agent_id);
   if (!profile) return { ok: false, code: 'unknown_agent', message: 'No registered agent matches agent_auth.agent_id.' };
   if (!profile.pubkey) return { ok: false, code: 'missing_pubkey', message: 'Agent profile has no registered secp256k1 public key.' };
-  const payload = buildToolAuthPayload({
+  const payload = buildSignedToolCallPayload({
     audience,
     agentId: agentAuth.agent_id,
     toolName,
@@ -368,6 +368,7 @@ export async function verifyToolAgentAuth({
   if (replayStore) {
     const replay = await replayStore.consume(authPayloadHash, {
       agentId: agentAuth.agent_id,
+      nonce: agentAuth.nonce,
       expiresAt: (agentAuth.timestamp + DEFAULT_AUTH_FRESHNESS_SECONDS) * 1000,
     });
     if (!replay.ok) return replay;
@@ -392,7 +393,7 @@ export class SignedAuthReplayStore {
     this._mutex = mutex;
   }
 
-  async consume(authPayloadHash, { agentId, expiresAt }) {
+  async consume(authPayloadHash, { agentId, nonce, expiresAt }) {
     if (!this._dataLayer || typeof this._dataLayer.readRuntimeStateJSON !== 'function' || typeof this._dataLayer.writeJSON !== 'function') {
       return { ok: false, code: 'replay_store_unavailable', message: 'Signed-auth replay store is unavailable.' };
     }
@@ -415,8 +416,14 @@ export class SignedAuthReplayStore {
       if (entries[authPayloadHash]) {
         return { ok: false, code: 'replayed_auth_payload', message: 'This signed agent_auth payload was already used.' };
       }
+      for (const entry of Object.values(entries)) {
+        if (entry?.agent_id === agentId && nonce && entry?.nonce === nonce) {
+          return { ok: false, code: 'replayed_auth_nonce', message: 'This agent_auth nonce was already used.' };
+        }
+      }
       entries[authPayloadHash] = {
         agent_id: agentId,
+        nonce: typeof nonce === 'string' ? nonce : null,
         expires_at: Number.isFinite(expiresAt) ? expiresAt : now + DEFAULT_AUTH_FRESHNESS_SECONDS * 1000,
         consumed_at: now,
       };

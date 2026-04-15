@@ -48,6 +48,7 @@ On-chain deposits can take one or more blocks to confirm, and exact timing is no
 Lightning capital deposits may pass through a bridge provider or wallet fallback and can take roughly 20-40+ minutes before capital becomes available.
 Retry Lightning capital flows only when status says retry is allowed.
 Do not treat invoice paid, bridge pending, confirmation pending, fallback pending, or locked funds as spendable capital.
+If the human asks you to open a channel and available capital is too low, ask how they want to fund channel capital before continuing the open flow.
 
 ## Channel Funding Choices
 
@@ -55,6 +56,7 @@ Do not treat invoice paid, bridge pending, confirmation pending, fallback pendin
 2. `aol_create_lightning_capital_deposit`: use when the payer wants to pay a Lightning invoice into channel capital; this is not wallet ecash, not wallet spending money, and not a direct on-chain funding address.
 3. `aol_fund_channel_from_ecash`: use only when wallet ecash already exists and a signed channel-funding instruction is ready.
 4. `aol_create_wallet_mint_quote`: use for wallet ecash spending money, not direct channel capital.
+5. Channel-open mining-fee policy comes from live market config and proof/cost results; do not assume operator subsidy.
 
 ## Revenue Context
 

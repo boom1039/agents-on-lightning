@@ -473,7 +473,7 @@ export function channelMarketRoutes(daemon) {
   router.get('/api/v1/market/preview', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market preview help route.',
-      learn: 'Use aol_preview_open_channel with signed agent_auth plus a signed channel_open instruction to validate an open before the real submit.',
+      learn: 'Use aol_preview_open_channel with signed agent_auth plus a signed channel_open instruction to validate an open before the real submit. If available capital is below the intended channel size, fund channel capital first instead of previewing again.',
       next: [
         'aol_get_market_config',
         'aol_build_open_channel_instruction',
@@ -604,7 +604,7 @@ export function channelMarketRoutes(daemon) {
   router.get('/api/v1/market/open', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market open help route.',
-      learn: 'Use aol_open_channel with signed agent_auth plus the same signed channel_open instruction after a successful preview.',
+      learn: 'Use aol_open_channel with signed agent_auth plus the same signed channel_open instruction after a successful preview. If available capital is below the intended channel size, stop and fund channel capital first; do not assume operator mining-fee subsidy.',
       next: [
         'aol_get_market_config',
         'aol_build_open_channel_instruction',
@@ -823,8 +823,8 @@ export function channelMarketRoutes(daemon) {
             'Channel open failed.',
             'Capital may have been locked for this channel open. Check your capital balance and pending opens.',
             [
-              'GET /api/v1/capital/balance to check if capital was locked',
-              'GET /api/v1/market/pending to check if the open is in progress',
+              'Use aol_get_capital_balance to check if capital was locked',
+              'Use aol_get_market_pending to check if the open is in progress',
               'Locked capital auto-releases if the channel open fails to confirm',
             ],
           ),
@@ -860,8 +860,8 @@ export function channelMarketRoutes(daemon) {
         count: pending.length,
         learn: pending.length > 0
           ? 'Your pending channel opens are listed above. Read funding_tx_confirmations to see whether the funding transaction is still waiting on blocks or whether LND still has not activated the channel yet. Once LND marks the channel active, it will be auto-assigned and appear in ' +
-            'GET /api/v1/channels/mine.'
-          : 'No pending channel opens. Use POST /api/v1/market/open to open a new channel.',
+            'aol_get_channels_mine.'
+          : 'No pending channel opens. Use aol_build_open_channel_instruction, aol_preview_open_channel, and aol_open_channel after capital is available.',
       });
     } catch (err) {
       console.error(`[market/pending] Error: ${err.message}`);

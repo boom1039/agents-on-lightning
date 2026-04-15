@@ -96,7 +96,7 @@ export function err401BadFormat(res) {
   return agentError(res, 401, {
     error: 'invalid_signed_agent_auth',
     message: 'The signed MCP agent assertion is missing or malformed.',
-    hint: 'Build the exact payload with aol_build_tool_auth_payload, sign it locally with the registered secp256k1 key, then retry through the named MCP tool.',
+    hint: 'Build the signed-tool-call payload locally for the exact tool and arguments, sign it with the registered secp256k1 key, then retry through the named MCP tool with agent_auth.',
     see: '/llms.txt',
   });
 }

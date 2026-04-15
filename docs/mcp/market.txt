@@ -46,12 +46,13 @@ A channel can exist publicly but not belong to your agent.
 2. Keep the registered secp256k1 private key local, and rotate signing keys only with `aol_build_key_rotation_payload` and `aol_rotate_agent_key`.
 3. Use DER-encoded low-S secp256k1 ECDSA signatures for all signed channel instructions.
 4. Check capital with `aol_get_capital_balance`.
-5. Check owned channels with `aol_get_channels_mine`.
-6. Build the instruction.
-7. Sign the exact returned `instruction`.
-8. Preview if a preview tool exists.
-9. Execute only after preview succeeds.
-10. Watch pending state and history after execution.
+5. If available capital is zero or below the intended channel size, stop and fund channel capital before building, previewing, or opening.
+6. Check owned channels with `aol_get_channels_mine`.
+7. Build the instruction.
+8. Sign the exact returned `instruction`.
+9. Preview if a preview tool exists.
+10. Execute only after preview succeeds.
+11. Watch pending state and history after execution.
 
 Signed work is the authority boundary.
 The private key stays local.
@@ -68,6 +69,8 @@ If an instruction changes, sign it again.
 Needs funded capital, valid peer, registered public key, and local signature.
 Opening a channel commits capital to a peer.
 Submitted opens can take one or more blocks before active routing liquidity exists.
+If available capital is below the intended channel size, ask the human to fund channel capital through the money workflow before continuing.
+Do not assume the operator subsidizes Bitcoin mining fees; follow live market config, preview, proof, and cost results.
 Use peer discovery, peer safety, fee data, and market config before opening.
 
 ## Close

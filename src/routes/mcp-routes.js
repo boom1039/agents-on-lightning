@@ -18,7 +18,7 @@ import {
   INTERNAL_AUTH_PAYLOAD_HASH_HEADER,
   INTERNAL_VERIFIED_AGENT_ID_HEADER,
   buildRegistrationAuthPayload,
-  buildToolAuthPayload,
+  buildSignedToolCallPayload,
   canonicalAuthHash,
   canonicalAuthJson,
   stripAgentAuth,
@@ -60,7 +60,7 @@ const ALLOWED_HEADER_NAMES = new Set([
 const RESPONSE_HEADER_NAMES = ['content-type', 'location', 'retry-after'];
 const mcpToolContext = new AsyncLocalStorage();
 const DEFAULT_INTERNAL_REQUEST_TIMEOUT_MS = 8_000;
-const MCP_AGENT_AUTH_HINT = 'Signed agent authorization for this exact MCP tool call. Build the payload with aol_build_tool_auth_payload, sign its signing_payload locally with the registered secp256k1 private key as DER-encoded low-S ECDSA, and never expose the private key.';
+const MCP_AGENT_AUTH_HINT = 'Signed agent authorization for this exact MCP tool call. Build the documented signed-tool-call payload locally, sign its canonical JSON with the registered secp256k1 private key as DER-encoded low-S ECDSA, and never expose the private key.';
 const MCP_TIMESTAMP_HINT = 'Optional unix timestamp embedded in the instruction before local signing. Usually omit unless you need deterministic signing input.';
 const MCP_IDEMPOTENCY_KEY_HINT = 'Optional stable key for retrying the exact same signed request safely. Reuse only when instruction and signature are unchanged.';
 const MCP_EXACT_SIGNATURE_HINT = 'Hex signature over the exact instruction object. Sign locally; never expose private keys and never sign an invented or modified instruction.';
@@ -78,12 +78,12 @@ const MCP_AGENT_AUTH_SCHEMA = z.object({
   agent_id: z.string().describe('Registered agent id whose secp256k1 key signs this exact tool call.'),
   timestamp: z.number().int().describe(`Unix timestamp in seconds, usually within ${DEFAULT_AUTH_FRESHNESS_SECONDS} seconds of server time.`),
   nonce: z.string().describe('Unique random value for this call. Reusing it with the same signed payload is rejected as replay.'),
-  signature: z.string().describe('DER-encoded low-S secp256k1 ECDSA signature hex over the exact signing_payload returned by aol_build_tool_auth_payload.'),
+  signature: z.string().describe('DER-encoded low-S secp256k1 ECDSA signature hex over the canonical signed-tool-call payload for this exact tool name and arguments.'),
 }).describe(MCP_AGENT_AUTH_HINT);
 const REGISTRATION_AUTH_SCHEMA = z.object({
   timestamp: z.number().int().describe('Unix timestamp in seconds from the aol_build_registration_payload payload.'),
   nonce: z.string().describe('Unique nonce from the aol_build_registration_payload payload.'),
-  signature: z.string().describe('DER-encoded low-S secp256k1 ECDSA signature hex over the exact registration signing_payload.'),
+  signature: z.string().describe('DER-encoded low-S secp256k1 ECDSA signature hex over the exact registration signing_payload string; do not parse or reserialize it before signing.'),
 }).describe('Proof that the agent controls the private key for pubkey. Build this with aol_build_registration_payload and sign locally.');
 const KEY_ROTATION_AUTH_SCHEMA = z.object({
   timestamp: z.number().int().describe('Unix timestamp in seconds from aol_build_key_rotation_payload.'),
@@ -503,7 +503,7 @@ function buildServerCard({ origin }) {
       required: false,
       schemes: ['per-tool-secp256k1-signature'],
     },
-    instructions: 'Connect to /mcp and read start_here or /llms.txt. Use named MCP tools only. You can register with a secp256k1 public key, inspect the market, fund wallet and capital state, prepare signed Lightning channel actions, coordinate with other agents, and track routing-fee revenue. The app charges zero platform fees and zero commissions. Private tools require one-time agent_auth signatures built by aol_build_tool_auth_payload.',
+    instructions: 'Connect to /mcp and read start_here or /llms.txt. Use named MCP tools only. You can register with a secp256k1 public key, inspect the market, fund wallet and capital state, prepare signed Lightning channel actions, coordinate with other agents, and track routing-fee revenue. The app charges zero platform fees and zero commissions. Private tools require one-time agent_auth signatures over the exact signed-tool-call payload.',
     resources: ['dynamic'],
     tools: ['dynamic'],
     prompts: ['dynamic'],
@@ -901,7 +901,7 @@ function buildAuthPayloadPreview({ audience, toolName, input }) {
   const nonce = typeof input?.agent_auth?.nonce === 'string' && input.agent_auth.nonce
     ? input.agent_auth.nonce
     : '<unique_nonce>';
-  const payload = buildToolAuthPayload({
+  const payload = buildSignedToolCallPayload({
     audience,
     agentId,
     toolName,
@@ -925,7 +925,7 @@ function authToolError({ code = 'AUTH_REQUIRED', message, audience, toolName, in
         text: JSON.stringify({
           error: code,
           message,
-          next: 'Call aol_build_tool_auth_payload with the same tool name and arguments, sign signing_payload locally with your registered secp256k1 key, then retry with agent_auth.',
+          next: 'Build the signed-tool-call payload locally with this exact tool name, args_hash, timestamp, nonce, and audience; sign its canonical JSON with your registered secp256k1 key; retry this same tool with agent_auth.',
           audience,
           tool_name: toolName,
           ...preview,
@@ -1233,11 +1233,22 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
         nonce: nonce || randomUUID(),
       });
       const signingPayload = canonicalAuthJson(payload);
+      const signing_guidance = {
+        sign_exact: 'Sign the signing_payload string exactly as returned. Do not parse it, reserialize it, pretty-print it, or sign the payload object.',
+        signature_format: 'DER-encoded low-S secp256k1 ECDSA signature hex.',
+        key_check: 'The private key used to sign must match the compressed pubkey you passed to this tool.',
+      };
+      const body = {
+        payload,
+        signing_payload: signingPayload,
+        signing_guidance,
+      };
       return {
-        content: [{ type: 'text', text: JSON.stringify({ payload, signing_payload: signingPayload }, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
         structuredContent: {
           payload,
           signing_payload: signingPayload,
+          signing_guidance,
           scheme: AOL_REGISTRATION_AUTH_SCHEME,
           version: AOL_AUTH_VERSION,
           audience: payload.audience,
@@ -1246,42 +1257,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
       };
     } catch (err) {
       return toolInputError(err?.message || 'Could not build registration payload.');
-    }
-  });
-
-  server.registerTool('aol_build_tool_auth_payload', {
-    inputSchema: {
-      agent_id: z.string().describe('Registered agent id returned by aol_register_agent.'),
-      tool_name: z.string().describe('Exact private MCP tool name you intend to call next.'),
-      args: z.record(z.string(), z.any()).optional().describe('Exact arguments for that tool, excluding agent_auth. Do not include secrets beyond the values the target tool requires.'),
-      timestamp: z.number().int().optional().describe('Optional unix timestamp in seconds for deterministic signing; omit for server time.'),
-      nonce: z.string().optional().describe('Optional unique nonce. Omit unless you already generated one.'),
-    },
-  }, async ({ agent_id, tool_name, args, timestamp, nonce }) => {
-    try {
-      const payload = buildToolAuthPayload({
-        audience: toolAuthAudience(publicBaseUrl),
-        agentId: agent_id,
-        toolName: tool_name,
-        args: args || {},
-        timestamp: timestamp ?? Math.floor(Date.now() / 1000),
-        nonce: nonce || randomUUID(),
-      });
-      const signingPayload = canonicalAuthJson(payload);
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ payload, signing_payload: signingPayload }, null, 2) }],
-        structuredContent: {
-          payload,
-          signing_payload: signingPayload,
-          scheme: AOL_TOOL_AUTH_SCHEME,
-          version: AOL_AUTH_VERSION,
-          audience: payload.audience,
-          args_hash: payload.args_hash,
-          server_time: Math.floor(Date.now() / 1000),
-        },
-      };
-    } catch (err) {
-      return toolInputError(err?.message || 'Could not build tool auth payload.');
     }
   });
 
@@ -2223,7 +2198,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
 
   server.registerTool('aol_build_open_channel_instruction', {
     inputSchema: privateInputSchema({
-      local_funding_amount_sats: z.number().int().positive().describe('Amount of channel capital to commit to the open, in sats. Confirm available capital first; this is not wallet ecash, and submitted opens can take blocks before active routing liquidity exists.'),
+      local_funding_amount_sats: z.number().int().positive().describe('Amount of channel capital to commit to the open, in sats. Confirm available capital first; if available is below this amount, stop and fund channel capital before building, previewing, or opening. This is not wallet ecash, and submitted opens can take blocks before active routing liquidity exists.'),
       peer_pubkey: z.string().describe('Real Lightning peer pubkey selected from market, safety, or peer tools. Verify it before signing.'),
       timestamp: z.number().int().optional().describe(MCP_TIMESTAMP_HINT),
     }),

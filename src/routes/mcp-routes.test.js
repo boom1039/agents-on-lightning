@@ -23,7 +23,7 @@ import {
 import { getJourneyMonitor, startJourneyMonitor, stopJourneyMonitor } from '../monitor/journey-monitor.js';
 import { mcpRoutes } from './mcp-routes.js';
 import {
-  buildToolAuthPayload,
+  buildSignedToolCallPayload,
   canonicalAuthJson,
   normalizeSecp256k1DerSignatureToLowS,
 } from '../identity/signed-auth.js';
@@ -158,7 +158,7 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
   const { server, baseUrl, apiRequests, identity } = await startApp();
   let nonceCounter = 0;
   const withAgentAuth = (toolName, args = {}) => {
-    const payload = buildToolAuthPayload({
+    const payload = buildSignedToolCallPayload({
       audience: `${baseUrl}/mcp`,
       agentId: identity.agentId,
       toolName,

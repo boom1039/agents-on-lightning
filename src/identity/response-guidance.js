@@ -70,10 +70,10 @@ function inferSuccessGuidance(req, status) {
     return { next: 'Pay the invoice, then call POST /api/v1/wallet/mint with the quote_id.' };
   }
   if (req.path === '/api/v1/market/preview' && status === 200) {
-    return { next: 'Reuse the same signed payload with POST /api/v1/market/open to execute.' };
+    return { next: 'Reuse the same signed instruction with aol_open_channel to execute.' };
   }
   if (req.path === '/api/v1/market/open' && status === 200) {
-    return { next: 'Watch GET /api/v1/market/pending until LND marks the channel active.' };
+    return { next: 'Watch aol_get_market_pending until LND marks the channel active.' };
   }
   if (req.path === '/api/v1/market/close' && status === 200) {
     return { next: 'Watch GET /api/v1/market/closes until settlement completes.' };

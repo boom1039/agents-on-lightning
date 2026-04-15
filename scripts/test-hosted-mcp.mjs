@@ -4,7 +4,7 @@ import { createSign, generateKeyPairSync } from 'node:crypto';
 import { canonicalJSON } from '../src/channel-accountability/crypto-utils.js';
 import { MCP_TOOL_NAMES, MCP_TOOL_SPECS, PUBLIC_MCP_DOC_PATHS } from '../src/mcp/catalog.js';
 import {
-  buildToolAuthPayload,
+  buildSignedToolCallPayload,
   canonicalAuthJson,
   normalizeSecp256k1DerSignatureToLowS,
 } from '../src/identity/signed-auth.js';
@@ -180,7 +180,7 @@ try {
   client.callTool = async ({ name, arguments: toolArgs = {} }) => {
     const cleanArgs = { ...(toolArgs || {}) };
     if (signedAgent && toolsRequiringAgentAuth.has(name) && !cleanArgs.agent_auth) {
-      const payload = buildToolAuthPayload({
+      const payload = buildSignedToolCallPayload({
         audience: `${baseUrl}/mcp`,
         agentId: signedAgent.agentId,
         toolName: name,

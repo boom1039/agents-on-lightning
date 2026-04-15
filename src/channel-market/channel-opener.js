@@ -111,7 +111,7 @@ const HINTS = {
 
   wrong_action:
     'Only "channel_open" accepted at this endpoint. ' +
-    'For fee policy changes, use POST /api/v1/channels/instruct.',
+    'For fee policy changes, use the named channel-policy MCP tools.',
 
   push_amount_rejected:
     'push_amount_sats gifts sats to the remote peer irrevocably the moment the channel opens. ' +
@@ -122,7 +122,8 @@ const HINTS = {
 
   insufficient_balance: (available, requested) =>
     `Your available capital is ${available.toLocaleString()} sats, but you requested ${requested.toLocaleString()} sats. ` +
-    'Deposit more Bitcoin via POST /api/v1/capital/deposit.',
+    'Stop the channel-open flow and fund channel capital first with aol_create_onchain_capital_deposit, ' +
+    'aol_create_lightning_capital_deposit, or existing wallet ecash through aol_fund_channel_from_ecash.',
 
   channel_count_limit: (scope) =>
     `${scope} channel limit reached. ` +
@@ -142,15 +143,15 @@ const HINTS = {
 
   peer_not_allowlisted:
     'This peer is not approved for direct opens on this node. ' +
-    'Use GET /api/v1/market/peer-safety/:pubkey to inspect the peer, or choose an approved peer.',
+    'Use aol_get_peer_safety to inspect the peer, or choose an approved peer.',
 
   peer_allowlist_required:
     'This node only opens channels to operator-approved peers. ' +
-    'Use GET /api/v1/market/peer-safety/:pubkey, then choose an approved peer or ask the operator to approve one.',
+    'Use aol_get_peer_safety, then choose an approved peer or ask the operator to approve one.',
 
   peer_force_closes:
     'This peer has too much force-close history for this node’s current safety policy. ' +
-    'Use GET /api/v1/market/peer-safety/:pubkey and choose a cleaner peer.',
+    'Use aol_get_peer_safety and choose a cleaner peer.',
 
   peer_force_close_history_unavailable:
     'Peer safety history is temporarily unavailable, so this open needs review before it can proceed. ' +
@@ -159,7 +160,7 @@ const HINTS = {
   peer_too_few_channels:
     'This peer has too few channels for this node’s current safety policy. ' +
     'Nodes with very few channels are risky — they may be ephemeral or poorly connected. ' +
-    'Use GET /api/v1/analysis/suggest-peers/:pubkey to find better-connected peers.',
+    'Use aol_suggest_peers to find better-connected peers.',
 
   peer_stale_graph_update:
     'This peer looks stale in the network graph. ' +
@@ -870,8 +871,8 @@ export class ChannelOpener {
         locked: balance.locked + params.local_funding_amount_sats,
       },
       learn: 'Preview ran all validation checks, including a live peer-connect check, without executing. ' +
-        'Submit the identical payload to POST /api/v1/market/open to execute for real. ' +
-        'The channel open will lock your capital and submit a funding transaction to the Bitcoin network.',
+        'Submit the identical signed instruction through aol_open_channel to execute for real. ' +
+        'The channel open will lock your channel capital and submit a funding transaction to the Bitcoin network.',
     };
   }
 
@@ -1093,10 +1094,10 @@ export class ChannelOpener {
           startup_policy: startupPolicy,
         },
         learn: 'Your channel open has been submitted to the Bitcoin network. ' +
-          `Track funding transaction ${fundingTxidStr} and keep checking GET /api/v1/market/pending. ` +
+          `Track funding transaction ${fundingTxidStr} and keep checking aol_get_market_pending. ` +
           'The channel becomes usable when LND marks it active; once that happens, it will be auto-assigned to you. ' +
           'Any startup policy fields that need an active channel will be applied automatically. ' +
-          'Track progress: GET /api/v1/market/pending',
+          'Track progress with aol_get_market_pending.',
       };
     } finally {
       unlock();
@@ -1343,7 +1344,8 @@ export class ChannelOpener {
       max_channel_size_sats: this.config.maxChannelSizeSats,
       channel_count_policy: 'server_enforced',
       activation_source: 'lnd_active',
-      operator_subsidizes_on_chain_fee: true,
+      operator_subsidizes_on_chain_fee: false,
+      on_chain_fee_policy: 'do_not_assume_operator_subsidy',
       peer_safety: {
         requires_public_address: true,
         force_close_policy: 'enforced',
@@ -1355,14 +1357,14 @@ export class ChannelOpener {
       },
       learn: 'These are the current limits for channel opens on this node. ' +
         `The current channel size range is ${this.config.minChannelSizeSats} to ${this.config.maxChannelSizeSats} sats. ` +
-        'The on-chain mining fee is paid by the node operator (not deducted from your capital). ' +
-        'Your local_funding_amount_sats becomes the channel capacity. ' +
+        'Do not assume the operator subsidizes Bitcoin mining fees; live cost/proof results and policy fields are the source of truth. ' +
+        'Your local_funding_amount_sats is the intended channel capacity and you need at least that much available channel capital before preview or open can succeed. ' +
+        'If available capital is zero or below the requested channel size, stop and fund channel capital first. ' +
         'A pending open becomes usable when LND marks the channel active. ' +
         'At open time you may request base_fee_msat, fee_rate_ppm, and min_htlc_msat. ' +
         'If you also request time_lock_delta or max_htlc_msat, the app will apply them automatically after activation. ' +
         'Peer must advertise a public address and pass the peer-safety gate. ' +
-        'To open a channel: POST /api/v1/market/open with a signed instruction. ' +
-        'To preview (dry-run validation): POST /api/v1/market/preview.',
+        'Use aol_build_open_channel_instruction, aol_preview_open_channel, and aol_open_channel for the open flow.',
     };
   }
 

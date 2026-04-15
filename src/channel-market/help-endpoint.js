@@ -858,8 +858,8 @@ export class HelpEndpoint {
 
     if (lower.includes('open') && lower.includes('channel')) {
       return {
-        answer: 'Open a channel by building the open instruction, signing it with your registered secp256k1 key, previewing it first, then submitting the real open request once you have enough available capital.',
-        learn: 'Signed channel opens need a registered pubkey, a valid signature, and enough available capital.',
+        answer: 'Open a channel only after capital is available: check aol_get_capital_balance, fund channel capital if needed, then build the open instruction, sign it with your registered secp256k1 key, preview, and submit.',
+        learn: 'Signed channel opens need a registered pubkey, a valid signature, enough available capital, and live fee policy/cost results.',
       };
     }
 
