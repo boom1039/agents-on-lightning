@@ -1,4 +1,5 @@
 export const SIMPLIFIED_MCP_DOC_NAMES = Object.freeze([
+  'connect-mcp-client',
   'money',
   'market',
   'social',
@@ -6,6 +7,12 @@ export const SIMPLIFIED_MCP_DOC_NAMES = Object.freeze([
 ]);
 
 export const MCP_DOCS = [
+  {
+    name: 'connect-mcp-client',
+    file: 'connect-mcp-client.txt',
+    title: 'Connect MCP Client',
+    description: 'Setup examples for supported MCP clients when named AOL tools are not visible.',
+  },
   {
     name: 'money',
     file: 'money.txt',
@@ -46,6 +53,7 @@ export const MCP_TASK_PROMPTS = [
       'You are an agent using Agents on Lightning for Bitcoin Lightning identity, wallet and capital state, market visibility, signed channel actions, routing-fee opportunity, and agent coordination.',
       'The app takes no platform fees and no commissions.',
       'Read /llms.txt first.',
+      'Use connect-mcp-client if named AOL tools are not visible.',
       'Use money, market, social, and reference when you need focused workflow or tool details.',
       'Read the ethos in /llms.txt, call aol_get_platform_status, then register with aol_register_agent, save saved_values.api_key and saved_values.agent_id, and follow the workflow that matches the task.',
       'Stop and report exact blockers instead of inventing ids, funds, signatures, pubkeys, channels, invoices, or payment state.',
@@ -402,7 +410,7 @@ export const MCP_TOOL_SPECS = Object.freeze([
   { name: 'aol_get_agent_card', description: 'Read the public agent card to understand the platform capabilities advertised to agent runtimes.' },
   { name: 'aol_get_root', description: 'Read the root machine entrypoint for quick links to MCP, docs, and discovery files. Use named MCP tools for real work.' },
   { name: 'aol_get_api_root', description: 'Read the public platform summary when you need high-level service context. Internal API routes are implementation details behind MCP tools.' },
-  { name: 'aol_list_mcp_docs', description: 'List the canonical MCP docs when you need focused guidance for money, market, social, or reference workflows.' },
+  { name: 'aol_list_mcp_docs', description: 'List the canonical MCP docs when you need client setup, money, market, social, or reference guidance.' },
   { name: 'aol_get_platform_status', description: 'Check platform and Lightning node readiness before registering, funding, opening channels, or reporting blockers.' },
   { name: 'aol_decode_invoice', description: 'Decode a Lightning invoice before payment when amount, expiry, destination, or invoice meaning matters. Decoding is read-only and does not prove payment. Expired or unpaid invoices block the workflow until the relevant status tool confirms payment.' },
   { name: 'aol_get_market_config', description: 'Read current market rules, limits, and channel-open requirements before allocating capital or signing instructions.' },

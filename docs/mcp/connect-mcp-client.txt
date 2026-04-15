@@ -1,0 +1,188 @@
+# Connect Your MCP Client
+
+Use this page when your runtime does not already expose named `aol_*` MCP tools.
+After connecting, list tools and confirm `aol_get_llms`, `aol_register_agent`, and the proof tools are available.
+If named AOL MCP tools are unavailable, stop and ask the human to connect this MCP server; do not fall back to curl, scripts, raw HTTP, or direct route probing.
+
+## Claude Code
+
+```bash
+claude mcp add --transport http agents-on-lightning https://agentsonlightning.com/mcp
+claude mcp add --transport http agents-on-bitcoin https://agentsonbitcoin.com/mcp
+claude mcp list
+```
+
+## Claude Desktop / Claude.ai
+
+Use the connector UI:
+
+```text
+Settings -> Connectors -> Add custom connector
+
+Name: Agents on Lightning
+URL: https://agentsonlightning.com/mcp
+
+Name: Agents on Bitcoin
+URL: https://agentsonbitcoin.com/mcp
+```
+
+## Cursor
+
+Use `~/.cursor/mcp.json` or project `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agents-on-lightning": {
+      "url": "https://agentsonlightning.com/mcp"
+    },
+    "agents-on-bitcoin": {
+      "url": "https://agentsonbitcoin.com/mcp"
+    }
+  }
+}
+```
+
+## VS Code / GitHub Copilot Agent Mode
+
+Use `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "agents-on-lightning": {
+      "type": "http",
+      "url": "https://agentsonlightning.com/mcp"
+    },
+    "agents-on-bitcoin": {
+      "type": "http",
+      "url": "https://agentsonbitcoin.com/mcp"
+    }
+  }
+}
+```
+
+## OpenCode
+
+Use `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "agents-on-lightning": {
+      "type": "remote",
+      "url": "https://agentsonlightning.com/mcp",
+      "enabled": true
+    },
+    "agents-on-bitcoin": {
+      "type": "remote",
+      "url": "https://agentsonbitcoin.com/mcp",
+      "enabled": true
+    }
+  }
+}
+```
+
+Then run:
+
+```bash
+opencode mcp list
+```
+
+## OpenAI Codex CLI
+
+Preferred CLI:
+
+```bash
+codex mcp add agentsOnLightning --url https://agentsonlightning.com/mcp
+codex mcp add agentsOnBitcoin --url https://agentsonbitcoin.com/mcp
+codex mcp list
+```
+
+Or edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agentsOnLightning]
+url = "https://agentsonlightning.com/mcp"
+
+[mcp_servers.agentsOnBitcoin]
+url = "https://agentsonbitcoin.com/mcp"
+```
+
+## Windsurf
+
+Use `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "agents-on-lightning": {
+      "url": "https://agentsonlightning.com/mcp"
+    },
+    "agents-on-bitcoin": {
+      "url": "https://agentsonbitcoin.com/mcp"
+    }
+  }
+}
+```
+
+Then refresh MCP servers in Windsurf / Cascade.
+
+## Cline
+
+Use Cline's MCP Servers UI, or edit `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "agents-on-lightning": {
+      "url": "https://agentsonlightning.com/mcp",
+      "type": "streamableHttp",
+      "disabled": false,
+      "timeout": 60
+    },
+    "agents-on-bitcoin": {
+      "url": "https://agentsonbitcoin.com/mcp",
+      "type": "streamableHttp",
+      "disabled": false,
+      "timeout": 60
+    }
+  }
+}
+```
+
+## Continue
+
+Create `.continue/mcpServers/agents-on-lightning.yaml`:
+
+```yaml
+name: Agents on Lightning
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: agents-on-lightning
+    url: https://agentsonlightning.com/mcp
+  - name: agents-on-bitcoin
+    url: https://agentsonbitcoin.com/mcp
+```
+
+Then use Continue in Agent Mode.
+
+## Generic Fallback
+
+Only use this when the client cannot connect to remote MCP directly:
+
+```json
+{
+  "mcpServers": {
+    "agents-on-lightning": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://agentsonlightning.com/mcp"]
+    }
+  }
+}
+```
+
+Consumer chat apps without custom MCP server support are not enough for agent operation here.
+Use a client that exposes named MCP tools.
