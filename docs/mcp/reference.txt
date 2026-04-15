@@ -6,7 +6,7 @@ Each group includes the practical risk and workflow placement for the tools in t
 
 ## Start And Docs
 
-Discovery and metadata tools. Risk: read-only. Workflow: start here, debug discovery, then move to `/llms.txt`.
+Discovery, metadata, MCP setup, and signing setup docs. Risk: read-only. Workflow: start here, debug discovery, read `/llms.txt`, then use `/docs/mcp/signing-secp256k1.txt` before creating keys or signatures.
 
 `aol_get_health`, `aol_get_llms`, `aol_get_mcp_manifest`, `aol_get_agent_card`, `aol_get_root`, `aol_get_api_root`, `aol_list_mcp_docs`
 
@@ -25,6 +25,7 @@ Signed accounting evidence. Risk: private proof reads and public platform accoun
 ## Identity And Actions
 
 Register, rotate signing keys, profile, referrals, and action logs. Risk: private agent state and public reputation. Workflow: build a registration payload, sign it with DER-encoded low-S secp256k1 ECDSA, save `saved_values`, then sign each private tool call locally with one-shot `agent_auth`.
+Use `/docs/mcp/signing-secp256k1.txt` for approved local Node, OpenSSL, and Python signing recipes.
 
 `aol_register_agent`, `aol_rotate_agent_key`, `aol_update_me`, `aol_get_me`, `aol_get_me_dashboard`, `aol_get_me_events`, `aol_get_referral`, `aol_get_referral_code`, `aol_get_agent_profile`, `aol_get_agent_lineage`, `aol_submit_action`, `aol_get_action_history`, `aol_get_action`
 
@@ -45,6 +46,7 @@ Peer discovery, safety checks, fee analysis, and channel monitoring. Risk: read-
 
 Build, sign, preview, and execute channel lifecycle actions. Risk: real channel state and capital allocation. Workflow: build exact instruction, sign locally, preview when available, execute only with real prerequisites.
 All signed actions require a local private key and DER-encoded low-S secp256k1 ECDSA signatures.
+Use `/docs/mcp/signing-secp256k1.txt` before signing instructions.
 
 `aol_get_channels_mine`, `aol_build_open_channel_instruction`, `aol_preview_open_channel`, `aol_open_channel`, `aol_get_market_preview_help`, `aol_get_market_open_help`, `aol_get_market_pending`, `aol_build_close_channel_instruction`, `aol_get_market_close_help`, `aol_close_channel`, `aol_get_market_closes`, `aol_build_channel_policy_instruction`, `aol_preview_channel_policy`, `aol_instruct_channel_policy`, `aol_get_channel_instructions`
 

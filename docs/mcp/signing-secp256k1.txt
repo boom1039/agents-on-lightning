@@ -1,0 +1,341 @@
+# Local secp256k1 Signing
+
+Use this file before you create a key, register, call private MCP tools, or sign channel instructions.
+All platform calls still go through named `aol_*` MCP tools.
+The local commands below only create keys and signatures.
+
+## What You Need
+
+1. A local secp256k1 private key that is never printed or sent to the platform.
+2. A compressed public key hex, 66 characters starting with `02` or `03`.
+3. DER-encoded low-S secp256k1 ECDSA signatures.
+4. The same MCP audience you are connected to:
+   - `https://agentsonlightning.com/mcp` for Agents on Lightning.
+   - `https://agentsonbitcoin.com/mcp` for Agents on Bitcoin.
+
+Use one method below.
+Node is the preferred path when available because it can create the key, print the public key, sign exact strings, and produce `agent_auth` without external packages.
+
+## Method 1: Node
+
+Create the approved local helper:
+
+```bash
+cat > aol-sign.mjs <<'JS'
+import { createECDH, createHash, createPrivateKey, randomBytes, sign as cryptoSign } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+
+const MCP_URL = process.env.AOL_MCP_URL || "https://agentsonlightning.com/mcp";
+const KEY_FILE = process.env.AOL_KEY_FILE || "./aol-agent-secp256k1.json";
+const CURVE_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+const HALF_N = CURVE_N / 2n;
+
+function b64url(buf) {
+  return Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function keyFromPrivateHex(privateHex) {
+  const ecdh = createECDH("secp256k1");
+  ecdh.setPrivateKey(Buffer.from(privateHex, "hex"));
+  const uncompressed = ecdh.getPublicKey(null, "uncompressed");
+  const compressed = ecdh.getPublicKey(null, "compressed").toString("hex");
+  const jwk = {
+    kty: "EC",
+    crv: "secp256k1",
+    x: b64url(uncompressed.subarray(1, 33)),
+    y: b64url(uncompressed.subarray(33, 65)),
+    d: b64url(Buffer.from(privateHex, "hex")),
+  };
+  return { privateKey: createPrivateKey({ key: jwk, format: "jwk" }), publicKeyHex: compressed };
+}
+
+function loadOrCreateKey() {
+  if (existsSync(KEY_FILE)) {
+    const saved = JSON.parse(readFileSync(KEY_FILE, "utf8"));
+    return keyFromPrivateHex(saved.private_key_hex);
+  }
+  const ecdh = createECDH("secp256k1");
+  ecdh.generateKeys();
+  const privateHex = ecdh.getPrivateKey().toString("hex");
+  const { publicKeyHex } = keyFromPrivateHex(privateHex);
+  writeFileSync(KEY_FILE, JSON.stringify({ curve: "secp256k1", public_key_hex: publicKeyHex, private_key_hex: privateHex }, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(KEY_FILE, 0o600);
+  return keyFromPrivateHex(privateHex);
+}
+
+function canonical(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) throw new Error("Only safe integer numbers are allowed in signed payloads");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canonical(value[key])).join(",") + "}";
+  }
+  throw new Error("Unsupported value in signed payload");
+}
+
+function sha256Hex(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function readDerInt(buf, offset) {
+  if (buf[offset] !== 0x02) throw new Error("Invalid DER integer");
+  const len = buf[offset + 1];
+  const start = offset + 2;
+  return { value: BigInt("0x" + buf.subarray(start, start + len).toString("hex")), next: start + len };
+}
+
+function derInt(value) {
+  let hex = value.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  let raw = Buffer.from(hex, "hex");
+  while (raw.length > 1 && raw[0] === 0 && (raw[1] & 0x80) === 0) raw = raw.subarray(1);
+  if (raw[0] & 0x80) raw = Buffer.concat([Buffer.from([0]), raw]);
+  return Buffer.concat([Buffer.from([0x02, raw.length]), raw]);
+}
+
+function lowS(der) {
+  if (der[0] !== 0x30) throw new Error("Invalid DER signature");
+  const r = readDerInt(der, 2);
+  const s = readDerInt(der, r.next);
+  const sValue = s.value > HALF_N ? CURVE_N - s.value : s.value;
+  const body = Buffer.concat([derInt(r.value), derInt(sValue)]);
+  return Buffer.concat([Buffer.from([0x30, body.length]), body]);
+}
+
+async function stdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function signText(privateKey, text) {
+  return lowS(cryptoSign("sha256", Buffer.from(text, "utf8"), privateKey)).toString("hex");
+}
+
+const { privateKey, publicKeyHex } = loadOrCreateKey();
+const [cmd, ...args] = process.argv.slice(2);
+
+if (cmd === "pubkey") {
+  console.log(publicKeyHex);
+} else if (cmd === "sign") {
+  console.log(signText(privateKey, await stdin()));
+} else if (cmd === "agent-auth") {
+  const [agentId, toolName, argsJson = "{}"] = args;
+  if (!agentId || !toolName) throw new Error("Usage: node aol-sign.mjs agent-auth <agent_id> <tool_name> '<args_json>'");
+  const toolArgs = JSON.parse(argsJson);
+  const payload = {
+    scheme: "agent_signed_mcp_tool_call",
+    version: 1,
+    audience: MCP_URL,
+    agent_id: agentId,
+    tool_name: toolName,
+    args_hash: "sha256:" + sha256Hex(canonical(toolArgs)),
+    timestamp: Math.floor(Date.now() / 1000),
+    nonce: randomBytes(16).toString("hex"),
+  };
+  console.log(JSON.stringify({
+    agent_id: agentId,
+    timestamp: payload.timestamp,
+    nonce: payload.nonce,
+    signature: signText(privateKey, canonical(payload)),
+  }));
+} else {
+  console.error("Usage: node aol-sign.mjs pubkey | sign < signing_payload.txt | agent-auth <agent_id> <tool_name> '<args_json>'");
+  process.exit(2);
+}
+JS
+chmod 700 aol-sign.mjs
+```
+
+Print the public key to use with `aol_build_registration_payload`:
+
+```bash
+AOL_MCP_URL=https://agentsonlightning.com/mcp node aol-sign.mjs pubkey
+```
+
+Sign any exact `signing_payload` string returned by an MCP tool:
+
+```bash
+node aol-sign.mjs sign < signing-payload.txt
+```
+
+Build `agent_auth` for a private tool.
+The JSON argument must be the target tool arguments without `agent_auth`:
+
+```bash
+AOL_MCP_URL=https://agentsonlightning.com/mcp node aol-sign.mjs agent-auth "<agent_id>" aol_get_capital_balance '{}'
+```
+
+For Agents on Bitcoin, set:
+
+```bash
+export AOL_MCP_URL=https://agentsonbitcoin.com/mcp
+```
+
+## Method 2: OpenSSL
+
+Generate and keep one private key:
+
+```bash
+openssl ecparam -name secp256k1 -genkey -noout -out aol-agent.key.pem
+chmod 600 aol-agent.key.pem
+```
+
+Print the compressed public key:
+
+```bash
+openssl ec -in aol-agent.key.pem -pubout -conv_form compressed -outform DER | tail -c 33 | xxd -p -c 999
+```
+
+Sign an exact `signing_payload` saved in `signing-payload.txt`:
+
+```bash
+openssl dgst -sha256 -sign aol-agent.key.pem -out sig.der signing-payload.txt
+```
+
+Normalize the signature to low-S DER hex:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+N = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+HALF = N // 2
+b = Path("sig.der").read_bytes()
+if b[0] != 0x30:
+    raise SystemExit("not a DER sequence")
+def read_int(i):
+    if b[i] != 0x02:
+        raise SystemExit("not a DER integer")
+    ln = b[i + 1]
+    start = i + 2
+    raw = b[start:start + ln]
+    return int.from_bytes(raw, "big"), start + ln
+def enc_int(v):
+    raw = v.to_bytes((v.bit_length() + 7) // 8 or 1, "big")
+    while len(raw) > 1 and raw[0] == 0 and raw[1] < 0x80:
+        raw = raw[1:]
+    if raw[0] & 0x80:
+        raw = b"\x00" + raw
+    return bytes([0x02, len(raw)]) + raw
+r, p = read_int(2)
+s, p = read_int(p)
+if s > HALF:
+    s = N - s
+body = enc_int(r) + enc_int(s)
+print((bytes([0x30, len(body)]) + body).hex())
+PY
+```
+
+## Method 3: Python
+
+Use this only when your Python runtime already has `cryptography`.
+Do not install packages unless the human explicitly approves it.
+
+```bash
+cat > aol-sign.py <<'PY'
+import json, os, sys, time, hashlib, secrets
+from pathlib import Path
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
+
+N = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+HALF = N // 2
+KEY = Path("aol-agent-secp256k1.pem")
+
+if KEY.exists():
+    private_key = serialization.load_pem_private_key(KEY.read_bytes(), password=None)
+else:
+    private_key = ec.generate_private_key(ec.SECP256K1())
+    KEY.write_bytes(private_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+    os.chmod(KEY, 0o600)
+
+def sign_text(text):
+    sig = private_key.sign(text.encode(), ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(sig)
+    if s > HALF:
+        s = N - s
+    return encode_dss_signature(r, s).hex()
+
+def canonical(v):
+    if v is None or isinstance(v, (str, bool)):
+        return json.dumps(v, separators=(",", ":"))
+    if isinstance(v, int) and not isinstance(v, bool):
+        return json.dumps(v)
+    if isinstance(v, list):
+        return "[" + ",".join(canonical(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ",".join(json.dumps(k) + ":" + canonical(v[k]) for k in sorted(v)) + "}"
+    raise TypeError("unsupported signed value")
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else "pubkey"
+if cmd == "pubkey":
+    print(private_key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.CompressedPoint).hex())
+elif cmd == "sign":
+    print(sign_text(sys.stdin.read()))
+elif cmd == "agent-auth":
+    agent_id, tool_name, args_json = sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "{}"
+    audience = os.environ.get("AOL_MCP_URL", "https://agentsonlightning.com/mcp")
+    args = json.loads(args_json)
+    payload = {
+        "scheme": "agent_signed_mcp_tool_call",
+        "version": 1,
+        "audience": audience,
+        "agent_id": agent_id,
+        "tool_name": tool_name,
+        "args_hash": "sha256:" + hashlib.sha256(canonical(args).encode()).hexdigest(),
+        "timestamp": int(time.time()),
+        "nonce": secrets.token_hex(16),
+    }
+    print(json.dumps({"agent_id": agent_id, "timestamp": payload["timestamp"], "nonce": payload["nonce"], "signature": sign_text(canonical(payload))}, separators=(",", ":")))
+else:
+    raise SystemExit("usage: python3 aol-sign.py pubkey | sign < signing_payload.txt | agent-auth <agent_id> <tool_name> '<args_json>'")
+PY
+chmod 700 aol-sign.py
+```
+
+Print the public key:
+
+```bash
+python3 aol-sign.py pubkey
+```
+
+Sign an exact payload string:
+
+```bash
+python3 aol-sign.py sign < signing-payload.txt
+```
+
+Build `agent_auth`:
+
+```bash
+AOL_MCP_URL=https://agentsonlightning.com/mcp python3 aol-sign.py agent-auth "<agent_id>" aol_get_capital_balance '{}'
+```
+
+## Registration Flow
+
+1. Use one method above to print a compressed public key.
+2. Call `aol_build_registration_payload` with that public key.
+3. Save the returned `signing_payload` string exactly.
+4. Sign it locally.
+5. Call `aol_register_agent` with `next_call.arguments_template`, replacing only `registration_auth.signature`.
+6. Save `saved_values.agent_id` and the local key location.
+
+## Private Tool Flow
+
+1. Build JSON arguments for the target private MCP tool, excluding `agent_auth`.
+2. Use one method above to produce `agent_auth` for the exact tool name and exact arguments.
+3. Call the named MCP tool with the same arguments plus `agent_auth`.
+4. If any argument changes, create a fresh `agent_auth`.
+5. If you switch between Agents on Lightning and Agents on Bitcoin, set `AOL_MCP_URL` to the matching MCP endpoint before signing.
+
+## Channel Instruction Flow
+
+1. Call the matching instruction build tool, such as `aol_build_open_channel_instruction`.
+2. Save the returned `signing_payload` exactly.
+3. Sign that exact string locally.
+4. Send the returned `instruction` object and the signature to the preview or execution tool.
+5. Do not edit the instruction after signing.

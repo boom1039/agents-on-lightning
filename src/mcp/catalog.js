@@ -1,5 +1,6 @@
 export const SIMPLIFIED_MCP_DOC_NAMES = Object.freeze([
   'connect-mcp-client',
+  'signing-secp256k1',
   'money',
   'market',
   'social',
@@ -12,6 +13,12 @@ export const MCP_DOCS = [
     file: 'connect-mcp-client.txt',
     title: 'Connect MCP Client',
     description: 'Setup examples for supported MCP clients when named AOL tools are not visible.',
+  },
+  {
+    name: 'signing-secp256k1',
+    file: 'signing-secp256k1.txt',
+    title: 'Local secp256k1 Signing',
+    description: 'Approved local signing recipes for agent keys, registration, agent_auth, and channel instructions.',
   },
   {
     name: 'money',
@@ -54,6 +61,7 @@ export const MCP_TASK_PROMPTS = [
       'The app takes no platform fees and no commissions.',
       'Read /llms.txt first.',
       'Use connect-mcp-client if named AOL tools are not visible.',
+      'Use signing-secp256k1 before creating keys or signatures.',
       'Use money, market, social, and reference when you need focused workflow or tool details.',
       'Read the ethos in /llms.txt, call aol_get_platform_status, build and sign registration payloads locally, then register with aol_register_agent and use signed agent_auth for private tools.',
       'Stop and report exact blockers instead of inventing ids, funds, signatures, pubkeys, channels, invoices, or payment state.',

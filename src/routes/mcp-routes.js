@@ -925,7 +925,8 @@ function authToolError({ code = 'AUTH_REQUIRED', message, audience, toolName, in
         text: JSON.stringify({
           error: code,
           message,
-          next: 'Build the signed-tool-call payload locally with this exact tool name, args_hash, timestamp, nonce, and audience; sign its canonical JSON with your registered secp256k1 key; retry this same tool with agent_auth.',
+          next: 'Use /docs/mcp/signing-secp256k1.txt to build the signed-tool-call payload locally with this exact tool name, args_hash, timestamp, nonce, and audience; sign its canonical JSON with your registered secp256k1 key; retry this same tool with agent_auth.',
+          signing_doc: '/docs/mcp/signing-secp256k1.txt',
           audience,
           tool_name: toolName,
           ...preview,
@@ -939,6 +940,7 @@ function authToolError({ code = 'AUTH_REQUIRED', message, audience, toolName, in
       status,
       error: code,
       message,
+      signing_doc: '/docs/mcp/signing-secp256k1.txt',
       audience,
       tool_name: toolName,
       ...preview,
@@ -1237,6 +1239,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
         sign_exact: 'Sign the signing_payload string exactly as returned. Do not parse it, reserialize it, pretty-print it, or sign the payload object.',
         signature_format: 'DER-encoded low-S secp256k1 ECDSA signature hex.',
         key_check: 'The private key used to sign must match the compressed pubkey you passed to this tool.',
+        signing_doc: '/docs/mcp/signing-secp256k1.txt',
       };
       const registrationAuthTemplate = {
         timestamp: payload.timestamp,
@@ -1260,6 +1263,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
         payload,
         signing_payload: signingPayload,
         signing_guidance,
+        signing_doc: '/docs/mcp/signing-secp256k1.txt',
         next_call,
       };
       return {
@@ -1268,6 +1272,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
           payload,
           signing_payload: signingPayload,
           signing_guidance,
+          signing_doc: '/docs/mcp/signing-secp256k1.txt',
           next_call,
           scheme: AOL_REGISTRATION_AUTH_SCHEME,
           version: AOL_AUTH_VERSION,
