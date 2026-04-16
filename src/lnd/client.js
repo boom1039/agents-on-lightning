@@ -350,6 +350,129 @@ export class NodeClient {
     return this._request('DELETE', path, query, null, requestOptions);
   }
 
+  _deleteStreamFirst(path, query, requestOptions) {
+    return this._requestStreamFirst('DELETE', path, query, null, requestOptions);
+  }
+
+  async _requestStreamFirst(method, path, query = null, body = null, requestOptions = {}) {
+    if (!this._initialized) {
+      throw new Error(`NodeClient "${this.name}" not initialized. Call init() first.`);
+    }
+
+    const qs = query ? '?' + new URLSearchParams(query).toString() : '';
+    const url = `${path}${qs}`;
+    const jsonBody = body != null ? JSON.stringify(body) : null;
+
+    return new Promise((resolve, reject) => {
+      const timeoutMs = Number.isFinite(requestOptions.timeoutMs) && requestOptions.timeoutMs > 0
+        ? requestOptions.timeoutMs
+        : DEFAULT_REQUEST_TIMEOUT_MS;
+      let settled = false;
+      let req;
+
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+        if (req) req.destroy();
+      }
+
+      function fail(err) {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      }
+
+      function parseEvent(raw) {
+        const trimmed = raw.trim();
+        if (!trimmed) return false;
+        try {
+          const parsed = JSON.parse(trimmed);
+          finish(parsed.result || parsed);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      const options = {
+        hostname: this.host,
+        port: this.restPort,
+        path: url,
+        method,
+        agent: this._agent,
+        headers: {
+          'Grpc-Metadata-Macaroon': this._macaroonHex,
+        },
+        timeout: timeoutMs,
+      };
+
+      if (jsonBody != null) {
+        options.headers['Content-Type'] = 'application/json';
+        options.headers['Content-Length'] = Buffer.byteLength(jsonBody);
+      }
+
+      req = https.request(options, (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const raw = Buffer.concat(chunks).toString('utf-8');
+            let lndMsg = raw;
+            let lndCode = null;
+            try {
+              const errBody = JSON.parse(raw);
+              lndMsg = normalizeLndMessage(errBody.message, '') || normalizeLndMessage(errBody.error, '') || raw;
+              lndCode = errBody.code || null;
+            } catch {
+              // raw text is fine as the error message
+            }
+            fail(new LndError(lndMsg, res.statusCode, raw, lndCode));
+          });
+          return;
+        }
+
+        let buffer = '';
+
+        res.on('data', (chunk) => {
+          if (settled) return;
+          buffer += chunk.toString('utf-8');
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (parseEvent(line)) return;
+          }
+
+          // Some REST gateways send the first stream event without a newline.
+          parseEvent(buffer);
+        });
+
+        res.on('end', () => {
+          if (settled) return;
+          if (parseEvent(buffer)) return;
+          finish({});
+        });
+
+        res.on('error', fail);
+      });
+
+      req.on('error', fail);
+      req.on('timeout', () => {
+        const err = new Error(`Stream request timed out: ${method} ${url}`);
+        err.code = 'ETIMEDOUT';
+        req.destroy();
+        fail(err);
+      });
+
+      if (jsonBody != null) {
+        req.write(jsonBody);
+      }
+      req.end();
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // General / Node info
   // ---------------------------------------------------------------------------
@@ -589,7 +712,7 @@ export class NodeClient {
     // LND REST uses the URL-safe base64 variant of txid bytes by default,
     // but also accepts the hex txid via the funding_txid_str query param
     // alongside the output_index in the URL path.
-    return this._delete(
+    return this._deleteStreamFirst(
       `/v1/channels/${fundingTxid}/${outputIndex}`,
       query,
       requestOptions,

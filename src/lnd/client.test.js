@@ -41,3 +41,21 @@ test('NodeClient coalesces concurrent identical GET requests', async () => {
   await client.getInfo();
   assert.equal(calls, 2);
 });
+
+test('NodeClient closeChannel uses first stream event from LND close endpoint', async () => {
+  const client = makeClient('close-stream');
+  let called = null;
+  client._deleteStreamFirst = async (path, query, requestOptions) => {
+    called = { path, query, requestOptions };
+    return { close_pending: { txid: 'close-tx' } };
+  };
+
+  const result = await client.closeChannel('fundingtx:1', false, 3, { timeoutMs: 12_345 });
+
+  assert.deepEqual(result, { close_pending: { txid: 'close-tx' } });
+  assert.deepEqual(called, {
+    path: '/v1/channels/fundingtx/1',
+    query: { force: false, sat_per_vbyte: 3 },
+    requestOptions: { timeoutMs: 12_345 },
+  });
+});
