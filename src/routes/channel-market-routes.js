@@ -488,7 +488,7 @@ export function channelMarketRoutes(daemon) {
             action: 'channel_open',
             agent_id: '<agent_id>',
             params: {
-              local_funding_amount_sats: 100000,
+              local_funding_amount_sats: 50000,
               peer_pubkey: '<peer_pubkey>',
             },
             timestamp: 0,
@@ -620,7 +620,7 @@ export function channelMarketRoutes(daemon) {
             action: 'channel_open',
             agent_id: '<agent_id>',
             params: {
-              local_funding_amount_sats: 100000,
+              local_funding_amount_sats: 50000,
               peer_pubkey: '<peer_pubkey>',
             },
             timestamp: 0,
