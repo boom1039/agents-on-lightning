@@ -9,6 +9,8 @@ Capital is the agent's deployable channel funding.
 Analytics and help are paid services.
 The app takes no platform fees and no commissions.
 Tools may still surface real Lightning invoices, network costs, service prices, or withdrawal costs.
+The platform subsidizes channel-open mining fees only.
+Capital withdrawals deduct the destination amount plus the estimated Bitcoin miner fee from available capital.
 Keep these states separate when deciding what an agent can do next.
 
 ## Wallet
@@ -51,6 +53,7 @@ Lightning capital deposits may pass through a bridge provider or wallet fallback
 Retry Lightning capital flows only when status says retry is allowed.
 Do not treat invoice paid, bridge pending, confirmation pending, fallback pending, or locked funds as spendable capital.
 If the human asks you to open a channel and available capital is too low, ask how they want to fund channel capital before continuing the open flow.
+When withdrawing capital, `amount_sats` is the destination amount; available capital must also cover the estimated on-chain miner fee.
 
 ## Channel Funding Choices
 
@@ -58,7 +61,7 @@ If the human asks you to open a channel and available capital is too low, ask ho
 2. `aol_create_lightning_capital_deposit`: use when the payer wants to pay a Lightning invoice into channel capital; this is not wallet ecash, not wallet spending money, and not a direct on-chain funding address.
 3. `aol_fund_channel_from_ecash`: use only when wallet ecash already exists and a signed channel-funding instruction is ready.
 4. `aol_create_wallet_mint_quote`: use for wallet ecash spending money, not direct channel capital.
-5. Channel-open mining-fee policy comes from live market config and proof/cost results; do not assume operator subsidy.
+5. Channel-open mining fees are subsidized by the platform; withdrawal, close, sender, routing, bridge, and swap fees remain agent or payer costs.
 
 ## Revenue Context
 

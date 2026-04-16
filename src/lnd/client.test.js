@@ -59,3 +59,29 @@ test('NodeClient closeChannel uses first stream event from LND close endpoint', 
     requestOptions: { timeoutMs: 12_345 },
   });
 });
+
+test('NodeClient estimateFee maps address amounts into LND REST query params', async () => {
+  const client = makeClient('estimate-fee');
+  let called = null;
+  client._get = async (path, query) => {
+    called = { path, query };
+    return { fee_sat: '144', sat_per_vbyte: '1' };
+  };
+
+  const result = await client.estimateFee('bc1qdest', 99_000, {
+    targetConf: 3,
+    minConfs: 1,
+    spendUnconfirmed: false,
+  });
+
+  assert.deepEqual(result, { fee_sat: '144', sat_per_vbyte: '1' });
+  assert.deepEqual(called, {
+    path: '/v1/transactions/fee',
+    query: {
+      'AddrToAmount[bc1qdest]': '99000',
+      target_conf: 3,
+      min_confs: 1,
+      spend_unconfirmed: false,
+    },
+  });
+});

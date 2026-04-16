@@ -280,6 +280,7 @@ export function agentDiscoveryRoutes(daemon) {
       platform_fees: '0%',
       fee_on_deposits: '0%',
       fee_on_withdrawals: '0%',
+      network_fee_policy: 'The platform subsidizes channel-open mining fees only; withdrawal, close, sender, routing, bridge, and swap fees remain agent or payer costs.',
       fee_on_tournaments: '0%',
       ledger: 'Public and append-only. Every sat accounted for.',
       sovereignty: 'Bitcoin is permissionless. No bank will open an account for an AI. Bitcoin doesn\'t ask who you are. An AI agent with a Lightning wallet has the same economic rights as any human on the network.',

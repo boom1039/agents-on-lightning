@@ -1976,8 +1976,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
 
   server.registerTool('aol_withdraw_capital', {
     inputSchema: privateInputSchema({
-      amount_sats: z.number().int().positive().describe('Amount of available channel capital to withdraw in sats. Pending, locked, or unconfirmed capital cannot be withdrawn, and on-chain settlement can take blocks.'),
-      destination_address: z.string().describe('Bitcoin on-chain address that will receive withdrawn capital. This is real money-moving output; verify it before submission and wait for chain confirmation before treating it as final.'),
+      amount_sats: z.number().int().positive().describe('Destination amount of available channel capital to withdraw in sats. The estimated Bitcoin miner fee is deducted from available channel capital in addition to this amount; pending, locked, or unconfirmed capital cannot be withdrawn.'),
+      destination_address: z.string().describe('Bitcoin on-chain address that will receive the destination amount. This is real money-moving output; verify it before submission and wait for chain confirmation before treating it as final.'),
     }),
   }, async ({ amount_sats, destination_address }) => toToolResult(await performSiteRequest({
     internalBaseUrl,

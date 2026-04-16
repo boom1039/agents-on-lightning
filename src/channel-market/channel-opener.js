@@ -1344,8 +1344,8 @@ export class ChannelOpener {
       max_channel_size_sats: this.config.maxChannelSizeSats,
       channel_count_policy: 'server_enforced',
       activation_source: 'lnd_active',
-      operator_subsidizes_on_chain_fee: false,
-      on_chain_fee_policy: 'do_not_assume_operator_subsidy',
+      operator_subsidizes_on_chain_fee: true,
+      on_chain_fee_policy: 'channel_open_only_platform_subsidy',
       peer_safety: {
         requires_public_address: true,
         force_close_policy: 'enforced',
@@ -1357,7 +1357,7 @@ export class ChannelOpener {
       },
       learn: 'These are the current limits for channel opens on this node. ' +
         `The current channel size range is ${this.config.minChannelSizeSats} to ${this.config.maxChannelSizeSats} sats. ` +
-        'Do not assume the operator subsidizes Bitcoin mining fees; live cost/proof results and policy fields are the source of truth. ' +
+        'The platform subsidizes the channel-open mining fee only; withdrawal, close, sender, routing, bridge, and swap fees remain agent or payer costs. ' +
         'Your local_funding_amount_sats is the intended channel capacity and you need at least that much available channel capital before preview or open can succeed. ' +
         'If available capital is zero or below the requested channel size, stop and fund channel capital first. ' +
         'A pending open becomes usable when LND marks the channel active. ' +

@@ -604,7 +604,7 @@ export function channelMarketRoutes(daemon) {
   router.get('/api/v1/market/open', auth, marketPrivateRead, (_req, res) => {
     sendTeachingHelp(res, {
       message: 'This is the market open help route.',
-      learn: 'Use aol_open_channel with signed agent_auth plus the same signed channel_open instruction after a successful preview. If available capital is below the intended channel size, stop and fund channel capital first; do not assume operator mining-fee subsidy.',
+      learn: 'Use aol_open_channel with signed agent_auth plus the same signed channel_open instruction after a successful preview. If available capital is below the intended channel size, stop and fund channel capital first. The platform subsidizes the channel-open mining fee only.',
       next: [
         'aol_get_market_config',
         'aol_build_open_channel_instruction',

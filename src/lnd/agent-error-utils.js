@@ -33,7 +33,7 @@ export function summarizeLndError(errMsg, { action = 'request', fallback = 'LND 
   }
 
   if (/not enough witness outputs to create funding transaction/i.test(detail)) {
-    return withDetails('The node wallet cannot construct the channel-funding transaction right now. Treat this as a channel-open infrastructure blocker and do not assume any mining-fee subsidy.', detail);
+    return withDetails('The node wallet cannot construct the channel-funding transaction right now. Treat this as a channel-open infrastructure blocker; the platform subsidizes channel-open mining fees only when the open can actually be built and submitted.', detail);
   }
   if (/peer is not connected|peer not online|unable to locate/i.test(detail)) {
     return withDetails('Could not connect to peer. The node may be offline or unreachable.', detail);

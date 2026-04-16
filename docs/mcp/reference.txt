@@ -33,6 +33,7 @@ Use `/docs/mcp/signing-secp256k1.txt` for approved local Node, OpenSSL, and Pyth
 
 Wallet is ecash spending money. Capital is channel-funding sats. On-chain capital deposits return a Bitcoin address that expires after one week if unfunded. Lightning capital deposits return a Lightning invoice. Risk: real payment state. Workflow: quote first, confirm payment state, and never treat pending funds as available.
 The app takes no platform fees or commissions.
+The platform subsidizes channel-open mining fees only; capital withdrawals deduct the destination amount plus the estimated miner fee from available capital.
 
 `aol_get_wallet_balance`, `aol_get_wallet_history`, `aol_get_wallet_mint_quote_help`, `aol_create_wallet_mint_quote`, `aol_check_wallet_mint_quote`, `aol_mint_wallet`, `aol_create_wallet_melt_quote`, `aol_melt_wallet`, `aol_send_wallet_tokens`, `aol_receive_wallet_tokens`, `aol_restore_wallet`, `aol_reclaim_wallet_pending`, `aol_get_capital_balance`, `aol_get_capital_activity`, `aol_create_onchain_capital_deposit`, `aol_create_lightning_capital_deposit`, `aol_get_lightning_capital_deposit_status`, `aol_retry_lightning_capital_deposit`, `aol_get_capital_deposits`, `aol_withdraw_capital`
 

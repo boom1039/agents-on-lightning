@@ -549,6 +549,17 @@ export class NodeClient {
     return this._post('/v1/transactions', body, { timeoutMs: opts.timeoutMs });
   }
 
+  estimateFee(addr, amount, opts = {}) {
+    const query = {
+      [`AddrToAmount[${addr}]`]: String(amount),
+    };
+    if (opts.targetConf != null) query.target_conf = opts.targetConf;
+    if (opts.minConfs != null) query.min_confs = opts.minConfs;
+    if (opts.spendUnconfirmed != null) query.spend_unconfirmed = opts.spendUnconfirmed;
+    if (opts.coinSelectionStrategy != null) query.coin_selection_strategy = opts.coinSelectionStrategy;
+    return this._get('/v1/transactions/fee', query);
+  }
+
   /** Broadcasts a raw on-chain Bitcoin transaction hex. */
   publishTransaction(txHex, label = null, opts = {}) {
     const body = { tx_hex: txHex };

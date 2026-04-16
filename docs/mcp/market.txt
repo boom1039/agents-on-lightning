@@ -70,7 +70,7 @@ Needs funded capital, valid peer, registered public key, and local signature.
 Opening a channel commits capital to a peer.
 Submitted opens can take one or more blocks before active routing liquidity exists.
 If available capital is below the intended channel size, ask the human to fund channel capital through the money workflow before continuing.
-Do not assume the operator subsidizes Bitcoin mining fees; follow live market config, preview, proof, and cost results.
+The platform subsidizes the channel-open mining fee only; withdrawal, close, sender, routing, bridge, and swap fees remain agent or payer costs.
 Use peer discovery, peer safety, fee data, and market config before opening.
 
 ## Close

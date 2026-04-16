@@ -31,6 +31,35 @@ function sha256Hex(value) {
   return createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
 }
 
+function parseSatsValue(value) {
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseOnchainFeeSats(tx) {
+  if (!tx || typeof tx !== 'object') return null;
+  for (const key of ['total_fees', 'total_fees_sat', 'fee', 'fee_sats']) {
+    const parsed = parseSatsValue(tx[key]);
+    if (parsed != null) return Math.abs(parsed);
+  }
+  return null;
+}
+
+function parseFeeEstimateSats(estimate) {
+  const fee = parseSatsValue(estimate?.fee_sat);
+  if (fee == null || fee <= 0) return null;
+  return fee;
+}
+
+function parseFeeRateSatPerVbyte(estimate) {
+  const feeRate = parseSatsValue(estimate?.sat_per_vbyte);
+  return feeRate != null && feeRate > 0 ? feeRate : null;
+}
+
 function capitalProofContext({ endpoint, mode }) {
   const rail = mode === 'lightning'
     ? 'Lightning-funded capital deposit'
@@ -162,6 +191,22 @@ async function findTransactionByLabel(client, label) {
   const txs = await client.getTransactions();
   const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
   return list.find((tx) => tx?.label === label) || null;
+}
+
+async function findWithdrawalTransaction(client, { label, txid, attempts = 4 }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const txs = await client.getTransactions();
+    const list = Array.isArray(txs?.transactions) ? txs.transactions : [];
+    const found = list.find((tx) => {
+      const hash = tx?.tx_hash || tx?.txid || tx?.hash;
+      return (txid && hash === txid) || (label && tx?.label === label);
+    });
+    if (found) return found;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return null;
 }
 
 export function agentPaidServicesRoutes(daemon) {
@@ -443,29 +488,6 @@ export function agentPaidServicesRoutes(daemon) {
     }
 
     const caps = safety.capitalWithdraw.caps || {};
-    const policy = await dangerPolicy.assessAmount({
-      scope: 'capital_withdraw',
-      agentId: req.agentId,
-      amountSats: amount_sats,
-      ...caps,
-    });
-    if (policy.decision === 'hard_cap') {
-      return agentError(res, 403, {
-        error: 'capital_withdraw_amount_rejected',
-        message: 'That withdrawal is above this node’s current capital-withdraw safety cap.',
-        hint: 'Try a smaller amount.',
-        see: 'GET /api/v1/capital/balance',
-      });
-    }
-    if (policy.decision === 'review_required') {
-      return agentError(res, 403, {
-        error: 'capital_withdraw_manual_review_required',
-        message: 'That withdrawal needs manual review on this node right now.',
-        hint: 'Try a smaller amount or wait for the current review window to clear.',
-        see: 'GET /api/v1/capital/balance',
-      });
-    }
-
     const client = daemon.nodeManager?.getScopedDefaultNodeOrNull?.('withdraw')
       || daemon.nodeManager?.getScopedDefaultNodeOrNull?.('wallet')
       || null;
@@ -478,19 +500,76 @@ export function agentPaidServicesRoutes(daemon) {
       });
     }
 
-    const withdrawalLabel = `capital-withdraw:${req.agentId}:${randomUUID()}`;
-    let debited = false;
+    let feeEstimate = null;
     try {
-      const balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, amount_sats, destination_address, {
-        reference: withdrawalLabel,
+      feeEstimate = await client.estimateFee(destination_address, amount_sats, {
+        targetConf: 3,
+        minConfs: 1,
+        spendUnconfirmed: false,
       });
-      debited = true;
+    } catch (err) {
+      return agentError(res, 503, {
+        error: 'capital_withdraw_fee_estimate_unavailable',
+        message: summarizeLndError(err?.message || '', {
+          action: 'capital withdrawal fee estimate',
+          fallback: 'The node could not estimate the on-chain withdrawal miner fee.',
+        }),
+        hint: 'Try again later. The platform only subsidizes channel-open mining fees, so withdrawals require a fee estimate before broadcast.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+
+    const estimatedFeeSats = parseFeeEstimateSats(feeEstimate);
+    if (estimatedFeeSats == null) {
+      return agentError(res, 503, {
+        error: 'capital_withdraw_fee_estimate_unavailable',
+        message: 'The node did not return a usable on-chain withdrawal miner fee estimate.',
+        hint: 'Try again later. Withdrawals require enough available capital to pay the destination amount plus the miner fee.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+
+    const totalDebitEstimateSats = amount_sats + estimatedFeeSats;
+    const feeInclusivePolicy = await dangerPolicy.assessAmount({
+      scope: 'capital_withdraw',
+      agentId: req.agentId,
+      amountSats: totalDebitEstimateSats,
+      ...caps,
+    });
+    if (feeInclusivePolicy.decision === 'hard_cap') {
+      return agentError(res, 403, {
+        error: 'capital_withdraw_amount_rejected',
+        message: 'That withdrawal plus its estimated miner fee is above this node’s current capital-withdraw safety cap.',
+        hint: 'Try a smaller destination amount.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+    if (feeInclusivePolicy.decision === 'review_required') {
+      return agentError(res, 403, {
+        error: 'capital_withdraw_manual_review_required',
+        message: 'That withdrawal plus its estimated miner fee needs manual review on this node right now.',
+        hint: 'Try a smaller destination amount or wait for the current review window to clear.',
+        see: 'GET /api/v1/capital/balance',
+      });
+    }
+    const withdrawalLabel = `capital-withdraw:${req.agentId}:${randomUUID()}`;
+    let debitedSats = 0;
+    try {
+      let balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, totalDebitEstimateSats, destination_address, {
+        reference: withdrawalLabel,
+        net_amount_sats: amount_sats,
+        estimated_fee_sats: estimatedFeeSats,
+        fee_reserve_sats: estimatedFeeSats,
+      });
+      debitedSats = totalDebitEstimateSats;
 
       let sendResult = null;
       let recoveredFromUnknown = false;
       try {
         sendResult = await client.sendCoins(destination_address, amount_sats, {
           label: withdrawalLabel,
+          targetConf: 3,
+          ...(parseFeeRateSatPerVbyte(feeEstimate) ? { satPerVbyte: parseFeeRateSatPerVbyte(feeEstimate) } : {}),
           minConfs: 1,
           spendUnconfirmed: false,
           timeoutMs: 120000,
@@ -510,12 +589,12 @@ export function agentPaidServicesRoutes(daemon) {
         if (!sendResult?.txid) {
           await daemon.capitalLedger.refundWithdrawal(
             req.agentId,
-            amount_sats,
+            debitedSats,
             destination_address,
             unknownOutcome ? 'withdraw_unknown_outcome_refunded' : 'withdraw_send_failed',
             { reference: withdrawalLabel },
           );
-          debited = false;
+          debitedSats = 0;
           return agentError(res, unknownOutcome ? 502 : 400, withRouteProofTrace({
             error: 'capital_withdraw_failed',
             message: summarizeLndError(detail, {
@@ -535,21 +614,61 @@ export function agentPaidServicesRoutes(daemon) {
         }
       }
 
+      const txRecord = await findWithdrawalTransaction(client, {
+        label: withdrawalLabel,
+        txid: sendResult.txid,
+      }).catch(() => null);
+      const actualFeeSats = parseOnchainFeeSats(txRecord);
+      let feeRefundSats = 0;
+      let feeShortfallSats = 0;
+      if (actualFeeSats != null && actualFeeSats < estimatedFeeSats) {
+        feeRefundSats = estimatedFeeSats - actualFeeSats;
+        balanceAfter = await daemon.capitalLedger.refundWithdrawal(
+          req.agentId,
+          feeRefundSats,
+          destination_address,
+          'withdraw_fee_reserve_refunded',
+          { reference: `${withdrawalLabel}:fee-refund` },
+        );
+        debitedSats -= feeRefundSats;
+      } else if (actualFeeSats != null && actualFeeSats > estimatedFeeSats) {
+        feeShortfallSats = actualFeeSats - estimatedFeeSats;
+        try {
+          balanceAfter = await daemon.capitalLedger.withdraw(req.agentId, feeShortfallSats, destination_address, {
+            reference: `${withdrawalLabel}:fee-shortfall`,
+            net_amount_sats: 0,
+            estimated_fee_sats: actualFeeSats,
+            fee_reserve_sats: feeShortfallSats,
+          });
+          debitedSats += feeShortfallSats;
+          feeShortfallSats = 0;
+        } catch (feeErr) {
+          console.error(`[Gateway] capital withdraw fee shortfall for ${req.agentId}: ${feeErr.message}`);
+        }
+      }
+      const chargedFeeSats = actualFeeSats ?? estimatedFeeSats;
+
       await dangerPolicy.recordSuccess({
         scope: 'capital_withdraw',
         agentId: req.agentId,
-        amountSats: amount_sats,
+        amountSats: debitedSats,
       });
       await daemon.capitalLedger.recordLifecycleProof?.(req.agentId, {
         moneyEventType: 'capital_withdrawal_broadcast',
         moneyEventStatus: 'submitted',
         eventSource: 'capital_withdrawal',
         authorizationMethod: 'agent_signed_request',
-        primaryAmountSats: amount_sats,
+        primaryAmountSats: debitedSats,
         reference: withdrawalLabel,
         publicSafeRefs: {
           txid: sendResult.txid,
-          amount_sats,
+          amount_sats: debitedSats,
+          gross_amount_sats: debitedSats,
+          net_amount_sats: amount_sats,
+          fee_sats: chargedFeeSats,
+          estimated_fee_sats: estimatedFeeSats,
+          fee_refund_sats: feeRefundSats,
+          platform_fee_sats: feeShortfallSats,
           status: 'broadcast',
         },
       }).catch((proofErr) => {
@@ -560,13 +679,27 @@ export function agentPaidServicesRoutes(daemon) {
         success: true,
         agent_id: req.agentId,
         amount_sats,
+        destination_amount_sats: amount_sats,
+        fee_sats: chargedFeeSats,
+        estimated_fee_sats: estimatedFeeSats,
+        fee_refund_sats: feeRefundSats,
+        total_debited_sats: debitedSats,
+        platform_fee_sats: feeShortfallSats,
         destination_address,
         txid: sendResult.txid,
         label: withdrawalLabel,
         status: 'broadcast',
         recovered_from_unknown: recoveredFromUnknown,
         balance_after: balanceAfter,
-        learn: 'The withdrawal broadcast on-chain. Watch the txid in a block explorer or your destination wallet.',
+        cost_summary: {
+          action: 'capital_withdrawal',
+          destination_amount_sats: amount_sats,
+          miner_fee_sats: chargedFeeSats,
+          total_debited_sats: debitedSats,
+          platform_fee_sats: feeShortfallSats,
+          unit: 'sat',
+        },
+        learn: 'The withdrawal broadcast on-chain. The destination amount was sent to the outside wallet, and the miner fee was deducted from this agent’s capital. The platform only subsidizes channel-open mining fees.',
       }, daemon, req.agentId, {
         scope: 'capital_withdrawal',
         eventSources: ['capital', 'capital_withdrawal'],
@@ -577,11 +710,11 @@ export function agentPaidServicesRoutes(daemon) {
         },
       }));
     } catch (err) {
-      if (debited) {
+      if (debitedSats > 0) {
         try {
           await daemon.capitalLedger.refundWithdrawal(
             req.agentId,
-            amount_sats,
+            debitedSats,
             destination_address,
             'withdraw_internal_error_refunded',
             { reference: withdrawalLabel },
@@ -602,8 +735,8 @@ export function agentPaidServicesRoutes(daemon) {
       if (isInsufficientCapitalError(err)) {
         return agentError(res, 400, {
           error: 'insufficient_capital',
-          message: `You do not have enough available capital to withdraw ${amount_sats} sats.`,
-          hint: 'Check your available capital first, or wait for pending funds to settle.',
+          message: `You do not have enough available capital to send ${amount_sats} sats and pay the estimated ${estimatedFeeSats} sat withdrawal miner fee.`,
+          hint: 'Request a smaller destination amount or wait for pending funds to settle. The platform does not subsidize withdrawal miner fees.',
           see: 'GET /api/v1/capital/balance',
         });
       }
