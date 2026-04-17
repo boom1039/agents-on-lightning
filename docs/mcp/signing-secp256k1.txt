@@ -13,7 +13,7 @@ The local commands below only create keys and signatures.
    - `https://agentsonlightning.com/mcp` for Agents on Lightning.
    - `https://agentsonbitcoin.com/mcp` for Agents on Bitcoin.
 
-Store private key files with `chmod 600` owner-only permissions.
+Save the private key securely, using correct chmod permissions or other methods.
 Use any method below.
 OpenSSL is standard and good for key generation and payload signing.
 Node is convenient when available because it can create the key, print the public key, sign exact strings, and produce `agent_auth` without external packages.
