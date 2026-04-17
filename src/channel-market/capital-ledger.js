@@ -181,10 +181,9 @@ export class CapitalLedger {
    * @param {import('../data-layer.js').DataLayer} opts.dataLayer
    * @param {import('../channel-accountability/hash-chain-audit-log.js').HashChainAuditLog} opts.auditLog
    * @param {{ acquire: (key: string) => Promise<() => void> }} opts.mutex
-   * @param {import('../wallet/ledger.js').PublicLedger} [opts.publicLedger]
    * @param {import('../proof-ledger/proof-ledger.js').ProofLedger} [opts.proofLedger]
    */
-  constructor({ dataLayer, auditLog, mutex, publicLedger = null, proofLedger = null }) {
+  constructor({ dataLayer, auditLog, mutex, proofLedger = null }) {
     if (!dataLayer) throw new Error('CapitalLedger requires dataLayer');
     if (!auditLog) throw new Error('CapitalLedger requires auditLog');
     if (!mutex) throw new Error('CapitalLedger requires mutex');
@@ -192,7 +191,6 @@ export class CapitalLedger {
     this._dataLayer = dataLayer;
     this._auditLog = auditLog;
     this._mutex = mutex;
-    this._publicLedger = publicLedger;
     this._proofLedger = proofLedger;
   }
 
@@ -258,79 +256,6 @@ export class CapitalLedger {
     assertNoNegativeBalances(state, context);
     assertInvariant(state, context);
     await this._dataLayer.writeJSON(this._statePath(agentId), state);
-  }
-
-  /**
-   * Append an entry to the legacy per-agent activity log.
-   * Proof Ledger deployments derive capital activity from signed proof rows.
-   */
-  async _logActivity(entry) {
-    if (this._proofLedger) return;
-
-    const agentId = entry.agent_id;
-    const logPath = `${STATE_DIR}/${agentId}/activity.jsonl`;
-    const stamped = {
-      ...entry,
-      _ts: Date.now(),
-    };
-    await this._dataLayer.appendLog(logPath, stamped);
-    await this._mirrorPublicLedger(stamped);
-  }
-
-  _publicLedgerEntry(entry) {
-    const mirrored = {
-      source: 'capital_ledger',
-      type: entry.type,
-      agent_id: entry.agent_id,
-    };
-
-    const amountSats = entry.amount_sats
-      ?? entry.actual_fee_sats
-      ?? entry.max_fee_locked_sats
-      ?? entry.refunded_sats
-      ?? entry.local_balance_sats
-      ?? null;
-    if (Number.isInteger(amountSats)) mirrored.amount_sats = amountSats;
-
-    const passthrough = [
-      'service',
-      'source',
-      'status',
-      'flow_id',
-      'address',
-      'txid',
-      'providers',
-      'preferred_provider',
-      'confirmations',
-      'required_confirmations',
-      'loop_out_swap_id',
-      'boltz_swap_id',
-      'claim_txid',
-      'direction',
-      'from_bucket',
-      'to_bucket',
-      'reference',
-      'reason',
-      'local_balance_sats',
-      'routing_pnl_sats',
-      'max_fee_locked_sats',
-      'actual_fee_sats',
-      'gross_amount_sats',
-      'refunded_sats',
-    ];
-    for (const key of passthrough) {
-      if (entry[key] !== undefined && entry[key] !== null) mirrored[key] = entry[key];
-    }
-    return mirrored;
-  }
-
-  async _mirrorPublicLedger(entry) {
-    if (!this._publicLedger?.record) return;
-    try {
-      await this._publicLedger.record(this._publicLedgerEntry(entry));
-    } catch (err) {
-      console.error(`[CapitalLedger] Public ledger mirror failed for ${entry.type}: ${err.message}`);
-    }
   }
 
   async _appendProof(input) {
@@ -516,17 +441,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `recordDeposit:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'deposit_pending',
-        amount_sats: amount,
-        from_bucket: null,
-        to_bucket: 'pending_deposit',
-        reference: txid,
-        ...details,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'deposit_pending',
         agent_id: agentId,
@@ -598,17 +512,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `confirmDeposit:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'deposit_confirmed',
-        amount_sats: amount,
-        from_bucket: 'pending_deposit',
-        to_bucket: 'available',
-        reference: txid,
-        ...details,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'deposit_confirmed',
         agent_id: agentId,
@@ -674,16 +577,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `lockForChannel:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'lock_for_channel',
-        amount_sats: amount,
-        from_bucket: 'available',
-        to_bucket: 'locked',
-        reference: channelPoint,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'lock_for_channel',
         agent_id: agentId,
@@ -746,16 +639,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `unlockForFailedOpen:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'unlock_failed_open',
-        amount_sats: amount,
-        from_bucket: 'locked',
-        to_bucket: 'available',
-        reference,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'unlock_failed_open',
         agent_id: agentId,
@@ -845,33 +728,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `initiateClose:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'unlock_from_channel',
-        amount_sats: originalLocked,
-        local_balance_sats: localBalance,
-        routing_pnl_sats: routingPnl,
-        from_bucket: 'locked',
-        to_bucket: 'pending_close',
-        reference: channelPoint,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
-
-      // Also log the routing P&L separately if non-zero
-      if (routingPnl !== 0) {
-        await this._logActivity({
-          agent_id: agentId,
-          type: 'routing_pnl',
-          amount_sats: Math.abs(routingPnl),
-          direction: routingPnl > 0 ? 'loss' : 'gain',
-          from_bucket: routingPnl > 0 ? 'locked' : null,
-          to_bucket: routingPnl > 0 ? null : 'available',
-          reference: channelPoint,
-          balance_after: this._balanceSummary(state),
-        });
-      }
-
       await this._logAudit({
         type: 'initiate_close',
         agent_id: agentId,
@@ -934,16 +790,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `settleClose:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'close_settled',
-        amount_sats: settledAmount,
-        from_bucket: 'pending_close',
-        to_bucket: 'available',
-        reference: txid,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'close_settled',
         agent_id: agentId,
@@ -1049,28 +895,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `reconcileClosedChannel:${agentId}`);
 
-      await this._logActivity({
-        agent_id: agentId,
-        type: 'close_settled',
-        amount_sats: settledAmount,
-        from_bucket: sourceBucket,
-        to_bucket: 'available',
-        reference: txid,
-        balance_after: this._balanceSummary(state),
-      });
-
-      if (closeFeeSats > 0) {
-        await this._logActivity({
-          agent_id: agentId,
-          type: 'close_fee',
-          amount_sats: closeFeeSats,
-          from_bucket: sourceBucket,
-          to_bucket: null,
-          reference: channelPoint,
-          balance_after: this._balanceSummary(state),
-        });
-      }
-
       await this._logAudit({
         type: 'close_settled',
         agent_id: agentId,
@@ -1150,18 +974,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `rollbackInitiatedClose:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'close_rollback',
-        amount_sats: originalLocked,
-        local_balance_sats: localBalance,
-        routing_pnl_sats: routingPnl,
-        from_bucket: 'pending_close',
-        to_bucket: 'locked',
-        reference: `${channelPoint}:${reason}`,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'close_rollback',
         agent_id: agentId,
@@ -1243,20 +1055,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `withdraw:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'withdrawal',
-        amount_sats: amount,
-        gross_amount_sats: amount,
-        net_amount_sats: Number.isSafeInteger(details.net_amount_sats) ? details.net_amount_sats : undefined,
-        estimated_fee_sats: Number.isSafeInteger(details.estimated_fee_sats) ? details.estimated_fee_sats : undefined,
-        fee_reserve_sats: Number.isSafeInteger(details.fee_reserve_sats) ? details.fee_reserve_sats : undefined,
-        from_bucket: 'available',
-        to_bucket: 'withdrawn',
-        reference: destinationAddress,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'withdrawal',
         agent_id: agentId,
@@ -1333,17 +1131,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `refund-withdrawal:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'withdrawal_refunded',
-        amount_sats: amount,
-        from_bucket: 'withdrawn',
-        to_bucket: 'available',
-        reference: destinationAddress,
-        reason,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'withdrawal_refunded',
         agent_id: agentId,
@@ -1411,17 +1198,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `spendOnService:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'service_spent',
-        service,
-        amount_sats: amount,
-        from_bucket: 'available',
-        to_bucket: 'service_spent',
-        reference,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'service_spent',
         service,
@@ -1490,18 +1266,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `refundServiceSpend:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'service_refund',
-        service,
-        amount_sats: amount,
-        from_bucket: 'service_spent',
-        to_bucket: 'available',
-        reference,
-        reason: reason || null,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'service_refund',
         service,
@@ -1564,16 +1328,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `creditRevenue:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'credit_revenue',
-        amount_sats: amount,
-        from_bucket: null,
-        to_bucket: 'available',
-        reference,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'credit_revenue',
         agent_id: agentId,
@@ -1628,16 +1382,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `creditEcashFunding:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'credit_ecash_funding',
-        amount_sats: amount,
-        from_bucket: null,
-        to_bucket: 'available',
-        reference,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'credit_ecash_funding',
         agent_id: agentId,
@@ -1729,7 +1473,6 @@ export class CapitalLedger {
         balance_after: this._balanceSummary(state),
         ...details,
       };
-      await this._logActivity(activity);
       await this._logAudit({
         type,
         agent_id: agentId,
@@ -1810,18 +1553,6 @@ export class CapitalLedger {
 
       await this._writeState(agentId, state, `settleRebalance:${agentId}`);
 
-      const activity = {
-        agent_id: agentId,
-        type: 'settle_rebalance',
-        max_fee_locked_sats: maxFeeLocked,
-        actual_fee_sats: actualFee,
-        refunded_sats: refunded,
-        from_bucket: 'locked',
-        to_bucket: 'available',
-        reference,
-        balance_after: this._balanceSummary(state),
-      };
-      await this._logActivity(activity);
       await this._logAudit({
         type: 'settle_rebalance',
         agent_id: agentId,
@@ -1926,34 +1657,9 @@ export class CapitalLedger {
       };
     }
 
-    let all;
-    if (agentId) {
-      // Read only this agent's activity log (O(1) per agent, not O(n) global)
-      try {
-        all = await this._dataLayer.readLog(`${STATE_DIR}/${agentId}/activity.jsonl`);
-      } catch { all = []; }
-    } else {
-      // Aggregate: iterate per-agent dirs
-      all = [];
-      try {
-        const entries = await this._dataLayer.listDir(STATE_DIR);
-        for (const entry of entries) {
-          if (!entry.isDir) continue;
-          try {
-            const agentEntries = await this._dataLayer.readLog(`${STATE_DIR}/${entry.name}/activity.jsonl`);
-            all.push(...agentEntries);
-          } catch { /* skip */ }
-        }
-      } catch { /* no data yet */ }
-    }
-
-    // Return newest-first for API consumers
-    const reversed = [...all].reverse();
-    const page = reversed.slice(clampedOffset, clampedOffset + clampedLimit);
-
     return {
-      entries: page,
-      total: all.length,
+      entries: [],
+      total: 0,
     };
   }
 }

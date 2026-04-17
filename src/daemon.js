@@ -176,7 +176,6 @@ export class AgentDaemon {
       dataLayer: this.dataLayer,
       auditLog: this.channelAuditLog,
       mutex: channelMutex,
-      publicLedger: this.proofLedger ? null : this.publicLedger,
       proofLedger: this.proofLedger,
     });
 
