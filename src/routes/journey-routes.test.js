@@ -47,6 +47,30 @@ function fakeDaemon() {
         total: agentId === 'agent-route' || !agentId ? 1 : 0,
       }),
     },
+    externalLeaderboard: {
+      getData: () => ({
+        entries: [
+          {
+            rank: 1,
+            agent_id: 'agent-route',
+            name: 'route-agent',
+            total_fees_sats: 7,
+            total_capacity_sats: 1000,
+            fees_per_sat: 0.007,
+            registered_at: 1000,
+          },
+        ],
+        updatedAt: 2000,
+        metric: 'all_time_routing_performance',
+        sort_order: [
+          { column: 'total_fees_sats', direction: 'desc' },
+          { column: 'total_capacity_sats', direction: 'desc' },
+          { column: 'fees_per_sat', direction: 'desc' },
+          { column: 'registered_at', direction: 'asc' },
+        ],
+        agentCount: 1,
+      }),
+    },
     proofLedger: {
       getLatestGlobalProof: () => ({
         proof_id: 'proof-route-1',
@@ -172,6 +196,18 @@ test('journey agents dashboard and ledger analytics require operator auth remote
     assert.equal(proofJson.source_of_truth, 'proof_ledger');
     assert.equal(proofJson.proof_of_liabilities.total_liability_sats, 1000);
     assert.equal(proofJson.global_chain.valid, true);
+
+    const leaderboard = await fetch(new URL('/api/analytics/leaderboard?limit=1', baseUrl), {
+      headers: {
+        'x-forwarded-for': '203.0.113.10',
+        authorization: auth,
+      },
+    });
+    assert.equal(leaderboard.status, 200);
+    const leaderboardJson = await leaderboard.json();
+    assert.equal(leaderboardJson.entries.length, 1);
+    assert.equal(leaderboardJson.entries[0].agent_id, 'agent-route');
+    assert.equal(leaderboardJson.sort_order[0].column, 'total_fees_sats');
   } finally {
     await stopJourneyMonitor();
     await new Promise((resolve) => server.close(resolve));

@@ -626,6 +626,20 @@ class JourneyMonitor {
     return this.analyticsDb.mcpFinancialMilestones(options);
   }
 
+  async leaderboard(options = {}) {
+    const data = this.daemon?.externalLeaderboard?.getData?.() || { entries: [], updatedAt: null };
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    const requestedLimit = Number(options.limit);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.max(1, Math.min(requestedLimit, 500))
+      : 50;
+    return {
+      ...data,
+      entries: entries.slice(0, limit),
+      total: entries.length,
+    };
+  }
+
   async ledgerSummary() {
     return ledgerSummary(this.daemon);
   }

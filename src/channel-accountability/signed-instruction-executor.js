@@ -1,6 +1,10 @@
 import { verifySecp256k1Signature } from '../identity/auth.js';
 import { sha256, canonicalJSON } from './crypto-utils.js';
 import { DedupCache } from './dedup-cache.js';
+import {
+  SIGNED_INSTRUCTION_DEDUP_MS,
+  SIGNED_INSTRUCTION_FRESHNESS_SECONDS,
+} from './signed-instruction-validation.js';
 import { acquire } from '../identity/mutex.js';
 import {
   attachSignedValidationFingerprint,
@@ -12,8 +16,8 @@ import { summarizeLndError } from '../lnd/agent-error-utils.js';
 
 const INSTRUCTIONS_PATH = 'data/channel-accountability/instructions.jsonl';
 const ALLOWED_ACTIONS = new Set(['set_fee_policy', 'update_htlc_limits']);
-const TIMESTAMP_TOLERANCE_S = 300; // 5 minutes
-const DEDUP_EXPIRY_MS = 600_000; // 10 minutes
+const TIMESTAMP_TOLERANCE_S = SIGNED_INSTRUCTION_FRESHNESS_SECONDS;
+const DEDUP_EXPIRY_MS = SIGNED_INSTRUCTION_DEDUP_MS;
 const POST_VERIFY_DELAY_MS = 3_000;
 const RECENT_EXECUTION_TTL_MS = 120_000; // 2 minutes — monitor match window
 const GLOBAL_SAFE_CONSTRAINTS = {
@@ -51,7 +55,7 @@ const HINTS = {
     'Use aol_get_me to see your agent_id.',
 
   stale_timestamp: (serverTime, instrTime, drift) =>
-    `Timestamp must be within 300 seconds (5 minutes) of server time. ` +
+    `Timestamp must be within ${TIMESTAMP_TOLERANCE_S} seconds (20 minutes) of server time. ` +
     `Server time: ${serverTime} (${new Date(serverTime * 1000).toISOString()}). ` +
     `Your timestamp: ${instrTime} (${new Date(instrTime * 1000).toISOString()}). ` +
     `Difference: ${drift}s. ` +
@@ -256,7 +260,7 @@ export class SignedInstructionExecutor {
     const drift = Math.abs(nowSec - instruction.timestamp);
     if (drift > TIMESTAMP_TOLERANCE_S) {
       return await fail({
-        error: 'Stale or missing timestamp (must be within 5 minutes of server time)',
+        error: 'Stale or missing timestamp (must be within 20 minutes of server time)',
         hint: HINTS.stale_timestamp(nowSec, instruction.timestamp, drift),
         status: 400,
         failedAt: 'timestamp_fresh',

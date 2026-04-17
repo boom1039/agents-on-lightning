@@ -6,7 +6,7 @@
  *   2. pubkey_registered  — agent has a secp256k1 public key
  *   3. action_valid       — instruction.action matches expected
  *   4. agent_id_matches   — instruction.agent_id == authenticated agent
- *   5. timestamp_fresh    — within ±300s of server time
+ *   5. timestamp_fresh    — within ±1200s of server time
  *   6. not_duplicate      — instruction hash not in dedup cache
  *   7. signature_valid    — secp256k1 signature verifies
  *
@@ -22,6 +22,9 @@ import {
   classifyInvalidSignature,
 } from './signed-validation-fingerprint.js';
 
+export const SIGNED_INSTRUCTION_FRESHNESS_SECONDS = 1200;
+export const SIGNED_INSTRUCTION_DEDUP_MS = (SIGNED_INSTRUCTION_FRESHNESS_SECONDS + 60) * 1000;
+
 /**
  * Hints shared across all signed-instruction endpoints.
  */
@@ -35,7 +38,7 @@ export const SHARED_VALIDATION_HINTS = {
     'Use aol_get_me to see your agent_id.',
 
   stale_timestamp: (serverTime, instrTime, drift) =>
-    `Timestamp must be within 300 seconds of server time. ` +
+    `Timestamp must be within ${SIGNED_INSTRUCTION_FRESHNESS_SECONDS} seconds (20 minutes) of server time. ` +
     `Server: ${serverTime} (${new Date(serverTime * 1000).toISOString()}). ` +
     `Yours: ${instrTime} (${new Date(instrTime * 1000).toISOString()}). ` +
     `Drift: ${Math.abs(drift)}s. Use Math.floor(Date.now()/1000) at sign time.`,
@@ -147,7 +150,7 @@ export async function validateSignedInstruction({
   }
   checks_passed.push('agent_id_matches');
 
-  // Step 5: timestamp_fresh (epoch seconds, ±300s)
+  // Step 5: timestamp_fresh (epoch seconds, ±1200s)
   if (typeof instruction.timestamp !== 'number' || !Number.isFinite(instruction.timestamp)) {
     return await fail({
       error: 'timestamp must be a finite number (epoch seconds)',
@@ -159,9 +162,9 @@ export async function validateSignedInstruction({
   }
   const nowSec = Math.floor(Date.now() / 1000);
   const driftSec = Math.abs(nowSec - instruction.timestamp);
-  if (driftSec > 300) {
+  if (driftSec > SIGNED_INSTRUCTION_FRESHNESS_SECONDS) {
     return await fail({
-      error: 'Timestamp too old or too far in future (must be within 300s of server time)',
+      error: `Timestamp too old or too far in future (must be within ${SIGNED_INSTRUCTION_FRESHNESS_SECONDS}s of server time)`,
       hint: SHARED_VALIDATION_HINTS.stale_timestamp(nowSec, instruction.timestamp, driftSec),
       status: 400,
       failedAt: 'timestamp_fresh',

@@ -18,6 +18,7 @@ import {
   buildKeyRotationPayload,
   canonicalAuthHash,
   canonicalAuthJson,
+  DEFAULT_AUTH_FRESHNESS_SECONDS,
   validateAuthFreshness,
   validateNonce,
   verifyRegistrationAuth,
@@ -281,7 +282,7 @@ export class AgentRegistry {
     if (replayStore) {
       const replay = await replayStore.consume(authCheck.auth_payload_hash, {
         agentId: normalizedPubkey,
-        expiresAt: (registration_auth.timestamp + 300) * 1000,
+        expiresAt: (registration_auth.timestamp + DEFAULT_AUTH_FRESHNESS_SECONDS) * 1000,
       });
       if (!replay.ok) throw new Error(`${replay.code}: ${replay.message}`);
     }
@@ -485,7 +486,7 @@ export class AgentRegistry {
     if (replayStore) {
       const replay = await replayStore.consume(authPayloadHash, {
         agentId,
-        expiresAt: (key_rotation_auth.timestamp + 300) * 1000,
+        expiresAt: (key_rotation_auth.timestamp + DEFAULT_AUTH_FRESHNESS_SECONDS) * 1000,
       });
       if (!replay.ok) throw new Error(`${replay.code}: ${replay.message}`);
     }

@@ -13,9 +13,11 @@ The local commands below only create keys and signatures.
    - `https://agentsonlightning.com/mcp` for Agents on Lightning.
    - `https://agentsonbitcoin.com/mcp` for Agents on Bitcoin.
 
+Store private key files with `chmod 600` owner-only permissions.
 Use any method below.
 OpenSSL is standard and good for key generation and payload signing.
 Node is convenient when available because it can create the key, print the public key, sign exact strings, and produce `agent_auth` without external packages.
+Use trusted installers and verify checksums/signatures when available.
 
 ## Method 1: Node
 
@@ -331,7 +333,7 @@ AOL_MCP_URL=https://agentsonlightning.com/mcp python3 aol-sign.py agent-auth "<a
 2. Use one method above to produce `agent_auth` for the exact tool name and exact arguments.
 3. Call the named MCP tool with the same arguments plus `agent_auth`.
 4. If any argument changes, create a fresh `agent_auth`.
-5. Signed payloads expire after five minutes.
+5. Signed payloads expire after twenty minutes.
 6. If you switch between Agents on Lightning and Agents on Bitcoin, set `AOL_MCP_URL` to the matching MCP endpoint before signing.
 
 ## Channel Instruction Flow

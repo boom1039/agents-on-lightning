@@ -395,6 +395,12 @@ export function journeyRoutes() {
     })
   ));
 
+  router.get('/api/analytics/leaderboard', analyticsHandler(req =>
+    getJourneyMonitor().leaderboard({
+      limit: intParam(req.query.limit) || 50,
+    })
+  ));
+
   router.get('/api/analytics/ledger/summary', analyticsHandler(() =>
     getJourneyMonitor().ledgerSummary()
   ));

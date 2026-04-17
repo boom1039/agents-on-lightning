@@ -13,7 +13,10 @@
  */
 
 import { DedupCache } from '../channel-accountability/dedup-cache.js';
-import { validateSignedInstruction } from '../channel-accountability/signed-instruction-validation.js';
+import {
+  SIGNED_INSTRUCTION_DEDUP_MS,
+  validateSignedInstruction,
+} from '../channel-accountability/signed-instruction-validation.js';
 import { appendSignedValidationFailure } from '../channel-accountability/signed-validation-fingerprint.js';
 import { summarizeLndError } from '../lnd/agent-error-utils.js';
 import { pickSafePublicPeerAddress } from '../identity/request-security.js';
@@ -224,8 +227,8 @@ export class ChannelOpener {
     this._lastPollBlockHeight = 0;
     this._stopping = false;
 
-    // Dedup cache (10-minute expiry window)
-    this._dedup = new DedupCache(600_000, {
+    // Dedup cache outlives the signed-instruction freshness window.
+    this._dedup = new DedupCache(SIGNED_INSTRUCTION_DEDUP_MS, {
       dataLayer,
       path: 'data/channel-market/channel-open-dedup.json',
     });

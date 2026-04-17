@@ -148,10 +148,11 @@
     .main {
       display: grid;
       grid-template-columns: minmax(360px, 0.95fr) minmax(520px, 1.35fr) minmax(350px, 0.9fr);
-      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr) 250px;
+      grid-template-rows: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 0.8fr) 250px;
       grid-template-areas:
         "slot0 slot1 slot2"
         "slot0 slot1 slot3"
+        "slot0 slot1 slot6"
         "slot0 slot1 slot4"
         "slot5 slot5 slot5";
       gap: 6px;
@@ -168,6 +169,7 @@
     .panel-slot[data-slot-index="3"] { grid-area: slot3; }
     .panel-slot[data-slot-index="4"] { grid-area: slot4; }
     .panel-slot[data-slot-index="5"] { grid-area: slot5; }
+    .panel-slot[data-slot-index="6"] { grid-area: slot6; }
     .panel-slot.drag-over {
       outline: 1px dashed var(--cyan);
       outline-offset: -2px;
@@ -384,12 +386,13 @@
       .metrics { grid-template-columns: repeat(4, 1fr); }
       .main {
         grid-template-columns: 1fr;
-        grid-template-rows: repeat(6, minmax(320px, auto));
+        grid-template-rows: repeat(7, minmax(320px, auto));
         grid-template-areas:
           "slot0"
           "slot1"
           "slot2"
           "slot3"
+          "slot6"
           "slot4"
           "slot5";
       }
@@ -482,6 +485,22 @@
         </section>
       </div>
 
+      <div class="panel-slot" data-slot-index="6">
+        <section class="subpane" data-panel="leaderboard">
+          <div class="subhead">
+            <span title="Source: /api/analytics/leaderboard from ExternalLeaderboard. Ordered by lifetime routing fees, then deployed channel capital, then fee efficiency.">Leaderboard</span>
+            <span class="grow"></span>
+            <button class="panel-drag" draggable="true" data-panel-drag="leaderboard" title="Drag section">move</button>
+          </div>
+          <div class="scroll">
+            <table>
+              <thead id="leaderboard-head"></thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
       <div class="panel-slot" data-slot-index="4">
         <section class="subpane" data-panel="sql">
           <div class="subhead">
@@ -543,13 +562,14 @@
 
     const $ = (id) => document.getElementById(id);
     const STORAGE_PREFIX = 'aol:mcp-ledger-console:v1';
-    const PANEL_IDS = ['agents', 'timeline', 'funnel', 'tools', 'sql', 'ledger'];
-    const TABLE_IDS = ['agents', 'funnel', 'tools', 'ledger'];
+    const PANEL_IDS = ['agents', 'timeline', 'funnel', 'tools', 'sql', 'ledger', 'leaderboard'];
+    const TABLE_IDS = ['agents', 'funnel', 'tools', 'leaderboard', 'ledger'];
     const tableState = {};
     const defaultTableState = {
       agents: { order: ['agent', 'calls', 'fail', 'stage', 'lastTool', 'proofBalance', 'proofs', 'latestProof', 'proofHash', 'capital', 'ledger', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       funnel: { order: ['stage', 'agents', 'calls', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
       tools: { order: ['tool', 'group', 'calls', 'fail', 'note'], widths: {}, sortBy: null, sortDir: 'desc' },
+      leaderboard: { order: ['rank', 'agent', 'name', 'fees', 'capital', 'efficiency', 'note'], widths: {}, sortBy: 'rank', sortDir: 'asc' },
       ledger: { order: ['time', 'seq', 'agent', 'proofId', 'record', 'status', 'type', 'delta', 'amount', 'source', 'refs', 'hash'], widths: {}, sortBy: null, sortDir: 'desc' },
     };
     let panelOrder = loadJson('panels', PANEL_IDS);
@@ -898,6 +918,73 @@
           sort: (row) => Number(row.calls || 0),
         },
       ],
+      leaderboard: [
+        {
+          id: 'rank',
+          label: 'rank',
+          width: 46,
+          className: 'mono',
+          title: () => 'Source: /api/analytics/leaderboard from ExternalLeaderboard. Rank is after the displayed all-time routing-performance sort order.',
+          html: (row) => fmtNum(row.rank),
+          sort: (row) => Number(row.rank || 0),
+        },
+        {
+          id: 'agent',
+          label: 'agent',
+          width: 86,
+          className: 'cyan',
+          title: () => 'Public agent id from the same leaderboard served to MCP agents.',
+          html: (row) => esc(short(row.agent_id, 12)),
+          sort: (row) => row.agent_id || '',
+        },
+        {
+          id: 'name',
+          label: 'name',
+          width: 112,
+          html: (row) => esc(short(row.name || '-', 20)),
+          sort: (row) => row.name || '',
+        },
+        {
+          id: 'fees',
+          label: 'fees',
+          width: 58,
+          className: 'mono',
+          title: () => 'Lifetime routing fees attributed to this agent. Primary descending sort.',
+          html: (row) => fmtSats(row.total_fees_sats),
+          sort: (row) => Number(row.total_fees_sats || 0),
+        },
+        {
+          id: 'capital',
+          label: 'capital',
+          width: 76,
+          className: 'mono',
+          title: () => 'Total assigned channel capital for this agent. Secondary descending sort when fees tie.',
+          html: (row) => fmtSats(row.total_capacity_sats),
+          sort: (row) => Number(row.total_capacity_sats || 0),
+        },
+        {
+          id: 'efficiency',
+          label: 'eff',
+          width: 56,
+          className: 'mono',
+          title: () => 'Routing-fee efficiency: lifetime fees divided by deployed channel capital. Third descending sort.',
+          html: (row) => Number(row.fees_per_sat || 0).toFixed(8),
+          sort: (row) => Number(row.fees_per_sat || 0),
+        },
+        {
+          id: 'note',
+          label: 'sort note',
+          width: 160,
+          className: 'muted',
+          title: () => 'Sort order matches the MCP leaderboard response: lifetime fees, channel capital, efficiency, then registration time.',
+          html: (row) => {
+            if (Number(row.total_fees_sats || 0) > 0) return 'ranked by routing fees';
+            if (Number(row.total_capacity_sats || 0) > 0) return 'fee tie; capital wins';
+            return 'zero fees and zero capital';
+          },
+          sort: (row) => Number(row.total_fees_sats || 0) || Number(row.total_capacity_sats || 0) || Number(row.fees_per_sat || 0),
+        },
+      ],
       ledger: [
         { id: 'time', label: 'time', width: 118, html: (row) => fmtTime(tsOf(row)), sort: (row) => tsOf(row) },
         {
@@ -1036,6 +1123,7 @@
       if (tableId === 'agents') renderAgents();
       if (tableId === 'funnel') renderFunnel();
       if (tableId === 'tools') renderTools();
+      if (tableId === 'leaderboard') renderLeaderboard();
       if (tableId === 'ledger') renderLedger();
     }
 
@@ -1302,6 +1390,14 @@
       renderConfiguredTable('tools', rows, { context: { maxCalls } });
     }
 
+    function renderLeaderboard() {
+      const payload = state.data.leaderboard || {};
+      const rows = Array.isArray(payload.entries) ? payload.entries.slice(0, 50) : [];
+      renderConfiguredTable('leaderboard', rows, {
+        context: { sortOrder: payload.sort_order || [] },
+      });
+    }
+
     function renderLedger() {
       const payload = state.data.ledgerRecent || { entries: [], total: 0, limit: state.ledgerLimit, offset: state.ledgerOffset };
       $('ledger-page').textContent = `${fmtNum(payload.offset || 0)}-${fmtNum((payload.offset || 0) + (payload.entries || []).length)} / ${fmtNum(payload.total || 0)}`;
@@ -1462,6 +1558,7 @@
           ledgerAgents,
           reconciliation,
           proofSummary,
+          leaderboard,
         ] = await Promise.all([
           api('/api/analytics/mcp-agents?limit=100'),
           api('/api/analytics/mcp-funnel'),
@@ -1472,13 +1569,15 @@
           api('/api/analytics/ledger/agents?limit=100'),
           api('/api/analytics/ledger/reconciliation'),
           api('/api/analytics/proof-ledger/summary'),
+          api('/api/analytics/leaderboard?limit=50'),
         ]);
-        state.data = { mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation, proofSummary };
+        state.data = { mcpAgents, funnel, tools, milestones, ledgerSummary, ledgerRecent, ledgerAgents, reconciliation, proofSummary, leaderboard };
         state.ledgerOffset = 0;
         renderMetrics();
         renderAgents();
         renderFunnel();
         renderTools();
+        renderLeaderboard();
         renderLedger();
         $('status').innerHTML = `<span class="${reconciliation.ok ? 'ok' : 'warn'}">recon ${reconciliation.ok ? 'ok' : `${reconciliation.issue_count} issues`}</span> | updated ${fmtTime(Date.now())}`;
         if (state.selectedAgent) await selectAgent(state.selectedAgent);
