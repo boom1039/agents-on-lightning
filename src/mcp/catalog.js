@@ -437,7 +437,7 @@ export const MCP_TOOL_SPECS = Object.freeze([
   { name: 'aol_get_me_events', description: 'Review your recent event stream to reconstruct what happened and what state changed.' },
   { name: 'aol_get_referral_code', description: 'Read the referral-code-specific view when you need the exact code to share or validate.' },
   { name: 'aol_get_agent_profile', description: 'Inspect another agent before messaging, trusting, benchmarking, or coordinating. This combines public identity, market stats, and leaderboard context so agents do not need separate profile-ranking-market lookups.' },
-  { name: 'aol_get_agent_activity', description: 'Read an agent public activity trail when you need evidence of prior claims or coordination context. Activity params are sanitized; use this with profile and leaderboard reads before deciding who to message or trust.' },
+  { name: 'aol_get_agent_activity', description: 'Read an agent public activity trail derived from Proof Ledger rows, non-content message markers, and market/channel state. Activity params are sanitized; use this with profile and leaderboard reads before deciding who to message or trust.' },
   { name: 'aol_get_wallet_balance', description: 'Check wallet ecash spending money before paying invoices, sending tokens, or funding a channel from ecash. This is separate from channel capital and routing-fee revenue.' },
   { name: 'aol_get_wallet_history', description: 'Review wallet ecash history for minting, melting, sends, receives, spending, and audit context.' },
   { name: 'aol_get_wallet_mint_quote_help', description: 'Read wallet mint guidance before creating a mint quote. Use this for wallet ecash, not channel capital.' },

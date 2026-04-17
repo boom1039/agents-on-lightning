@@ -4,8 +4,6 @@
  * Per-agent directory: ai_panel/data/external-agents/{agent_id}/
  *   profile.json — name, description, framework, contact_url, pubkey
  *   state.json — tier, wallet balance, node connection, strategy, cycle count
- *   activity.jsonl — public agent activity records
- *   suggestions.jsonl — suggestions made/received
  *   reputation.json — scores, ranking history, badges
  *   messages.jsonl — agent-to-agent messages
  */
@@ -28,12 +26,6 @@ import {
 
 const PROFILE_DESCRIPTION_RULE = { field: 'description', maxLen: 500, maxLines: 8, maxLineLen: 240 };
 const PROFILE_FRAMEWORK_RULE = { field: 'framework', maxLen: 100, maxLines: 2, maxLineLen: 80, allowNewlines: false };
-const ACTIVITY_DESCRIPTION_RULE = { field: 'description', maxLen: 1500, maxLines: 24, maxLineLen: 240 };
-const SUGGESTION_TEXT_RULES = {
-  description: { field: 'description', maxLen: 1000, maxLines: 16, maxLineLen: 240 },
-  content: { field: 'content', maxLen: 1500, maxLines: 24, maxLineLen: 240 },
-  reason: { field: 'reason', maxLen: 500, maxLines: 8, maxLineLen: 160 },
-};
 const MESSAGE_TEXT_RULE = { field: 'content', maxLen: 2000, maxLines: 24, maxLineLen: 320 };
 
 function applyNormalizedTextField(target, field, rule) {
@@ -526,24 +518,6 @@ export class AgentRegistry {
   }
 
   /**
-   * Append to an agent's public activity log.
-   */
-  async logActivity(agentId, activity) {
-    const sanitized = sanitizeLoggedRecord(activity, {
-      description: ACTIVITY_DESCRIPTION_RULE,
-    });
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/activity.jsonl`, sanitized);
-  }
-
-  /**
-   * Append to agent's suggestion log.
-   */
-  async logSuggestion(agentId, suggestion) {
-    const sanitized = sanitizeLoggedRecord(suggestion, SUGGESTION_TEXT_RULES);
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/suggestions.jsonl`, sanitized);
-  }
-
-  /**
    * Append to agent's message log.
    */
   async logMessage(agentId, message) {
@@ -551,28 +525,6 @@ export class AgentRegistry {
       content: MESSAGE_TEXT_RULE,
     });
     await this._dataLayer.appendLog(`data/external-agents/${agentId}/messages.jsonl`, sanitized);
-  }
-
-  /**
-   * Read an agent's public activity history.
-   */
-  async getActivities(agentId, since) {
-    try {
-      return await this._dataLayer.readLog(`data/external-agents/${agentId}/activity.jsonl`, since);
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Read agent's suggestion history.
-   */
-  async getSuggestions(agentId, since) {
-    try {
-      return await this._dataLayer.readLog(`data/external-agents/${agentId}/suggestions.jsonl`, since);
-    } catch {
-      return [];
-    }
   }
 
   /**

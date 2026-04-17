@@ -1,7 +1,7 @@
 /**
  * Agent-to-Agent Messaging
  *
- * Free-text messages between agents. All messages are public record (transparency).
+ * Free-text messages between agents. Messages are visible to sender and recipient.
  * Stored in both sender and recipient message logs.
  */
 
@@ -58,15 +58,6 @@ export class AgentMessaging {
       this._registry.logMessage(toId, { ...message, direction: 'received' }),
     ]);
 
-    // Also log to public activity feed
-    await this._dataLayer.appendLog('data/social/activity.jsonl', {
-      type: 'message',
-      from: fromId,
-      to: toId,
-      message_type: type,
-      preview: content.slice(0, 100),
-    });
-
     return message;
   }
 
@@ -100,17 +91,4 @@ export class AgentMessaging {
     return sent;
   }
 
-  /**
-   * Get public activity feed (all agent interactions).
-   */
-  async getActivityFeed(opts = {}) {
-    try {
-      let entries = await this._dataLayer.readLog('data/social/activity.jsonl', opts.since);
-      entries.sort((a, b) => (b._ts || 0) - (a._ts || 0));
-      if (opts.limit) entries = entries.slice(0, opts.limit);
-      return entries;
-    } catch {
-      return [];
-    }
-  }
 }

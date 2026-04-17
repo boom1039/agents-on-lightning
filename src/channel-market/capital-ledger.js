@@ -17,7 +17,7 @@
  *   1. Mutex-protected (per-agent)
  *   2. Validated (no negative balances)
  *   3. Atomically written (write-to-tmp + rename)
- *   4. Activity-logged (JSONL)
+ *   4. Written to Proof Ledger when enabled
  *   5. Audit-chained (tamper-evident hash chain)
  */
 
@@ -261,9 +261,12 @@ export class CapitalLedger {
   }
 
   /**
-   * Append an entry to the per-agent activity log.
+   * Append an entry to the legacy per-agent activity log.
+   * Proof Ledger deployments derive capital activity from signed proof rows.
    */
   async _logActivity(entry) {
+    if (this._proofLedger) return;
+
     const agentId = entry.agent_id;
     const logPath = `${STATE_DIR}/${agentId}/activity.jsonl`;
     const stamped = {

@@ -122,12 +122,144 @@ function sanitizePublicActivity(activity) {
   return {
     activity_id: activity.activity_id,
     agent_id: activity.agent_id,
+    source: activity.source || 'derived',
     activity_type: activity.activity_type,
     description: activity.description || '',
     status: activity.status || 'unknown',
     submitted_at: activity.submitted_at,
     params: sanitizePublicActivityParams(activity.params),
   };
+}
+
+function parseJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function proofDescription(proof) {
+  const amount = Number(proof.primary_amount_sats || proof.net_amount_sats || proof.gross_amount_sats || 0);
+  const amountText = amount ? ` for ${amount} sats` : '';
+  return `${proof.money_event_type || proof.proof_record_type || 'proof event'}${amountText}`;
+}
+
+function proofToActivity(proof) {
+  return {
+    activity_id: proof.proof_id,
+    agent_id: proof.agent_id,
+    source: 'proof_ledger',
+    activity_type: proof.money_event_type || proof.proof_record_type || 'proof_event',
+    description: proofDescription(proof),
+    status: proof.money_event_status || 'signed',
+    submitted_at: proof.created_at_ms,
+    params: {
+      proof_id: proof.proof_id,
+      global_sequence: proof.global_sequence,
+      agent_proof_sequence: proof.agent_proof_sequence,
+      proof_record_type: proof.proof_record_type,
+      money_event_type: proof.money_event_type,
+      money_event_status: proof.money_event_status,
+      primary_amount_sats: proof.primary_amount_sats,
+      asset: proof.asset,
+      ...parseJsonObject(proof.safe_refs_json),
+    },
+  };
+}
+
+function messageToActivity(message) {
+  const direction = message.direction === 'sent' ? 'sent' : 'received';
+  return {
+    activity_id: message.message_id,
+    agent_id: direction === 'sent' ? message.from : message.to,
+    source: 'messages',
+    activity_type: `message_${direction}`,
+    description: `${direction === 'sent' ? 'Sent' : 'Received'} a direct message`,
+    status: 'delivered',
+    submitted_at: message.sent_at || message._ts,
+    params: {
+      message_id: message.message_id,
+      message_type: message.type,
+      direction,
+    },
+  };
+}
+
+function assignmentToActivity(assignment) {
+  return {
+    activity_id: `channel-${assignment.chan_id || assignment.channel_point || assignment.assigned_at}`,
+    agent_id: assignment.agent_id,
+    source: 'market',
+    activity_type: 'channel_assigned',
+    description: 'Assigned channel capital to a Lightning channel',
+    status: assignment.active ? 'active' : 'assigned',
+    submitted_at: assignment.assigned_at || assignment.created_at || 0,
+    params: {
+      chan_id: assignment.chan_id,
+      channel_point: assignment.channel_point,
+      peer_pubkey: assignment.peer_pubkey,
+      capacity_sats: assignment.capacity || assignment.capacity_sats,
+    },
+  };
+}
+
+function pendingMarketToActivity(entry, source, type) {
+  return {
+    activity_id: entry.flow_id || entry.open_id || entry.close_id || entry.channel_point || `${type}-${entry.created_at || entry.requested_at || entry.updated_at || ''}`,
+    agent_id: entry.agent_id,
+    source,
+    activity_type: type,
+    description: type.replaceAll('_', ' '),
+    status: entry.status || entry.state || 'pending',
+    submitted_at: entry.created_at || entry.requested_at || entry.updated_at || 0,
+    params: {
+      flow_id: entry.flow_id,
+      chan_id: entry.chan_id,
+      channel_point: entry.channel_point,
+      peer_pubkey: entry.peer_pubkey,
+      amount_sats: entry.amount_sats || entry.local_funding_amount_sats,
+    },
+  };
+}
+
+async function buildDerivedPublicAgentActivity(daemon, agentId, limit) {
+  const entries = [];
+
+  if (daemon.proofLedger?.listProofs) {
+    entries.push(...daemon.proofLedger
+      .listProofs({ agentId, limit: Math.max(limit * 2, 20), offset: 0 })
+      .map(proofToActivity));
+  }
+
+  if (daemon.agentRegistry?.getMessages) {
+    const messages = await daemon.agentRegistry.getMessages(agentId);
+    entries.push(...messages.map(messageToActivity));
+  }
+
+  if (daemon.channelAssignments?.getByAgent) {
+    entries.push(...daemon.channelAssignments.getByAgent(agentId).map(assignmentToActivity));
+  }
+
+  for (const [handler, source, type] of [
+    [daemon.channelOpener, 'market', 'channel_open_pending'],
+    [daemon.channelCloser, 'market', 'channel_close_pending'],
+    [daemon.ecashChannelFunder, 'market', 'ecash_channel_funding_pending'],
+  ]) {
+    if (handler && typeof handler.getPendingForAgent === 'function') {
+      entries.push(...handler.getPendingForAgent(agentId).map((entry) => pendingMarketToActivity(entry, source, type)));
+    }
+  }
+
+  return entries
+    .filter((entry) => entry.activity_id && entry.submitted_at)
+    .map(sanitizePublicActivity)
+    .sort((a, b) => (b.submitted_at || 0) - (a.submitted_at || 0))
+    .slice(0, limit);
 }
 
 async function verifyExternalNodeConnection(daemon, agentId, hostCheck, macaroon, tlsCert) {
@@ -297,10 +429,7 @@ export function agentIdentityRoutes(daemon) {
 
       const limit = clampPublicActivityLimit(req.query.limit);
       const activityId = typeof req.query.activity_id === 'string' ? req.query.activity_id.trim() : '';
-      const rawActivities = await daemon.agentRegistry.getActivities(req.params.id);
-      const sanitized = rawActivities
-        .map(sanitizePublicActivity)
-        .sort((a, b) => (b.submitted_at || 0) - (a.submitted_at || 0));
+      const sanitized = await buildDerivedPublicAgentActivity(daemon, req.params.id, limit);
 
       if (activityId) {
         const activity = sanitized.find((entry) => entry.activity_id === activityId);
@@ -310,17 +439,18 @@ export function agentIdentityRoutes(daemon) {
           activity,
           activities: [activity],
           count: 1,
-          learn: 'Public activity for this agent. Params are sanitized and never include private keys, signatures, tokens, or seeds.',
+          source_of_truth: 'derived_from_proof_messages_and_market_state',
+          learn: 'Public activity for this agent is derived from proof rows, non-content message markers, and market/channel state. Params are sanitized and never include private keys, signatures, tokens, seeds, message content, or message counterparties.',
         });
       }
 
-      const activities = sanitized.slice(0, limit);
       return res.json({
         agent_id: req.params.id,
-        activities,
-        count: activities.length,
+        activities: sanitized,
+        count: sanitized.length,
         limit,
-        learn: 'Public activity for this agent. Params are sanitized and never include private keys, signatures, tokens, or seeds.',
+        source_of_truth: 'derived_from_proof_messages_and_market_state',
+        learn: 'Public activity for this agent is derived from proof rows, non-content message markers, and market/channel state. Params are sanitized and never include private keys, signatures, tokens, seeds, message content, or message counterparties.',
       });
     } catch (err) {
       return err500Internal(res, 'fetching agent activity');

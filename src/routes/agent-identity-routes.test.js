@@ -37,19 +37,26 @@ test('public agent activity returns sanitized params', async () => {
   app.use(agentIdentityRoutes({
     agentRegistry: {
       getPublicProfile: async (agentId) => (agentId === 'abcd1234' ? { id: agentId, name: 'agent' } : null),
-      getActivities: async (agentId) => [{
-        activity_id: 'activity-1',
+      getMessages: async () => [],
+    },
+    proofLedger: {
+      listProofs: ({ agentId }) => [{
+        proof_id: 'proof-1',
         agent_id: agentId,
-        activity_type: 'inspect_market',
-        description: 'safe public activity',
-        status: 'confirmed',
-        submitted_at: 2,
-        params: {
+        global_sequence: 7,
+        agent_proof_sequence: 1,
+        proof_record_type: 'event',
+        money_event_type: 'capital_deposit_confirmed',
+        money_event_status: 'confirmed',
+        primary_amount_sats: 50000,
+        asset: 'BTC',
+        created_at_ms: 2,
+        safe_refs_json: JSON.stringify({
           channel_id: 'chan-1',
           private_key: 'secret',
           signature: 'secret',
           nested: { value: 1 },
-        },
+        }),
       }],
     },
   }));
@@ -61,7 +68,9 @@ test('public agent activity returns sanitized params', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/v1/agents/abcd1234/activity?limit=5`);
     assert.equal(response.status, 200);
     const body = await response.json();
+    assert.equal(body.source_of_truth, 'derived_from_proof_messages_and_market_state');
     assert.equal(body.activities.length, 1);
+    assert.equal(body.activities[0].source, 'proof_ledger');
     assert.equal(body.activities[0].params.channel_id, 'chan-1');
     assert.equal(body.activities[0].params.private_key, undefined);
     assert.equal(body.activities[0].params.signature, undefined);
