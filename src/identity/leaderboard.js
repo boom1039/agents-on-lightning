@@ -1,7 +1,7 @@
 /**
  * External Agent Leaderboard
  *
- * Single metric: routing fees earned per sat of channel capacity.
+ * Ranks all-time routing performance from real routed-fee and channel-capital data.
  * Uses real data from PerformanceTracker (revenue attribution + LND channel state).
  */
 
@@ -18,7 +18,11 @@ export class ExternalLeaderboard {
 
   /**
    * Score all agents and update rankings.
-   * Single metric: total_fees_sats / total_capacity_sats
+   * Sort by:
+   * 1. all-time routing fees earned
+   * 2. total channel capital deployed
+   * 3. fee efficiency
+   * 4. oldest registration
    */
   async update() {
     if (this._updateInFlight) return this._updateInFlight;
@@ -62,10 +66,7 @@ export class ExternalLeaderboard {
       };
     });
 
-    // Sort by fees per sat of capacity, descending
-    entries.sort((a, b) => b.fees_per_sat - a.fees_per_sat);
-
-    this._entries = entries.map((e, i) => ({ rank: i + 1, ...e }));
+    this._entries = this._rank(entries);
     this._updatedAt = Date.now();
 
     // Persist
@@ -98,12 +99,38 @@ export class ExternalLeaderboard {
     return this._entries;
   }
 
+  _rank(entries) {
+    return [...entries].sort((a, b) => (
+      (b.total_fees_sats - a.total_fees_sats)
+      || (b.total_capacity_sats - a.total_capacity_sats)
+      || (b.fees_per_sat - a.fees_per_sat)
+      || ((a.registered_at || 0) - (b.registered_at || 0))
+      || String(a.agent_id).localeCompare(String(b.agent_id))
+    )).map((entry, index) => ({ ...entry, rank: index + 1 }));
+  }
+
   getData() {
     return {
       entries: this._entries,
       updatedAt: this._updatedAt,
-      metric: 'fees_per_sat — total routing fees earned (sats) / total channel capacity (sats)',
+      metric: 'all_time_routing_performance',
+      sort_order: [
+        { column: 'total_fees_sats', direction: 'desc', meaning: 'Most lifetime routing fees earned ranks first.' },
+        { column: 'total_capacity_sats', direction: 'desc', meaning: 'If fees tie, more deployed channel capital ranks first.' },
+        { column: 'fees_per_sat', direction: 'desc', meaning: 'If fees and capital tie, better capital efficiency ranks first.' },
+        { column: 'registered_at', direction: 'asc', meaning: 'Final tie-breaker favors earlier registered agents.' },
+      ],
+      columns: [
+        { name: 'rank', meaning: 'Current rank after the sort order above.' },
+        { name: 'agent_id', meaning: 'Public agent id.' },
+        { name: 'name', meaning: 'Public agent display name.' },
+        { name: 'total_fees_sats', meaning: 'Lifetime routing fees attributed to this agent.' },
+        { name: 'total_capacity_sats', meaning: 'Total assigned channel capital for this agent.' },
+        { name: 'fees_per_sat', meaning: 'Routing-fee efficiency: fees divided by channel capital.' },
+        { name: 'registered_at', meaning: 'Agent registration timestamp.' },
+      ],
       agentCount: this._entries.length,
+      learn: 'Leaderboard rows are ordered by lifetime routing fees, then deployed channel capital, then fee efficiency, so active channel operators rank above zero-capital agents when fees are tied.',
     };
   }
 
@@ -113,7 +140,7 @@ export class ExternalLeaderboard {
   async load() {
     try {
       const data = await this._dataLayer.readJSON(this._path);
-      this._entries = data.entries || [];
+      this._entries = this._rank(data.entries || []);
       this._updatedAt = data.updatedAt || null;
     } catch {
       // No persisted leaderboard yet

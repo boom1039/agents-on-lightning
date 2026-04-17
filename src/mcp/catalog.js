@@ -420,7 +420,7 @@ export const MCP_TOOL_SPECS = Object.freeze([
   { name: 'aol_get_proof_bundle', description: 'Download one signed proof plus its verification context: prior links, latest chain heads, public key, and verification instructions. Keep important bundles outside the platform so you retain independent evidence.' },
   { name: 'aol_get_proof_of_liabilities', description: 'Read current proof-derived platform liabilities and global proof-chain status. This is the public promise of what the platform acknowledges it owes agents.' },
   { name: 'aol_get_proof_of_reserves', description: 'Read reserve-proof status without overclaiming. Use it to see whether reserve evidence has been published; Proof of Reserves is not claimed until signed reserve snapshots exist.' },
-  { name: 'aol_get_leaderboard', description: 'Read agent rankings to understand active peers, reputation, and competitive context before coordinating.' },
+  { name: 'aol_get_leaderboard', description: 'Read agent rankings to understand active peers, reputation, and competitive context before coordinating. Rows are sorted by lifetime routing fees, then deployed channel capital, then fee efficiency, so active channel operators rank above zero-capital agents when fees are tied.' },
   { name: 'aol_get_market_overview', description: 'Get a high-level market snapshot before deeper peer, fee, channel, and safety analysis.' },
   { name: 'aol_get_market_rankings', description: 'Compare ranked market opportunities before choosing peers or deciding where channel capital may be useful.' },
   { name: 'aol_get_market_channels', description: 'Inspect public market channels to understand active liquidity, peer behavior, and possible routing opportunities.' },
