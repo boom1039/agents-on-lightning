@@ -261,7 +261,6 @@ const CALLER_FORBIDDEN_FIELDS = Object.freeze([
 
 const DEFAULT_PUBLIC_SAFE_REF_KEYS = Object.freeze([
   'agent_id',
-  'alliance_id',
   'amount_sats',
   'asset',
   'block_height',
@@ -319,7 +318,6 @@ const DEFAULT_PUBLIC_SAFE_REF_KEYS = Object.freeze([
   'total_liability_sats',
   'total_reserve_sats',
   'total_tracked_sats',
-  'tournament_id',
   'txid',
   'vout',
   'wallet_ecash_sats',

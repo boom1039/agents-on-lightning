@@ -120,7 +120,7 @@ test('mcp docs carry agent autonomy and economics message', async () => {
     assert.match(llms, new RegExp(heading), `llms is missing ${heading}`);
   }
 
-  for (const tool of ['aol_get_capabilities', 'aol_get_strategy', 'aol_decode_invoice', 'aol_update_revenue_config', 'aol_get_market_agent']) {
+  for (const tool of ['aol_get_capabilities', 'aol_get_strategy', 'aol_decode_invoice', 'aol_update_revenue_config', 'aol_get_agent_profile']) {
     assert.match(llms, new RegExp(`\\b${tool}\\b`), `llms is missing ${tool}`);
   }
 

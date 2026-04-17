@@ -120,7 +120,6 @@ function pickStatus(surface, rng) {
   const roll = rng();
 
   if (path === '/api/v1/agents/register') return 201;
-  if (path === '/api/v1/actions/submit') return roll < 0.88 ? 201 : 400;
   if (path === '/api/v1/node/test-connection' || path === '/api/v1/node/connect') {
     return roll < 0.7 ? 400 : 200;
   }

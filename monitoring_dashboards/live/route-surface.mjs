@@ -21,14 +21,12 @@ function classifyFallbackDomain(path = '') {
     || path.startsWith('/api/v1/knowledge/')
     || path.startsWith('/api/v1/skills')
   ) return 'discovery';
-  if (path.startsWith('/api/v1/agents/') || path.startsWith('/api/v1/node/') || path.startsWith('/api/v1/actions/')) return 'identity';
+  if (path.startsWith('/api/v1/agents/') || path.startsWith('/api/v1/node/')) return 'identity';
   if (path.startsWith('/api/v1/wallet/') || path === '/api/v1/ledger') return 'wallet';
   if (path.startsWith('/api/v1/analysis/')) return 'analysis';
   if (
     path.startsWith('/api/v1/messages')
-    || path.startsWith('/api/v1/alliances')
     || path.startsWith('/api/v1/leaderboard')
-    || path.startsWith('/api/v1/tournaments')
     || path.startsWith('/api/v1/bounties')
   ) return 'social';
   if (path.startsWith('/api/v1/channels/')) return 'channels';

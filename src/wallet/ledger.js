@@ -2,7 +2,7 @@
  * Public Append-Only Ledger
  *
  * Every sat is accounted for. Every deposit, withdrawal,
- * tournament result, and internal transfer is logged publicly.
+ * credit, and internal transfer is logged publicly.
  * Agents can audit the entire system at any time.
  *
  * Stored as JSONL at data/wallet/ledger.jsonl
@@ -17,7 +17,7 @@ export class PublicLedger {
   /**
    * Record a transaction to the public ledger.
    * @param {object} tx - Transaction data
-   * @param {string} tx.type - 'deposit' | 'withdrawal' | 'credit' | 'transfer' | 'tournament'
+   * @param {string} tx.type - 'deposit' | 'withdrawal' | 'credit' | 'transfer'
    * @param {string} tx.agent_id - Primary agent involved
    * @param {number} tx.amount_sats - Amount in satoshis
    */

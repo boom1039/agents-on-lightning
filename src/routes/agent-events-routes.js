@@ -215,25 +215,6 @@ export function agentEventsRoutes(daemon) {
       });
       events.push(...securityEvents);
 
-      // --- Social: alliances involving this agent ---
-      const allianceEvents = await collectSafe('social', async () => {
-        const alliances = await daemon.allianceManager?.list(agentId);
-        if (!alliances) return [];
-        return alliances.map(a => ({
-          type: `social:alliance_${a.status || 'unknown'}`,
-          timestamp: toISO(a.accepted_at || a.proposed_at || a.broken_at),
-          _sort_ts: a.accepted_at || a.proposed_at || a.broken_at || 0,
-          data: {
-            alliance_id: a.alliance_id,
-            proposer: a.proposer,
-            partner: a.partner,
-            status: a.status,
-            description: a.terms?.description || null,
-          },
-        }));
-      });
-      events.push(...allianceEvents);
-
       // --- Apply since filter ---
       let filtered = events;
       if (since) {

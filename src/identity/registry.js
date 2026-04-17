@@ -2,19 +2,18 @@
  * Agent Registry — manages external agent registration, profiles, and identity.
  *
  * Per-agent directory: ai_panel/data/external-agents/{agent_id}/
- *   profile.json — name, description, framework, lineage, contact_url, pubkey
+ *   profile.json — name, description, framework, contact_url, pubkey
  *   state.json — tier, wallet balance, node connection, strategy, cycle count
- *   actions.jsonl — submitted actions (append-only)
+ *   activity.jsonl — public agent activity records
  *   suggestions.jsonl — suggestions made/received
  *   reputation.json — scores, ranking history, badges
  *   messages.jsonl — agent-to-agent messages
- *   lineage.json — strategy genealogy
  */
 
 import { randomBytes } from 'node:crypto';
 import {
   validateName, validateUrl,
-  validateSecp256k1Pubkey, validateAgentId, validateReferralCode,
+  validateSecp256k1Pubkey, validateReferralCode,
   normalizeFreeText,
 } from './validators.js';
 import {
@@ -29,7 +28,7 @@ import {
 
 const PROFILE_DESCRIPTION_RULE = { field: 'description', maxLen: 500, maxLines: 8, maxLineLen: 240 };
 const PROFILE_FRAMEWORK_RULE = { field: 'framework', maxLen: 100, maxLines: 2, maxLineLen: 80, allowNewlines: false };
-const ACTION_DESCRIPTION_RULE = { field: 'description', maxLen: 1500, maxLines: 24, maxLineLen: 240 };
+const ACTIVITY_DESCRIPTION_RULE = { field: 'description', maxLen: 1500, maxLines: 24, maxLineLen: 240 };
 const SUGGESTION_TEXT_RULES = {
   description: { field: 'description', maxLen: 1000, maxLines: 16, maxLineLen: 240 },
   content: { field: 'content', maxLen: 1500, maxLines: 24, maxLineLen: 240 },
@@ -70,7 +69,6 @@ export function normalizeRegistrationProfileForSigning({
   name,
   description,
   framework,
-  forked_from,
   contact_url,
   referred_by,
 }) {
@@ -91,13 +89,6 @@ export function normalizeRegistrationProfileForSigning({
     normalizedFramework = fw.value || null;
   }
 
-  let normalizedForkedFrom = null;
-  if (forked_from !== undefined && forked_from !== null) {
-    const forkCheck = validateAgentId(forked_from);
-    if (!forkCheck.valid) throw new Error(`forked_from: ${forkCheck.reason}`);
-    normalizedForkedFrom = forked_from.trim();
-  }
-
   let normalizedContactUrl = null;
   if (contact_url !== undefined && contact_url !== null) {
     const urlCheck = validateUrl(contact_url);
@@ -116,7 +107,6 @@ export function normalizeRegistrationProfileForSigning({
     name: name.trim(),
     description: normalizedDescription,
     framework: normalizedFramework,
-    forked_from: normalizedForkedFrom,
     contact_url: normalizedContactUrl,
     referred_by: normalizedReferredBy,
   };
@@ -162,7 +152,6 @@ export class AgentRegistry {
       framework: profile.framework || null,
       contact_url: profile.contact_url || null,
       badge: profile.badge || null,
-      forked_from: profile.forked_from || null,
       registered_at: profile.registered_at || null,
       updated_at: profile.updated_at || null,
     };
@@ -218,7 +207,6 @@ export class AgentRegistry {
     name,
     description,
     framework,
-    forked_from,
     contact_url,
     referred_by,
   }) {
@@ -226,7 +214,6 @@ export class AgentRegistry {
       name,
       description,
       framework,
-      forked_from,
       contact_url,
       referred_by,
     });
@@ -261,7 +248,7 @@ export class AgentRegistry {
 
   /**
    * Register a new external agent.
-   * @param {object} params - { name, pubkey, registration_auth, audience, description?, framework?, forked_from?, contact_url?, referred_by? }
+   * @param {object} params - { name, pubkey, registration_auth, audience, description?, framework?, contact_url?, referred_by? }
    * @returns {{ agent_id, referral_code, tier }}
    */
   async register({
@@ -271,7 +258,6 @@ export class AgentRegistry {
     pubkey,
     registration_auth,
     audience,
-    forked_from,
     contact_url,
     referred_by,
     replayStore,
@@ -287,7 +273,6 @@ export class AgentRegistry {
       name,
       description,
       framework,
-      forked_from,
       contact_url,
       referred_by,
     });
@@ -323,7 +308,6 @@ export class AgentRegistry {
       description: signedProfile.description,
       framework: signedProfile.framework,
       pubkey: normalizedPubkey,
-      forked_from: signedProfile.forked_from,
       contact_url: signedProfile.contact_url,
       referred_by: signedProfile.referred_by,
       registration_auth_payload_hash: authCheck.auth_payload_hash,
@@ -367,32 +351,8 @@ export class AgentRegistry {
       referral_count: 0,
     });
 
-    // Write lineage
-    const lineage = {
-      agent_id: agentId,
-      forked_from: forked_from || null,
-      forks: [],
-      created_at: now,
-    };
-    await this._dataLayer.writeJSON(`${basePath}/lineage.json`, lineage);
-
     // Update in-memory indexes
     this._indexProfile(profile);
-
-    // If forked_from, update parent's lineage
-    if (forked_from && this._idIndex.has(forked_from)) {
-      try {
-        const parentPath = `data/external-agents/${forked_from}/lineage.json`;
-        const parentLineage = await this._dataLayer.readJSON(parentPath);
-        if (parentLineage) {
-          parentLineage.forks = parentLineage.forks || [];
-          parentLineage.forks.push({ agent_id: agentId, forked_at: now });
-          await this._dataLayer.writeJSON(parentPath, parentLineage);
-        }
-      } catch {
-        // Parent lineage update is best-effort
-      }
-    }
 
     // If referred_by, credit the referrer
     if (referred_by) {
@@ -403,17 +363,6 @@ export class AgentRegistry {
           const refRep = await this._dataLayer.readJSON(refRepPath);
           if (refRep) {
             refRep.referral_count = (refRep.referral_count || 0) + 1;
-            // Award evangelist badges at thresholds
-            const count = refRep.referral_count;
-            if (count >= 5 && !refRep.badges.includes('evangelist-5')) {
-              refRep.badges.push('evangelist-5');
-            }
-            if (count >= 25 && !refRep.badges.includes('evangelist-25')) {
-              refRep.badges.push('evangelist-25');
-            }
-            if (count >= 100 && !refRep.badges.includes('evangelist-100')) {
-              refRep.badges.push('evangelist-100');
-            }
             await this._dataLayer.writeJSON(refRepPath, refRep);
           }
         } catch {
@@ -577,24 +526,13 @@ export class AgentRegistry {
   }
 
   /**
-   * Get agent's lineage tree.
+   * Append to an agent's public activity log.
    */
-  async getLineage(agentId) {
-    try {
-      return await this._dataLayer.readJSON(`data/external-agents/${agentId}/lineage.json`);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Append to agent's action log.
-   */
-  async logAction(agentId, action) {
-    const sanitized = sanitizeLoggedRecord(action, {
-      description: ACTION_DESCRIPTION_RULE,
+  async logActivity(agentId, activity) {
+    const sanitized = sanitizeLoggedRecord(activity, {
+      description: ACTIVITY_DESCRIPTION_RULE,
     });
-    await this._dataLayer.appendLog(`data/external-agents/${agentId}/actions.jsonl`, sanitized);
+    await this._dataLayer.appendLog(`data/external-agents/${agentId}/activity.jsonl`, sanitized);
   }
 
   /**
@@ -616,11 +554,11 @@ export class AgentRegistry {
   }
 
   /**
-   * Read agent's action history.
+   * Read an agent's public activity history.
    */
-  async getActions(agentId, since) {
+  async getActivities(agentId, since) {
     try {
-      return await this._dataLayer.readLog(`data/external-agents/${agentId}/actions.jsonl`, since);
+      return await this._dataLayer.readLog(`data/external-agents/${agentId}/activity.jsonl`, since);
     } catch {
       return [];
     }
@@ -722,28 +660,4 @@ export class AgentRegistry {
     return this._idIndex.size;
   }
 
-  /**
-   * Get top evangelists (by referral count).
-   */
-  async getTopEvangelists(limit = 20) {
-    const results = [];
-    for (const [id] of this._idIndex) {
-      try {
-        const rep = await this._dataLayer.readJSON(`data/external-agents/${id}/reputation.json`);
-        if (rep && rep.referral_count > 0) {
-          const profile = this._idIndex.get(id);
-          results.push({
-            agent_id: id,
-            name: profile?.name || id,
-            referral_count: rep.referral_count,
-            badges: rep.badges?.filter(b => b.startsWith('evangelist')) || [],
-          });
-        }
-      } catch {
-        // skip
-      }
-    }
-    results.sort((a, b) => b.referral_count - a.referral_count);
-    return results.slice(0, limit);
-  }
 }

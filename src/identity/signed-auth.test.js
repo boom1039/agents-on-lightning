@@ -62,7 +62,6 @@ test('registration auth proves control of the registering secp256k1 key', async 
     name: 'signed-auth-test',
     description: null,
     framework: null,
-    forked_from: null,
     contact_url: null,
     referred_by: null,
   };

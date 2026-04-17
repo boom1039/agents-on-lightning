@@ -1,7 +1,7 @@
 /**
- * Agent Identity Routes — /api/v1/agents/, /api/v1/node/, /api/v1/actions/
+ * Agent Identity Routes — /api/v1/agents/ and /api/v1/node/.
  *
- * Registration, profile, lineage, node connection, and action submission.
+ * Registration, profile, public activity, and node connection.
  */
 
 import { Router } from 'express';
@@ -9,7 +9,7 @@ import { requireAuth } from '../identity/auth.js';
 import { rateLimit } from '../identity/rate-limiter.js';
 import {
   validateAgentId,
-  validateString, validateTier,
+  validateTier,
 } from '../identity/validators.js';
 import { logRegistrationAttempt } from '../identity/audit-log.js';
 import { err400Validation, err400MissingField, err404NotFound, err500Internal } from '../identity/agent-friendly-errors.js';
@@ -20,6 +20,9 @@ const SAFE_SELF_SERVE_NODE_TIERS = new Set(['observatory', 'readonly', 'wallet',
 const DEFAULT_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS = 5_000;
 const MIN_MACAROON_HEX_CHARS = 32;
 const MIN_TLS_CERT_CHARS = 64;
+const PUBLIC_AGENT_ACTIVITY_DEFAULT_LIMIT = 20;
+const PUBLIC_AGENT_ACTIVITY_MAX_LIMIT = 100;
+const PUBLIC_ACTIVITY_SECRET_KEY = /(api|secret|token|private|seed|bearer|signature|key)/i;
 
 function getNodeCredentialVerifyTimeoutMs() {
   const parsed = Number(process.env.AOL_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS || DEFAULT_NODE_CREDENTIAL_VERIFY_TIMEOUT_MS);
@@ -93,6 +96,38 @@ function sendTierRequiresApproval(res, tier) {
     message: `Node tier "${tier}" needs operator approval.`,
     hint: 'Use observatory, readonly, wallet, or invoice for self-serve node connections.',
   });
+}
+
+function clampPublicActivityLimit(value) {
+  const parsed = Number(value || PUBLIC_AGENT_ACTIVITY_DEFAULT_LIMIT);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PUBLIC_AGENT_ACTIVITY_DEFAULT_LIMIT;
+  return Math.min(Math.trunc(parsed), PUBLIC_AGENT_ACTIVITY_MAX_LIMIT);
+}
+
+function sanitizePublicActivityParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return {};
+  const clean = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (PUBLIC_ACTIVITY_SECRET_KEY.test(String(key))) continue;
+    if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      clean[key] = value;
+      continue;
+    }
+    clean[key] = Array.isArray(value) ? '[array]' : '[object]';
+  }
+  return clean;
+}
+
+function sanitizePublicActivity(activity) {
+  return {
+    activity_id: activity.activity_id,
+    agent_id: activity.agent_id,
+    activity_type: activity.activity_type,
+    description: activity.description || '',
+    status: activity.status || 'unknown',
+    submitted_at: activity.submitted_at,
+    params: sanitizePublicActivityParams(activity.params),
+  };
 }
 
 async function verifyExternalNodeConnection(daemon, agentId, hostCheck, macaroon, tlsCert) {
@@ -231,9 +266,7 @@ export function agentIdentityRoutes(daemon) {
   // Read agents me referral code.
   // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral-code","summary":"Read agents me referral code.","order":140,"tags":["identity","read","agent"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/me/referral-code', auth, rateLimit('identity_read'), sendReferralCode);
-  // Read agents me referral.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Agents","label":"referral","summary":"Read agents me referral.","order":150,"tags":["identity","read","agent"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/agents/me/referral', auth, rateLimit('identity_read'), sendReferralCode);
+
   // Read agents by id.
   // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"agent","summary":"Read agents by id.","order":160,"tags":["identity","read","dynamic","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
   router.get('/api/v1/agents/:id', rateLimit('discovery'), async (req, res) => {
@@ -250,18 +283,47 @@ export function agentIdentityRoutes(daemon) {
       return err500Internal(res, 'fetching agent profile');
     }
   });
-  // Read agents by id lineage.
-  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"lineage","summary":"Read agents by id lineage.","order":170,"tags":["identity","read","dynamic","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/agents/:id/lineage', rateLimit('discovery'), async (req, res) => {
+  // Read public activity for an agent.
+  // @agent-route {"auth":"public","domain":"identity","subgroup":"Agents","label":"activity","summary":"Read public agent activity.","order":165,"tags":["identity","read","dynamic","public"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/agents/:id/activity', rateLimit('discovery'), async (req, res) => {
     const idCheck = validateAgentId(req.params.id);
-    if (!idCheck.valid) return err400Validation(res, idCheck.reason);
+    if (!idCheck.valid) return err400Validation(res, idCheck.reason, {
+      hint: 'Agent IDs are 8-character alphanumeric strings. Check GET /api/v1/leaderboard for valid agent IDs.',
+    });
 
     try {
-      const tree = await daemon.lineageTracker?.getTree(req.params.id);
-      if (!tree) return err404NotFound(res, 'Lineage', { see: `GET /api/v1/agents/${req.params.id}` });
-      res.json(tree);
+      const profile = await daemon.agentRegistry.getPublicProfile(req.params.id);
+      if (!profile) return err404NotFound(res, 'Agent', { see: 'GET /api/v1/leaderboard' });
+
+      const limit = clampPublicActivityLimit(req.query.limit);
+      const activityId = typeof req.query.activity_id === 'string' ? req.query.activity_id.trim() : '';
+      const rawActivities = await daemon.agentRegistry.getActivities(req.params.id);
+      const sanitized = rawActivities
+        .map(sanitizePublicActivity)
+        .sort((a, b) => (b.submitted_at || 0) - (a.submitted_at || 0));
+
+      if (activityId) {
+        const activity = sanitized.find((entry) => entry.activity_id === activityId);
+        if (!activity) return err404NotFound(res, 'Activity', { see: `GET /api/v1/agents/${req.params.id}/activity` });
+        return res.json({
+          agent_id: req.params.id,
+          activity,
+          activities: [activity],
+          count: 1,
+          learn: 'Public activity for this agent. Params are sanitized and never include private keys, signatures, tokens, or seeds.',
+        });
+      }
+
+      const activities = sanitized.slice(0, limit);
+      return res.json({
+        agent_id: req.params.id,
+        activities,
+        count: activities.length,
+        limit,
+        learn: 'Public activity for this agent. Params are sanitized and never include private keys, signatures, tokens, or seeds.',
+      });
     } catch (err) {
-      return err500Internal(res, 'fetching agent lineage');
+      return err500Internal(res, 'fetching agent activity');
     }
   });
 
@@ -477,77 +539,6 @@ export function agentIdentityRoutes(daemon) {
     }
 
     res.json(dashboard);
-  });
-
-  // =========================================================================
-  // ACTIONS
-  // =========================================================================
-  // Submit actions.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"submit","summary":"Submit actions.","order":300,"tags":["identity","write","agent"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.post('/api/v1/actions/submit', auth, rateLimit('social_write'), async (req, res) => {
-    try {
-      const unexpected = findUnexpectedKeys(req.body, ['action_type', 'params', 'description']);
-      if (unexpected.length > 0) {
-        return sendUnexpectedKeys(res, unexpected, 'GET /api/v1/actions/history');
-      }
-      const { action_type, params, description } = req.body;
-      if (!action_type) return err400MissingField(res, 'action_type', {
-        example: { action_type: 'open_channel', params: { pubkey: '02abc...' } },
-      });
-      const atCheck = validateString(action_type, 100);
-      if (!atCheck.valid) return err400Validation(res, `action_type: ${atCheck.reason}`);
-      if (description) {
-        const dCheck = validateString(description, 300);
-        if (!dCheck.valid) return err400Validation(res, `description: ${dCheck.reason}`);
-      }
-      const paramsBytes = Buffer.byteLength(JSON.stringify(params || {}));
-      if (paramsBytes > 4000) return err400Validation(res, 'params too large (max 4000 bytes)');
-
-      const actionId = `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const action = {
-        action_id: actionId,
-        agent_id: req.agentId,
-        action_type,
-        params: params || {},
-        description: description || '',
-        status: 'pending',
-        submitted_at: Date.now(),
-      };
-
-      await daemon.agentRegistry.logAction(req.agentId, action);
-
-      // Award "First Blood" badge on first action
-      const rep = await daemon.agentRegistry.getReputation(req.agentId);
-      if (rep && !rep.badges?.includes('first-blood')) {
-        await daemon.agentRegistry.awardBadge(req.agentId, 'first-blood');
-      }
-
-      res.status(201).json(action);
-    } catch (err) {
-      return err400Validation(res, err.message);
-    }
-  });
-  // Read actions history.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"history","summary":"Read actions history.","order":310,"tags":["identity","read","agent"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/actions/history', auth, rateLimit('identity_read'), async (req, res) => {
-    try {
-      const actions = await daemon.agentRegistry.getActions(req.agentId);
-      res.json({ actions });
-    } catch (err) {
-      return err500Internal(res, 'fetching action history');
-    }
-  });
-  // Read actions by id.
-  // @agent-route {"auth":"agent","domain":"identity","subgroup":"Actions","label":"action","summary":"Read actions by id.","order":320,"tags":["identity","read","dynamic","agent"],"doc":["llms.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":true,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/actions/:id', auth, rateLimit('identity_read'), async (req, res) => {
-    try {
-      const actions = await daemon.agentRegistry.getActions(req.agentId);
-      const action = actions.find(a => a.action_id === req.params.id);
-      if (!action) return err404NotFound(res, 'Action', { see: 'GET /api/v1/actions/history' });
-      res.json(action);
-    } catch (err) {
-      return err500Internal(res, 'fetching action');
-    }
   });
 
   return router;

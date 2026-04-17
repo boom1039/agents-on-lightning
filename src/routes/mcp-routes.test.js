@@ -137,6 +137,22 @@ async function startApp() {
   app.get('/api/v1/proofs/reserves', (_req, res) => res.json({
     proof_of_reserves: { status: 'not_yet_published' },
   }));
+  app.get('/api/v1/agents/:id', (req, res) => res.json({
+    id: req.params.id,
+    name: 'public-agent',
+  }));
+  app.get('/api/v1/agents/:id/activity', (req, res) => res.json({
+    agent_id: req.params.id,
+    activities: [],
+  }));
+  app.get('/api/v1/agents/:id/market-summary', (req, res) => res.json({
+    agent_id: req.params.id,
+    channels: 0,
+  }));
+  app.get('/api/v1/leaderboard', (_req, res) => res.json({
+    entries: [{ agent_id: 'agent1234', rank: 7 }],
+    total: 1,
+  }));
 
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -330,20 +346,14 @@ test('hosted MCP works in stateless mode without mcp-session-id headers', async 
     ]);
     apiRequests.length = 0;
     await client.callTool({ name: 'aol_get_channels_mine', arguments: withAgentAuth('aol_get_channels_mine') });
-    await client.callTool({ name: 'aol_get_leaderboard_agent', arguments: { id: 'agent1234' } });
-    await client.callTool({ name: 'aol_get_leaderboard_challenges', arguments: {} });
-    await client.callTool({ name: 'aol_get_leaderboard_hall_of_fame', arguments: {} });
-    await client.callTool({ name: 'aol_get_leaderboard_evangelists', arguments: {} });
-    await client.callTool({ name: 'aol_get_tournament_bracket', arguments: { id: 'daily' } });
-    await client.callTool({ name: 'aol_enter_tournament', arguments: withAgentAuth('aol_enter_tournament', { id: 'daily' }) });
+    await client.callTool({ name: 'aol_get_agent_profile', arguments: { id: 'agent1234' } });
+    await client.callTool({ name: 'aol_get_agent_activity', arguments: { id: 'agent1234', limit: 5 } });
     assert.deepEqual(apiRequests, [
       { method: 'GET', path: '/api/v1/channels/mine' },
-      { method: 'GET', path: '/api/v1/leaderboard/agent/agent1234' },
-      { method: 'GET', path: '/api/v1/leaderboard/challenges' },
-      { method: 'GET', path: '/api/v1/leaderboard/hall-of-fame' },
-      { method: 'GET', path: '/api/v1/leaderboard/evangelists' },
-      { method: 'GET', path: '/api/v1/tournaments/daily/bracket' },
-      { method: 'POST', path: '/api/v1/tournaments/daily/enter' },
+      { method: 'GET', path: '/api/v1/agents/agent1234' },
+      { method: 'GET', path: '/api/v1/agents/agent1234/market-summary' },
+      { method: 'GET', path: '/api/v1/leaderboard' },
+      { method: 'GET', path: '/api/v1/agents/agent1234/activity' },
     ]);
     const resources = await client.listResources();
     const resourceUris = (resources.resources || []).map((resource) => resource.uri);

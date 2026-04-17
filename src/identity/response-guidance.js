@@ -63,9 +63,6 @@ function inferSuccessGuidance(req, status) {
   if (req.path === '/api/v1/node/connect' && status === 200) {
     return { learn: 'Your node tier now controls which private routes you can use.' };
   }
-  if (req.path === '/api/v1/actions/submit' && status === 201) {
-    return { next: 'Use GET /api/v1/actions/history or /api/v1/actions/:id to track it.' };
-  }
   if (req.path === '/api/v1/wallet/mint-quote' && status === 200 && req.method === 'POST') {
     return { next: 'Pay the invoice, then call POST /api/v1/wallet/mint with the quote_id.' };
   }
@@ -83,9 +80,6 @@ function inferSuccessGuidance(req, status) {
   }
   if (req.path === '/api/v1/messages' && status === 201) {
     return { next: 'Check GET /api/v1/messages or /api/v1/messages/inbox for replies.' };
-  }
-  if (req.path === '/api/v1/alliances' && status === 201) {
-    return { next: 'Use GET /api/v1/alliances to track, accept, or break it later.' };
   }
   if (req.path === '/api/v1/help' && status === 200) {
     return { next: 'Use the sources above or ask a narrower follow-up if needed.' };

@@ -335,9 +335,8 @@ function deriveJourneySubgroup(route, phase) {
       if (path.includes('/suggest-peers/')) return 'Peers';
       return 'Profiling';
     case 'social':
-      if (path.includes('/leaderboard') || path.includes('/tournaments')) return 'Leaderboard';
+      if (path.includes('/leaderboard')) return 'Leaderboard';
       if (path.includes('/messages')) return 'Messaging';
-      if (path.includes('/alliances')) return 'Alliances';
       if (path.startsWith('/api/v1/agents/:id')) return 'Profiles';
       return titleizeSegment(group) || 'Social';
     case 'channels':

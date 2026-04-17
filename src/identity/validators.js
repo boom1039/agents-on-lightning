@@ -208,28 +208,7 @@ export function clampQueryInt(value, defaultVal, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-const ALLIANCE_ID_RE = /^alliance-[0-9a-f]{8}$/;
-const TOURNAMENT_ID_RE = /^tourn-[0-9a-f]{8}$/;
-const ACTION_ID_RE = /^act-\d{10,16}-[a-z0-9]{2,8}$/;
 const SAFE_EXTERNAL_ID_RE = /^[a-zA-Z0-9\-]{1,64}$/;
-
-export function validateAllianceId(s) {
-  if (typeof s !== 'string') return { valid: false, reason: 'alliance ID must be a string' };
-  if (!ALLIANCE_ID_RE.test(s)) return { valid: false, reason: 'Invalid alliance ID format (expected alliance-XXXXXXXX)' };
-  return { valid: true };
-}
-
-export function validateTournamentId(s) {
-  if (typeof s !== 'string') return { valid: false, reason: 'tournament ID must be a string' };
-  if (!TOURNAMENT_ID_RE.test(s)) return { valid: false, reason: 'Invalid tournament ID format (expected tourn-XXXXXXXX)' };
-  return { valid: true };
-}
-
-export function validateActionId(s) {
-  if (typeof s !== 'string') return { valid: false, reason: 'action ID must be a string' };
-  if (!ACTION_ID_RE.test(s)) return { valid: false, reason: 'Invalid action ID format' };
-  return { valid: true };
-}
 
 export function validateSwapId(s) {
   if (typeof s !== 'string') return { valid: false, reason: 'swap ID must be a string' };

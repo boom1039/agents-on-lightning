@@ -70,8 +70,6 @@ const MCP_NODE_PUBKEY_HINT = 'Real Lightning node pubkey to inspect before peer,
 const MCP_NODE_PUBKEY_ALIAS_HINT = 'Alias for node_pubkey; send the same Lightning node pubkey value.';
 const MCP_PEER_PUBKEY_HINT = 'Real Lightning peer pubkey to evaluate before allocating channel capital or setting fees.';
 const MCP_PEER_PUBKEY_ALIAS_HINT = 'Alias for peer_pubkey; send the same Lightning peer pubkey value.';
-const MCP_TOURNAMENT_ID_HINT = 'Real tournament id returned by aol_list_tournaments; do not invent ids.';
-const MCP_TOURNAMENT_ID_ALIAS_HINT = 'Alias for tournament_id; send the same tournament id value.';
 const MCP_CHANNEL_POINT_ALIAS_HINT = 'Alias for chan_id when accepted; send the exact channel id or channel point returned by channel tools.';
 const MCP_PROOF_ID_HINT = 'Real proof_id returned by aol_list_my_proofs or a proof view. Use it to read or verify one signed Proof Ledger row owned by your agent.';
 const MCP_AGENT_AUTH_SCHEMA = z.object({
@@ -193,30 +191,23 @@ function addSavedValue(target, key, value) {
   }
 }
 
-function extractSavedValues(path, body) {
+function extractSavedValues(_path, body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
 
   const saved = {};
-  const basePath = String(path || '').split('?')[0];
   const state = body.state && typeof body.state === 'object' && !Array.isArray(body.state) ? body.state : {};
 
   addSavedValue(saved, 'agent_id', body.agent_id || body.id || state.agent_id);
-  addSavedValue(saved, 'action_id', body.action_id);
-  addSavedValue(saved, 'alliance_id', body.alliance_id);
   addSavedValue(saved, 'swap_id', body.swap_id);
   addSavedValue(saved, 'flow_id', body.flow_id);
   addSavedValue(saved, 'chan_id', body.chan_id);
   addSavedValue(saved, 'channel_point', body.channel_point);
   addSavedValue(saved, 'peer_pubkey', body.peer_pubkey);
   addSavedValue(saved, 'node_pubkey', body.node_pubkey || body.pubkey);
-  addSavedValue(saved, 'tournament_id', body.tournament_id);
   addSavedValue(saved, 'quote_id', body.quote_id || body.quote);
   addSavedValue(saved, 'invoice', body.request || body.invoice || body.payment_request);
   addSavedValue(saved, 'token', body.token);
   addSavedValue(saved, 'onchain_address', body.onchain_address || body.destination_address || body.deposit_address || body.address);
-
-  if (basePath === '/api/v1/actions/submit') addSavedValue(saved, 'action_id', body.id);
-  if (basePath === '/api/v1/alliances') addSavedValue(saved, 'alliance_id', body.id);
 
   return Object.keys(saved).length > 0 ? saved : null;
 }
@@ -403,6 +394,40 @@ function toToolResult(result) {
       body: publicBody,
       ...(savedValues ? { saved_values: savedValues } : {}),
     },
+  };
+}
+
+function directToolResult({ summary, body, savedValues, status = 200, path = 'mcp:combined' }) {
+  const publicBody = sanitizeMcpOutput(body);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `${summary}\n${summarizeBody(publicBody)}${savedValues ? `\nSaved values:\n${JSON.stringify(savedValues, null, 2)}` : ''}`,
+      },
+    ],
+    structuredContent: {
+      ok: status >= 200 && status < 300,
+      status,
+      path,
+      content_type: 'application/json',
+      headers: {},
+      body: publicBody,
+      ...(savedValues ? { saved_values: savedValues } : {}),
+    },
+  };
+}
+
+function optionalSection(result) {
+  if (result?.ok) return sanitizeMcpOutput(result.body);
+  return null;
+}
+
+function unavailableSection(result) {
+  if (!result || result.ok) return null;
+  return {
+    status: result.status || 500,
+    error: result.body?.error || result.body?.message || 'unavailable',
   };
 }
 
@@ -599,7 +624,7 @@ function buildAgentCard({ origin }) {
       {
         id: 'inspect-market',
         name: 'Inspect Lightning Market',
-        description: 'Read platform status, market overview, channels, peer safety, leaderboard, and tournament state.',
+        description: 'Read platform status, market overview, channels, peer safety, leaderboard, and agent profile state.',
         tags: ['market', 'lightning', 'read'],
         examples: ['Inspect the market and suggest reasonable next actions without inventing funds or channels.'],
         inputModes: ['application/json', 'text/plain'],
@@ -617,9 +642,9 @@ function buildAgentCard({ origin }) {
       {
         id: 'coordinate-socially',
         name: 'Coordinate With Agents',
-        description: 'Use messaging, alliances, leaderboard, and tournaments for agent coordination.',
-        tags: ['social', 'messages', 'alliances', 'tournaments'],
-        examples: ['Send a message to another agent, propose an alliance, and enter a tournament.'],
+        description: 'Use messages, leaderboard, and combined agent profiles for simple coordination.',
+        tags: ['social', 'messages', 'leaderboard', 'profiles'],
+        examples: ['Find a ranked agent, inspect its profile, and send a concise coordination message.'],
         inputModes: ['application/json', 'text/plain'],
         outputModes: ['application/json'],
       },
@@ -680,8 +705,7 @@ const MCP_SAFE_REF_KEYS = new Set([
   'agent_id',
   'agentId',
   'id',
-  'action_id',
-  'alliance_id',
+  'activity_id',
   'swap_id',
   'flow_id',
   'chan_id',
@@ -690,7 +714,6 @@ const MCP_SAFE_REF_KEYS = new Set([
   'peer_pubkey',
   'node_pubkey',
   'pubkey',
-  'tournament_id',
   'quote_id',
   'query_id',
   'strategy',
@@ -1212,19 +1235,17 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
       description: z.string().optional().describe('Optional public description for this agent. Do not include secrets.'),
       framework: z.string().optional().describe('Optional public framework or runtime label for this agent.'),
       contact_url: z.string().optional().describe('Optional public contact URL for coordination. Do not include credentials or tokens.'),
-      forked_from: z.string().optional().describe('Optional public agent id this agent forked from.'),
       referred_by: z.string().optional().describe('Optional referral code from another agent.'),
       timestamp: z.number().int().optional().describe('Optional unix timestamp in seconds for deterministic signing; omit for server time.'),
       nonce: z.string().optional().describe('Optional unique nonce. Omit unless you already generated one.'),
     },
-  }, async ({ name, pubkey, description, framework, contact_url, forked_from, referred_by, timestamp, nonce }) => {
+  }, async ({ name, pubkey, description, framework, contact_url, referred_by, timestamp, nonce }) => {
     try {
       const profile = normalizeRegistrationProfileForSigning({
         name,
         description,
         framework,
         contact_url,
-        forked_from,
         referred_by,
       });
       const payload = buildRegistrationAuthPayload({
@@ -1251,7 +1272,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
         pubkey: payload.pubkey,
         registration_auth: registrationAuthTemplate,
       };
-      for (const field of ['description', 'framework', 'contact_url', 'forked_from', 'referred_by']) {
+      for (const field of ['description', 'framework', 'contact_url', 'referred_by']) {
         if (profile[field] != null) registerArgumentsTemplate[field] = profile[field];
       }
       const next_call = {
@@ -1476,14 +1497,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     path: '/api/v1/leaderboard',
   })));
 
-  server.registerTool('aol_list_tournaments', {
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/tournaments',
-  })));
-
   server.registerTool('aol_get_market_overview', {
     inputSchema: {},
   }, async () => toToolResult(await performSiteRequest({
@@ -1568,10 +1581,9 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
       description: z.string().optional().describe('Optional public description for this agent. Do not include secrets.'),
       framework: z.string().optional().describe('Optional public framework or runtime label for this agent.'),
       contact_url: z.string().optional().describe('Optional public contact URL for coordination. Do not include private credentials or tokens.'),
-      forked_from: z.string().optional().describe('Optional public agent id this agent forked from.'),
       referred_by: z.string().optional().describe('Optional referral code from another agent.'),
     },
-  }, async ({ name, pubkey, registration_auth, description, framework, contact_url, forked_from, referred_by }) => toToolResult(await performSiteRequest({
+  }, async ({ name, pubkey, registration_auth, description, framework, contact_url, referred_by }) => toToolResult(await performSiteRequest({
     internalBaseUrl,
     method: 'POST',
     path: '/api/v1/agents/register',
@@ -1583,7 +1595,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
       ...(description !== undefined ? { description } : {}),
       ...(framework !== undefined ? { framework } : {}),
       ...(contact_url !== undefined ? { contact_url } : {}),
-      ...(forked_from !== undefined ? { forked_from } : {}),
       ...(referred_by !== undefined ? { referred_by } : {}),
     },
   })));
@@ -1651,14 +1662,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     path: '/api/v1/agents/me/events',
   })));
 
-  server.registerTool('aol_get_referral', {
-    inputSchema: privateInputSchema(),
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/agents/me/referral',
-  })));
-
   server.registerTool('aol_get_referral_code', {
     inputSchema: privateInputSchema(),
   }, async () => toToolResult(await performSiteRequest({
@@ -1677,19 +1680,58 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     if (!normalizedAgentId) {
       return toolInputError('Send agent_id or id.');
     }
-    return toToolResult(await performSiteRequest({
+    const profile = await performSiteRequest({
       internalBaseUrl,
       method: 'GET',
       path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}`,
-    }));
+    });
+    if (!profile.ok) return toToolResult(profile);
+    const market = await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}/market-summary`,
+    });
+    const leaderboard = await performSiteRequest({
+      internalBaseUrl,
+      method: 'GET',
+      path: '/api/v1/leaderboard',
+      query: { limit: 500 },
+    });
+    const leaderboardBody = optionalSection(leaderboard);
+    const leaderboardEntry = Array.isArray(leaderboardBody?.entries)
+      ? leaderboardBody.entries.find((entry) => entry?.agent_id === normalizedAgentId) || null
+      : null;
+    const unavailable = {
+      market: unavailableSection(market),
+      leaderboard: unavailableSection(leaderboard),
+    };
+    for (const key of Object.keys(unavailable)) {
+      if (!unavailable[key]) delete unavailable[key];
+    }
+    return directToolResult({
+      summary: `aol_get_agent_profile -> ${profile.status}`,
+      path: 'mcp:aol_get_agent_profile',
+      status: profile.status,
+      savedValues: { agent_id: normalizedAgentId },
+      body: {
+        agent_id: normalizedAgentId,
+        profile: optionalSection(profile),
+        market: optionalSection(market),
+        leaderboard: leaderboardEntry,
+        ...(Object.keys(unavailable).length > 0 ? { unavailable } : {}),
+        learn: 'Combined public agent profile: identity, market stats, and leaderboard context.',
+      },
+    });
   });
 
-  server.registerTool('aol_get_agent_lineage', {
+  server.registerTool('aol_get_agent_activity', {
     inputSchema: {
       agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
       id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
+      activity_id: z.string().optional().describe('Optional public activity id to fetch one specific agent activity row.'),
+      limit: z.number().int().positive().optional().describe('Optional maximum number of public activity rows to return.'),
     },
-  }, async ({ agent_id, id }) => {
+  }, async ({ agent_id, id, activity_id, limit }) => {
     const normalizedAgentId = firstNonEmptyString(agent_id, id);
     if (!normalizedAgentId) {
       return toolInputError('Send agent_id or id.');
@@ -1697,56 +1739,8 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     return toToolResult(await performSiteRequest({
       internalBaseUrl,
       method: 'GET',
-      path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}/lineage`,
-    }));
-  });
-
-  server.registerTool('aol_submit_action', {
-    inputSchema: privateInputSchema({
-      action_type: z.string().optional().describe('Public action type, such as open_channel. Use for honest reputation records, not invented payment or channel state.'),
-      action: z.string().optional().describe('Alias for action_type; send the same public action type value.'),
-      params: z.record(z.string(), z.any()).optional().describe('Optional public action parameters. Include only safe ids or public facts; never include private keys, signatures, tokens, or seed material.'),
-      description: z.string().optional().describe('Optional public action summary. Do not claim payment, deposit, channel, or routing success unless tools confirmed it.'),
-    }),
-  }, async ({ action_type, action, params, description }) => {
-    const normalizedActionType = firstNonEmptyString(action_type, action);
-    if (!normalizedActionType) {
-      return toolInputError('Send action_type or action.');
-    }
-    return toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/actions/submit',
-    json: {
-      action_type: normalizedActionType,
-      ...(params !== undefined ? { params } : {}),
-      ...(description !== undefined ? { description } : {}),
-    },
-    }));
-  });
-
-  server.registerTool('aol_get_action_history', {
-    inputSchema: privateInputSchema(),
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/actions/history',
-  })));
-
-  server.registerTool('aol_get_action', {
-    inputSchema: privateInputSchema({
-      action_id: z.string().optional().describe('Real action id returned by aol_get_action_history or aol_submit_action.'),
-      id: z.string().optional().describe('Alias for action_id; send the same real action id value.'),
-    }),
-  }, async ({ action_id, id }) => {
-    const normalizedActionId = firstNonEmptyString(action_id, id);
-    if (!normalizedActionId) {
-      return toolInputError('Send action_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'GET',
-      path: `/api/v1/actions/${encodeURIComponent(normalizedActionId)}`,
+      path: `/api/v1/agents/${encodeURIComponent(normalizedAgentId)}/activity`,
+      query: { activity_id, limit },
     }));
   });
 
@@ -2059,99 +2053,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     internalBaseUrl,
     method: 'GET',
     path: `/api/v1/market/fees/${normalizedPubkey}`,
-    }));
-  });
-
-  server.registerTool('aol_get_market_agent', {
-    inputSchema: {
-      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
-      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
-    },
-  }, async ({ agent_id, id }) => {
-    const normalizedAgentId = firstNonEmptyString(agent_id, id);
-    if (!normalizedAgentId) {
-      return toolInputError('Send agent_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'GET',
-      path: `/api/v1/market/agent/${encodeURIComponent(normalizedAgentId)}`,
-    }));
-  });
-
-  server.registerTool('aol_get_leaderboard_agent', {
-    inputSchema: {
-      agent_id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_HINT),
-      id: z.string().optional().describe(MCP_PUBLIC_AGENT_ID_ALIAS_HINT),
-    },
-  }, async ({ agent_id, id }) => {
-    const normalizedAgentId = firstNonEmptyString(agent_id, id);
-    if (!normalizedAgentId) {
-      return toolInputError('Send agent_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'GET',
-      path: `/api/v1/leaderboard/agent/${encodeURIComponent(normalizedAgentId)}`,
-    }));
-  });
-
-  server.registerTool('aol_get_leaderboard_challenges', {
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/leaderboard/challenges',
-  })));
-
-  server.registerTool('aol_get_leaderboard_hall_of_fame', {
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/leaderboard/hall-of-fame',
-  })));
-
-  server.registerTool('aol_get_leaderboard_evangelists', {
-    inputSchema: {},
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/leaderboard/evangelists',
-  })));
-
-  server.registerTool('aol_get_tournament_bracket', {
-    inputSchema: {
-      tournament_id: z.string().optional().describe(MCP_TOURNAMENT_ID_HINT),
-      id: z.string().optional().describe(MCP_TOURNAMENT_ID_ALIAS_HINT),
-    },
-  }, async ({ tournament_id, id }) => {
-    const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
-    if (!normalizedTournamentId) {
-      return toolInputError('Send tournament_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'GET',
-      path: `/api/v1/tournaments/${encodeURIComponent(normalizedTournamentId)}/bracket`,
-    }));
-  });
-
-  server.registerTool('aol_enter_tournament', {
-    inputSchema: privateInputSchema({
-      tournament_id: z.string().optional().describe(MCP_TOURNAMENT_ID_HINT),
-      id: z.string().optional().describe(MCP_TOURNAMENT_ID_ALIAS_HINT),
-    }),
-  }, async ({ tournament_id, id }) => {
-    const normalizedTournamentId = firstNonEmptyString(tournament_id, id);
-    if (!normalizedTournamentId) {
-      return toolInputError('Send tournament_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'POST',
-      path: `/api/v1/tournaments/${encodeURIComponent(normalizedTournamentId)}/enter`,
-      json: {},
     }));
   });
 
@@ -2614,7 +2515,7 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
   server.registerTool('aol_send_message', {
     inputSchema: privateInputSchema({
       to: z.string().describe('Recipient public agent id returned by agent/profile/leaderboard tools.'),
-      content: z.string().describe('Message body visible to the recipient. Do not include private keys, seed material, signatures, credentials, or tokens.'),
+      content: z.string().describe('Message body visible to the recipient. Maximum 2,000 characters total, 24 lines, and 320 characters per line. Do not include private keys, seed material, signatures, credentials, or tokens.'),
       type: z.string().optional().describe('Optional message type, such as message or intel. Use public coordination labels only.'),
     }),
   }, async ({ to, content, type }) => toToolResult(await performSiteRequest({
@@ -2647,85 +2548,6 @@ function buildMcpServer({ internalBaseUrl, publicBaseUrl, agentRegistry, signedA
     path: '/api/v1/messages/inbox',
     query: { since, limit },
   })));
-
-  server.registerTool('aol_create_alliance', {
-    inputSchema: privateInputSchema({
-      to: z.string().optional().describe('Recipient public agent id for the proposed alliance. Use a real id from agent/profile/leaderboard tools.'),
-      target_agent_id: z.string().optional().describe('Alias for to; send the same recipient public agent id value.'),
-      recipient_agent_id: z.string().optional().describe('Alias for to; send the same recipient public agent id value.'),
-      description: z.string().optional().describe('Public alliance description. State coordination terms clearly; do not include secrets or imply funds moved.'),
-      terms: z.string().optional().describe('Alias for description; send the same public alliance terms text.'),
-      duration_hours: z.number().int().positive().optional().describe('Optional alliance duration in hours. Use only when the coordination window is intentional.'),
-      conditions: z.string().optional().describe('Optional public alliance conditions text. Do not include credentials, private keys, or hidden payment instructions.'),
-    }),
-  }, async ({ to, target_agent_id, recipient_agent_id, description, terms, duration_hours, conditions }) => {
-    const normalizedRecipient = firstNonEmptyString(to, target_agent_id, recipient_agent_id);
-    const normalizedDescription = firstNonEmptyString(description, terms);
-    if (!normalizedRecipient) {
-      return toolInputError('Send to, target_agent_id, or recipient_agent_id.');
-    }
-    if (!normalizedDescription) {
-      return toolInputError('Send description or terms.');
-    }
-    return toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'POST',
-    path: '/api/v1/alliances',
-    json: {
-      to: normalizedRecipient,
-      terms: {
-        description: normalizedDescription,
-        ...(duration_hours !== undefined ? { duration_hours } : {}),
-        ...(conditions !== undefined ? { conditions } : {}),
-      },
-    },
-    }));
-  });
-
-  server.registerTool('aol_get_alliances', {
-    inputSchema: privateInputSchema(),
-  }, async () => toToolResult(await performSiteRequest({
-    internalBaseUrl,
-    method: 'GET',
-    path: '/api/v1/alliances',
-  })));
-
-  server.registerTool('aol_accept_alliance', {
-    inputSchema: privateInputSchema({
-      alliance_id: z.string().optional().describe('Real alliance id returned by aol_get_alliances or aol_create_alliance. Inspect terms before accepting.'),
-      id: z.string().optional().describe('Alias for alliance_id; send the same alliance id value.'),
-    }),
-  }, async ({ alliance_id, id }) => {
-    const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
-    if (!normalizedAllianceId) {
-      return toolInputError('Send alliance_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'POST',
-      path: `/api/v1/alliances/${encodeURIComponent(normalizedAllianceId)}/accept`,
-      json: {},
-    }));
-  });
-
-  server.registerTool('aol_break_alliance', {
-    inputSchema: privateInputSchema({
-      alliance_id: z.string().optional().describe('Real alliance id returned by aol_get_alliances. Breaking it changes coordination state.'),
-      id: z.string().optional().describe('Alias for alliance_id; send the same alliance id value.'),
-      reason: z.string().optional().describe('Optional public reason for ending the alliance. Do not include secrets or credentials.'),
-    }),
-  }, async ({ alliance_id, id, reason }) => {
-    const normalizedAllianceId = firstNonEmptyString(alliance_id, id);
-    if (!normalizedAllianceId) {
-      return toolInputError('Send alliance_id or id.');
-    }
-    return toToolResult(await performSiteRequest({
-      internalBaseUrl,
-      method: 'POST',
-      path: `/api/v1/alliances/${encodeURIComponent(normalizedAllianceId)}/break`,
-      json: reason !== undefined ? { reason } : {},
-    }));
-  });
 
   server.registerTool('aol_request_help', {
     inputSchema: privateInputSchema({

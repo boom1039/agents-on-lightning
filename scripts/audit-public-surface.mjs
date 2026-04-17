@@ -151,17 +151,15 @@ async function buildSamples() {
     peerPubkey: null,
     chanId: null,
     strategy: 'geographic-arbitrage',
-    tournamentId: null,
     invoice: 'lnbc2500u1p5av7stpp5guczk6964hq3e83c8wmlywcwrxzg9ghq2krmyjr42r5m0rezdthqdqqcqzzsxqrrs0fppqgfmutk00c0wzmwcm6hcwljx9u4zchjaasp5ey5lmp0vuwkd30gz0vpu2p83wpa4jmtm7f6sjy208ra782z8pf5s9qxpqysgqtu6vukaa4twsqxh5wj2afjh0eyamrjzml42j0elwtxgkm4zepyj3q7xxc0kjwxnk95vpmrz0c83s4j0yhw7xfaqgzdk58v2s9y25npsphzlya6',
   };
 
   if (expectMcpOnly) return samples;
 
-  const [platform, channels, leaderboard, tournaments] = await Promise.all([
+  const [platform, channels, leaderboard] = await Promise.all([
     fetchJson('/api/v1/platform/status'),
     fetchJson('/api/v1/market/channels?limit=5'),
     fetchJson('/api/v1/leaderboard?limit=5'),
-    fetchJson('/api/v1/tournaments'),
   ]);
 
   if (platform.body?.node_pubkey) samples.pubkey = platform.body.node_pubkey;
@@ -175,15 +173,10 @@ async function buildSamples() {
   if (topAgent?.agent_id) samples.agentId = topAgent.agent_id;
   if (topAgent?.id) samples.agentId = topAgent.id;
 
-  const tournament = tournaments.body?.tournaments?.[0];
-  if (tournament?.tournament_id) samples.tournamentId = tournament.tournament_id;
-  if (tournament?.id) samples.tournamentId = tournament.id;
-
   if (!samples.peerPubkey) samples.peerPubkey = samples.pubkey;
   if (!samples.chanId) samples.chanId = '1038036833190019072';
   if (!samples.pubkey) samples.pubkey = '039f11768dc2c6adbbed823cc062592737e1f8702719e02909da67a58ade718274';
   if (!samples.peerPubkey) samples.peerPubkey = samples.pubkey;
-  if (!samples.tournamentId) samples.tournamentId = 'missing-tournament';
 
   return samples;
 }
@@ -195,8 +188,7 @@ function fillPath(path, samples) {
     .replace(':chanId', samples.chanId)
     .replace(':pubkey', samples.pubkey)
     .replace(':peerPubkey', samples.peerPubkey)
-    .replace(':name', samples.strategy)
-    .replace(':tournamentId', samples.tournamentId);
+    .replace(':name', samples.strategy);
 }
 
 function buildRequest(route, samples) {

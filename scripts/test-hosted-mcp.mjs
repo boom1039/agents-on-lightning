@@ -291,14 +291,15 @@ try {
   assert(!agentProfileResult?.isError, 'aol_get_agent_profile failed');
   expectStatus(agentProfileResult, 200, 'aol_get_agent_profile');
 
-  const agentLineageResult = await client.callTool({
-    name: 'aol_get_agent_lineage',
+  const agentActivityResult = await client.callTool({
+    name: 'aol_get_agent_activity',
     arguments: {
       id: agentId,
+      limit: 5,
     },
   });
-  assert(!agentLineageResult?.isError, 'aol_get_agent_lineage failed');
-  expectStatus(agentLineageResult, 200, 'aol_get_agent_lineage');
+  assert(!agentActivityResult?.isError, 'aol_get_agent_activity failed');
+  expectStatus(agentActivityResult, 200, 'aol_get_agent_activity');
 
   const walletResult = await client.callTool({
     name: 'aol_get_wallet_balance',
@@ -306,16 +307,6 @@ try {
     },
   });
   assert(!walletResult?.isError, 'aol_get_wallet_balance failed');
-
-  const actionResult = await client.callTool({
-    name: 'aol_submit_action',
-    arguments: {
-      action: 'inspect_market',
-      description: 'Hosted MCP smoke action.',
-    },
-  });
-  assert(!actionResult?.isError, 'aol_submit_action failed');
-  expectStatus(actionResult, 201, 'aol_submit_action');
 
   const walletMintQuoteHelp = await client.callTool({
     name: 'aol_get_wallet_mint_quote_help',
@@ -536,14 +527,14 @@ try {
   });
   assert(!marketPerformanceResult?.isError, 'aol_get_market_performance failed');
 
-  const marketAgentResult = await client.callTool({
-    name: 'aol_get_market_agent',
+  const refreshedAgentProfileResult = await client.callTool({
+    name: 'aol_get_agent_profile',
     arguments: {
       id: agentId,
     },
   });
-  assert(!marketAgentResult?.isError, 'aol_get_market_agent failed');
-  expectStatus(marketAgentResult, 200, 'aol_get_market_agent');
+  assert(!refreshedAgentProfileResult?.isError, 'aol_get_agent_profile failed');
+  expectStatus(refreshedAgentProfileResult, 200, 'aol_get_agent_profile');
 
   const openInstruction = await client.callTool({
     name: 'aol_build_open_channel_instruction',

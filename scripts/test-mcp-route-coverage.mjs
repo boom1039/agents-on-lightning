@@ -239,12 +239,6 @@ try {
   const leaderboard = await callTool('aol_get_leaderboard');
   markResult('GET /api/v1/leaderboard', 'aol_get_leaderboard', leaderboard, { success: [200] });
 
-  const tournaments = await callTool('aol_list_tournaments');
-  markResult('GET /api/v1/tournaments', 'aol_list_tournaments', tournaments, { success: [200] });
-  const tournamentId = getBody(tournaments)?.tournaments?.[0]?.tournament_id
-    || getBody(tournaments)?.tournaments?.[0]?.id
-    || 'tourn-00000000';
-
   const marketOverview = await callTool('aol_get_market_overview');
   markResult('GET /api/v1/market/overview', 'aol_get_market_overview', marketOverview, { success: [200] });
 
@@ -281,27 +275,16 @@ try {
   const meEvents = await callTool('aol_get_me_events', {});
   markResult('GET /api/v1/agents/me/events', 'aol_get_me_events', meEvents, { success: [200] });
 
-  const referral = await callTool('aol_get_referral', {});
-  markResult('GET /api/v1/agents/me/referral', 'aol_get_referral', referral, { success: [200] });
-
   const referralCode = await callTool('aol_get_referral_code', {});
   markResult('GET /api/v1/agents/me/referral-code', 'aol_get_referral_code', referralCode, { success: [200] });
 
   const publicProfile = await callTool('aol_get_agent_profile', { id: agentAId });
   markResult('GET /api/v1/agents/:id', 'aol_get_agent_profile', publicProfile, { success: [200] });
+  markResult('GET /api/v1/agents/:agentId/market-summary', 'aol_get_agent_profile', publicProfile, { success: [200] });
+  markResult('GET /api/v1/leaderboard', 'aol_get_agent_profile', publicProfile, { success: [200] });
 
-  const publicLineage = await callTool('aol_get_agent_lineage', { id: agentAId });
-  markResult('GET /api/v1/agents/:id/lineage', 'aol_get_agent_lineage', publicLineage, { success: [200] });
-
-  const actionSubmit = await callTool('aol_submit_action', { action: 'inspect_market', description: 'Coverage action' });
-  markResult('POST /api/v1/actions/submit', 'aol_submit_action', actionSubmit, { success: [201] });
-  const actionId = getSaved(actionSubmit).action_id || getBody(actionSubmit)?.action_id || getBody(actionSubmit)?.id;
-
-  const actionHistory = await callTool('aol_get_action_history', {});
-  markResult('GET /api/v1/actions/history', 'aol_get_action_history', actionHistory, { success: [200] });
-
-  const actionGet = await callTool('aol_get_action', { id: actionId });
-  markResult('GET /api/v1/actions/:id', 'aol_get_action', actionGet, { success: [200] });
+  const publicActivity = await callTool('aol_get_agent_activity', { id: agentAId, limit: 5 });
+  markResult('GET /api/v1/agents/:id/activity', 'aol_get_agent_activity', publicActivity, { success: [200] });
 
   const walletBalance = await callTool('aol_get_wallet_balance', {});
   markResult('GET /api/v1/wallet/balance', 'aol_get_wallet_balance', walletBalance, { success: [200] });
@@ -389,32 +372,11 @@ try {
   const marketFees = await callTool('aol_get_market_fees', { pubkey: suggestedPeer });
   markResult('GET /api/v1/market/fees/:peerPubkey', 'aol_get_market_fees', marketFees, { success: [200] });
 
-  const marketAgent = await callTool('aol_get_market_agent', { id: agentAId });
-  markResult('GET /api/v1/market/agent/:agentId', 'aol_get_market_agent', marketAgent, { success: [200] });
-
   const channelsMine = await callTool('aol_get_channels_mine', {});
   markResult('GET /api/v1/channels/mine', 'aol_get_channels_mine', channelsMine, { success: [200] });
   const ownedChannel = getBody(channelsMine)?.channels?.[0] || null;
   const ownedChanId = ownedChannel?.chan_id || '1037758656816742400';
   const ownedChannelPoint = ownedChannel?.channel_point || 'deadbeef:0';
-
-  const leaderboardAgent = await callTool('aol_get_leaderboard_agent', { id: agentAId });
-  markResult('GET /api/v1/leaderboard/agent/:id', 'aol_get_leaderboard_agent', leaderboardAgent, { success: [200] });
-
-  const leaderboardChallenges = await callTool('aol_get_leaderboard_challenges');
-  markResult('GET /api/v1/leaderboard/challenges', 'aol_get_leaderboard_challenges', leaderboardChallenges, { success: [200] });
-
-  const hallOfFame = await callTool('aol_get_leaderboard_hall_of_fame');
-  markResult('GET /api/v1/leaderboard/hall-of-fame', 'aol_get_leaderboard_hall_of_fame', hallOfFame, { success: [200] });
-
-  const evangelists = await callTool('aol_get_leaderboard_evangelists');
-  markResult('GET /api/v1/leaderboard/evangelists', 'aol_get_leaderboard_evangelists', evangelists, { success: [200] });
-
-  const tournamentBracket = await callTool('aol_get_tournament_bracket', { id: tournamentId });
-  markResult('GET /api/v1/tournaments/:id/bracket', 'aol_get_tournament_bracket', tournamentBracket, {
-    success: [200],
-    boundary: [404],
-  });
 
   const channelsAudit = await callTool('aol_get_channels_audit');
   markResult('GET /api/v1/channels/audit', 'aol_get_channels_audit', channelsAudit, { success: [200] });
@@ -562,25 +524,6 @@ try {
 
   const getInbox = await callTool('aol_get_messages_inbox', { __agent_label: 'b' });
   markResult('GET /api/v1/messages/inbox', 'aol_get_messages_inbox', getInbox, { success: [200] });
-
-  const createAlliance = await callTool('aol_create_alliance', {
-    to: agentBId,
-    description: 'MCP coverage alliance',
-  });
-  markResult('POST /api/v1/alliances', 'aol_create_alliance', createAlliance, { success: [200, 201] });
-  const allianceId = getSaved(createAlliance).alliance_id || getBody(createAlliance)?.alliance_id || getBody(createAlliance)?.id;
-
-  const getAlliances = await callTool('aol_get_alliances', {});
-  markResult('GET /api/v1/alliances', 'aol_get_alliances', getAlliances, { success: [200] });
-
-  const acceptAlliance = await callTool('aol_accept_alliance', { __agent_label: 'b', id: allianceId || 'missing-alliance' });
-  markResult('POST /api/v1/alliances/:id/accept', 'aol_accept_alliance', acceptAlliance, { success: [200], boundary: [404] });
-
-  const breakAlliance = await callTool('aol_break_alliance', { id: allianceId || 'missing-alliance', reason: 'coverage done' });
-  markResult('POST /api/v1/alliances/:id/break', 'aol_break_alliance', breakAlliance, { success: [200], boundary: [404] });
-
-  const enterTournament = await callTool('aol_enter_tournament', { id: tournamentId });
-  markResult('POST /api/v1/tournaments/:id/enter', 'aol_enter_tournament', enterTournament, { success: [200], boundary: [400, 404] });
 
   const analyticsHistory = await callTool('aol_get_analytics_history', {});
   markResult('GET /api/v1/analytics/history', 'aol_get_analytics_history', analyticsHistory, { success: [200] });

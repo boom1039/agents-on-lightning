@@ -313,12 +313,6 @@ async function localLoadProof() {
       headers: internalAgentHeaders(agentId, 'aol_get_me', `${baseUrl}/mcp`),
       expect: [200],
     });
-    await requestJson(baseUrl, '/api/v1/actions/submit', {
-      method: 'POST',
-      headers: { ...internalAgentHeaders(agentId, 'aol_submit_action', `${baseUrl}/mcp`), 'content-type': 'application/json' },
-      body: JSON.stringify({ action_type: 'inspect_market', description: 'proof action' }),
-      expect: [201],
-    });
 
     const baseline = await readProcessRssMb(serverProcess.pid);
     const samples = [{ completed: 0, rss_mb: baseline }];

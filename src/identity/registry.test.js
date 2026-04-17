@@ -61,7 +61,6 @@ test('AgentRegistry registration requires secp256k1 proof and stores no reusable
       description: null,
       framework: null,
       contact_url: null,
-      forked_from: null,
       referred_by: null,
     });
     const registration_auth = makeRegistrationAuth({

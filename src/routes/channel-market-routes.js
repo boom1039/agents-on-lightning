@@ -39,7 +39,7 @@
  * Plan N: Market Transparency (public, no auth)
  *   GET  /api/v1/market/overview               — Market summary stats
  *   GET  /api/v1/market/channels               — Paginated channel list
- *   GET  /api/v1/market/agent/:agentId         — Agent public profile
+ *   GET  /api/v1/agents/:agentId/market-summary — Agent market summary
  *   GET  /api/v1/market/peer-safety/:pubkey    — Peer safety info
  *   GET  /api/v1/market/fees/:peerPubkey       — Fee competition view
  */
@@ -1832,9 +1832,9 @@ export function channelMarketRoutes(daemon) {
       res.status(500).json({ error: 'Internal error fetching channels' });
     }
   });
-  // Read market agent by agentId.
-  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"agent-profile","summary":"Read market agent by agentId.","order":140,"tags":["market","read","dynamic","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
-  router.get('/api/v1/market/agent/:agentId', marketRL, async (req, res) => {
+  // Read agent market summary by agentId.
+  // @agent-route {"auth":"public","domain":"market","subgroup":"Market Reads","label":"agent-market-summary","summary":"Read agent market summary by agentId.","order":140,"tags":["market","read","dynamic","public"],"doc":["mcp/market.txt","mcp/reference.txt"],"security":{"moves_money":false,"requires_ownership":false,"requires_signature":false,"long_running":false}}
+  router.get('/api/v1/agents/:agentId/market-summary', marketRL, async (req, res) => {
     if (!daemon.marketTransparency) {
       return res.status(503).json({ error: 'Market transparency not initialized' });
     }
@@ -1845,8 +1845,8 @@ export function channelMarketRoutes(daemon) {
       }
       res.json(result);
     } catch (err) {
-      console.error(`[market/agent] Error: ${err.message}`);
-      res.status(500).json({ error: 'Internal error fetching agent profile' });
+      console.error(`[agent/market-summary] Error: ${err.message}`);
+      res.status(500).json({ error: 'Internal error fetching agent market summary' });
     }
   });
   // Read market peer safety by pubkey.

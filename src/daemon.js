@@ -39,9 +39,6 @@ import { AgentCashuSeedManager } from './wallet/agent-cashu-seed-manager.js';
 
 // Social
 import { AgentMessaging } from './social/messaging.js';
-import { AllianceManager } from './social/alliances.js';
-import { LineageTracker } from './social/lineage.js';
-import { TournamentManager } from './tournaments/manager.js';
 import { ExternalLeaderboard } from './identity/leaderboard.js';
 
 // Channel accountability
@@ -144,9 +141,6 @@ export class AgentDaemon {
 
     // 5. Social
     this.messaging = new AgentMessaging(this.dataLayer, this.agentRegistry);
-    this.allianceManager = new AllianceManager(this.dataLayer, this.agentRegistry);
-    this.lineageTracker = new LineageTracker(this.dataLayer, this.agentRegistry);
-    this.tournamentManager = new TournamentManager(this.dataLayer, this.agentRegistry);
     this.externalLeaderboard = new ExternalLeaderboard(this.dataLayer, this.agentRegistry, null);
     await this.externalLeaderboard.load();
 
@@ -352,7 +346,6 @@ export class AgentDaemon {
     // 9. Background timers
     this._leaderboardTimer = setInterval(() => {
       this.externalLeaderboard?.update().catch(() => {});
-      this.allianceManager?.expireOld().catch(() => {});
     }, 5 * 60 * 1000);
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);

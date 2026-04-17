@@ -67,7 +67,6 @@ export function mockAgentRegistry(agents = {}) {
         framework: profile.framework || null,
         contact_url: profile.contact_url || null,
         badge: profile.badge || null,
-        forked_from: profile.forked_from || null,
         registered_at: profile.registered_at || null,
         updated_at: profile.updated_at || null,
       };
