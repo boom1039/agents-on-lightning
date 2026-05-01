@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lightning Graph Channel Size Histogram</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #050506;
+    --panel: #0b0d0f;
+    --panel-2: #11161b;
+    --line: #30210f;
+    --line-2: #443015;
+    --text: #d8d1c7;
+    --muted: #8f8982;
+    --hot: #f5a623;
+    --green: #58a84b;
+    --blue: #62a8ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+  header {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid #4a150f;
+    background: #180202;
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: end;
+  }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0; }
+  .sub { color: var(--muted); margin-top: 4px; }
+  main { padding: 10px; display: grid; gap: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .card, .panel {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  .card { padding: 8px 10px; min-height: 54px; }
+  .label { color: var(--muted); font-weight: 600; }
+  .value { font-size: 18px; margin-top: 4px; color: #f0ede7; }
+  .panel h2 {
+    font-size: 13px;
+    margin: 0;
+    padding: 7px 8px;
+    color: #f0ede7;
+    background: #100503;
+    border-bottom: 1px solid var(--line);
+  }
+  .histogram {
+    display: grid;
+    grid-template-columns: repeat(14, minmax(52px, 1fr));
+    gap: 7px;
+    align-items: end;
+    min-height: 300px;
+    padding: 14px 12px 12px;
+  }
+  .hist-bar { display: grid; grid-template-rows: 22px 220px 38px; gap: 5px; align-items: end; min-width: 0; }
+  .hist-value { color: var(--green); text-align: center; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+  .hist-fill {
+    align-self: end;
+    background: linear-gradient(180deg, #f4d35e, var(--hot) 55%, #9b4d12);
+    border: 1px solid #f2b84b;
+    min-height: 3px;
+    box-shadow: 0 0 12px rgba(245,166,35,.22);
+  }
+  .hist-label { color: var(--muted); text-align: center; font-size: 10px; min-height: 32px; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 5px 7px; border-bottom: 1px solid #220d08; vertical-align: middle; }
+  th { color: #e8e0d7; background: #100503; text-align: left; font-weight: 600; }
+  td { color: #cfc8bd; }
+  .number { text-align: right; font-variant-numeric: tabular-nums; }
+  .bucket-label { color: #f0ede7; white-space: nowrap; }
+  .bar { height: 12px; background: #16100b; border: 1px solid #2c1b0d; border-radius: 2px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--green), #9bdc79); }
+  .bar.cap span { background: linear-gradient(90deg, var(--blue), #b6d6ff); }
+  code { color: #97c5ff; font-family: inherit; font-size: 12px; }
+  .two { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+  .note { color: var(--muted); padding: 8px; border-top: 1px solid var(--line); }
+  @media (max-width: 1000px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .two { grid-template-columns: 1fr; }
+    .histogram { overflow-x: auto; grid-template-columns: repeat(14, 74px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Lightning Graph Channel Size Histogram</h1>
+    <div class="sub">Source: local LND graph via <code>lncli describegraph</code>. Snapshot: 2026-04-16T22:53:52.387Z</div>
+  </div>
+  <div class="sub">Capacities shown in sats and BTC. Counts are public graph channels.</div>
+</header>
+<main>
+  <section class="grid">
+    <div class="card"><div class="label">Channels</div><div class="value">50,172</div></div>
+    <div class="card"><div class="label">Nodes</div><div class="value">17,089</div></div>
+    <div class="card"><div class="label">Total capacity</div><div class="value">488,660,602,184 sats</div></div>
+    <div class="card"><div class="label">Average</div><div class="value">9,739,707 sats</div></div>
+    <div class="card"><div class="label">Median</div><div class="value">1,400,000 sats</div></div>
+    <div class="card"><div class="label">P90</div><div class="value">15,000,000 sats</div></div>
+    <div class="card"><div class="label">P99</div><div class="value">200,000,000 sats</div></div>
+    <div class="card"><div class="label">Max</div><div class="value">1,000,000,000 sats</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Channel Count By Capacity Bucket</h2>
+    <div class="histogram"><div class="hist-bar" title="< 50k: 6,760 channels (13.47%)">
+    <div class="hist-value">6,760</div>
+    <div class="hist-fill" style="height:178.71251193887298px"></div>
+    <div class="hist-label">< 50k</div>
+  </div>
+<div class="hist-bar" title="50k-100k: 2,255 channels (4.49%)">
+    <div class="hist-value">2,255</div>
+    <div class="hist-fill" style="height:63.613419293218726px"></div>
+    <div class="hist-label">50k-100k</div>
+  </div>
+<div class="hist-bar" title="100k-250k: 4,638 channels (9.24%)">
+    <div class="hist-value">4,638</div>
+    <div class="hist-fill" style="height:124.4971346704871px"></div>
+    <div class="hist-label">100k-250k</div>
+  </div>
+<div class="hist-bar" title="250k-500k: 2,516 channels (5.01%)">
+    <div class="hist-value">2,516</div>
+    <div class="hist-fill" style="height:70.28175740210123px"></div>
+    <div class="hist-label">250k-500k</div>
+  </div>
+<div class="hist-bar" title="500k-1M: 3,151 channels (6.28%)">
+    <div class="hist-value">3,151</div>
+    <div class="hist-fill" style="height:86.50549188156639px"></div>
+    <div class="hist-label">500k-1M</div>
+  </div>
+<div class="hist-bar" title="1M-2M: 6,966 channels (13.88%)">
+    <div class="hist-value">6,966</div>
+    <div class="hist-fill" style="height:183.9756446991404px"></div>
+    <div class="hist-label">1M-2M</div>
+  </div>
+<div class="hist-bar" title="2M-5M: 8,376 channels (16.69%)">
+    <div class="hist-value">8,376</div>
+    <div class="hist-fill" style="height:220px"></div>
+    <div class="hist-label">2M-5M</div>
+  </div>
+<div class="hist-bar" title="5M-10M: 6,097 channels (12.15%)">
+    <div class="hist-value">6,097</div>
+    <div class="hist-fill" style="height:161.77340019102198px"></div>
+    <div class="hist-label">5M-10M</div>
+  </div>
+<div class="hist-bar" title="10M-25M: 6,234 channels (12.43%)">
+    <div class="hist-value">6,234</div>
+    <div class="hist-fill" style="height:165.27363896848138px"></div>
+    <div class="hist-label">10M-25M</div>
+  </div>
+<div class="hist-bar" title="25M-50M: 894 channels (1.78%)">
+    <div class="hist-value">894</div>
+    <div class="hist-fill" style="height:28.840974212034382px"></div>
+    <div class="hist-label">25M-50M</div>
+  </div>
+<div class="hist-bar" title="50M-100M: 1,130 channels (2.25%)">
+    <div class="hist-value">1,130</div>
+    <div class="hist-fill" style="height:34.87058261700095px"></div>
+    <div class="hist-label">50M-100M</div>
+  </div>
+<div class="hist-bar" title="100M-250M: 812 channels (1.62%)">
+    <div class="hist-value">812</div>
+    <div class="hist-fill" style="height:26.745940783190065px"></div>
+    <div class="hist-label">100M-250M</div>
+  </div>
+<div class="hist-bar" title="250M-500M: 172 channels (0.34%)">
+    <div class="hist-value">172</div>
+    <div class="hist-fill" style="height:10.394460362941738px"></div>
+    <div class="hist-label">250M-500M</div>
+  </div>
+<div class="hist-bar" title="500M+: 171 channels (0.34%)">
+    <div class="hist-value">171</div>
+    <div class="hist-fill" style="height:10.3689111747851px"></div>
+    <div class="hist-label">500M+</div>
+  </div></div>
+    <div class="note">This is a count histogram: each bar is the number of graph channels whose advertised capacity falls in that bucket.</div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <h2>Bucket Table</h2>
+      <table>
+        <thead><tr><th>Bucket</th><th class="number">Channels</th><th class="number">Count %</th><th>Count bar</th><th class="number">Capacity</th><th class="number">Capacity %</th><th>Capacity bar</th></tr></thead>
+        <tbody><tr>
+    <td class="bucket-label">< 50k</td>
+    <td class="number">6,760</td>
+    <td class="number">13.47%</td>
+    <td><div class="bar"><span style="width:80.70678127984718%"></span></div></td>
+    <td class="number">1.2086 BTC</td>
+    <td class="number">0.02%</td>
+    <td><div class="bar cap"><span style="width:0.4%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">50k-100k</td>
+    <td class="number">2,255</td>
+    <td class="number">4.49%</td>
+    <td><div class="bar"><span style="width:26.92215854823305%"></span></div></td>
+    <td class="number">1.429 BTC</td>
+    <td class="number">0.03%</td>
+    <td><div class="bar cap"><span style="width:0.4%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">100k-250k</td>
+    <td class="number">4,638</td>
+    <td class="number">9.24%</td>
+    <td><div class="bar"><span style="width:55.372492836676216%"></span></div></td>
+    <td class="number">6.5153 BTC</td>
+    <td class="number">0.13%</td>
+    <td><div class="bar cap"><span style="width:0.6023619052949996%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">250k-500k</td>
+    <td class="number">2,516</td>
+    <td class="number">5.01%</td>
+    <td><div class="bar"><span style="width:30.038204393505254%"></span></div></td>
+    <td class="number">8.384 BTC</td>
+    <td class="number">0.17%</td>
+    <td><div class="bar cap"><span style="width:0.7751321193546493%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">500k-1M</td>
+    <td class="number">3,151</td>
+    <td class="number">6.28%</td>
+    <td><div class="bar"><span style="width:37.619388729703914%"></span></div></td>
+    <td class="number">19.1283 BTC</td>
+    <td class="number">0.39%</td>
+    <td><div class="bar cap"><span style="width:1.7684878158613895%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">1M-2M</td>
+    <td class="number">6,966</td>
+    <td class="number">13.88%</td>
+    <td><div class="bar"><span style="width:83.16618911174784%"></span></div></td>
+    <td class="number">78.6466 BTC</td>
+    <td class="number">1.61%</td>
+    <td><div class="bar cap"><span style="width:7.271196489852756%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">2M-5M</td>
+    <td class="number">8,376</td>
+    <td class="number">16.69%</td>
+    <td><div class="bar"><span style="width:100%"></span></div></td>
+    <td class="number">232.9852 BTC</td>
+    <td class="number">4.77%</td>
+    <td><div class="bar cap"><span style="width:21.54043645055902%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">5M-10M</td>
+    <td class="number">6,097</td>
+    <td class="number">12.15%</td>
+    <td><div class="bar"><span style="width:72.79130850047756%"></span></div></td>
+    <td class="number">349.8485 BTC</td>
+    <td class="number">7.16%</td>
+    <td><div class="bar cap"><span style="width:32.3449244700428%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">10M-25M</td>
+    <td class="number">6,234</td>
+    <td class="number">12.43%</td>
+    <td><div class="bar"><span style="width:74.42693409742121%"></span></div></td>
+    <td class="number">798.3409 BTC</td>
+    <td class="number">16.34%</td>
+    <td><div class="bar cap"><span style="width:73.80987925887645%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">25M-50M</td>
+    <td class="number">894</td>
+    <td class="number">1.78%</td>
+    <td><div class="bar"><span style="width:10.673352435530086%"></span></div></td>
+    <td class="number">267.168 BTC</td>
+    <td class="number">5.47%</td>
+    <td><div class="bar cap"><span style="width:24.70076899300996%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">50M-100M</td>
+    <td class="number">1,130</td>
+    <td class="number">2.25%</td>
+    <td><div class="bar"><span style="width:13.490926456542502%"></span></div></td>
+    <td class="number">620.3421 BTC</td>
+    <td class="number">12.69%</td>
+    <td><div class="bar cap"><span style="width:57.353157425720816%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">100M-250M</td>
+    <td class="number">812</td>
+    <td class="number">1.62%</td>
+    <td><div class="bar"><span style="width:9.694364851957975%"></span></div></td>
+    <td class="number">1,081.618 BTC</td>
+    <td class="number">22.13%</td>
+    <td><div class="bar cap"><span style="width:100%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">250M-500M</td>
+    <td class="number">172</td>
+    <td class="number">0.34%</td>
+    <td><div class="bar"><span style="width:2.053486150907354%"></span></div></td>
+    <td class="number">558.5818 BTC</td>
+    <td class="number">11.43%</td>
+    <td><div class="bar cap"><span style="width:51.643169246703394%"></span></div></td>
+  </tr>
+<tr>
+    <td class="bucket-label">500M+</td>
+    <td class="number">171</td>
+    <td class="number">0.34%</td>
+    <td><div class="bar"><span style="width:2.041547277936963%"></span></div></td>
+    <td class="number">862.41 BTC</td>
+    <td class="number">17.65%</td>
+    <td><div class="bar cap"><span style="width:79.73332817069965%"></span></div></td>
+  </tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>Largest Channels In Graph</h2>
+      <table>
+        <thead><tr><th class="number">#</th><th class="number">Sats</th><th>BTC</th><th>Channel ID</th></tr></thead>
+        <tbody><tr>
+  <td class="number">1</td>
+  <td class="number">1,000,000,000</td>
+  <td>10 BTC</td>
+  <td><code>761140222877237249</code></td>
+</tr>
+<tr>
+  <td class="number">2</td>
+  <td class="number">720,000,000</td>
+  <td>7.2 BTC</td>
+  <td><code>1026645892766629889</code></td>
+</tr>
+<tr>
+  <td class="number">3</td>
+  <td class="number">521,000,000</td>
+  <td>5.21 BTC</td>
+  <td><code>1033656379013201921</code></td>
+</tr>
+<tr>
+  <td class="number">4</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>815858518705963009</code></td>
+</tr>
+<tr>
+  <td class="number">5</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>835866331763769345</code></td>
+</tr>
+<tr>
+  <td class="number">6</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>861583908675977217</code></td>
+</tr>
+<tr>
+  <td class="number">7</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>878992476273770497</code></td>
+</tr>
+<tr>
+  <td class="number">8</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>890310849058308100</code></td>
+</tr>
+<tr>
+  <td class="number">9</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>890507661605732362</code></td>
+</tr>
+<tr>
+  <td class="number">10</td>
+  <td class="number">500,000,000</td>
+  <td>5 BTC</td>
+  <td><code>891321300299481090</code></td>
+</tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Percentiles</h2>
+    <table>
+      <tbody>
+        <tr><td>P10</td><td class="number">20,000 sats</td><td>P25</td><td class="number">200,000 sats</td><td>Median</td><td class="number">1,400,000 sats</td></tr>
+        <tr><td>P75</td><td class="number">5,000,000 sats</td><td>P90</td><td class="number">15,000,000 sats</td><td>P95</td><td class="number">32,000,000 sats</td></tr>
+        <tr><td>P99</td><td class="number">200,000,000 sats</td><td>Min</td><td class="number">1,050 sats</td><td>Max</td><td class="number">1,000,000,000 sats</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
